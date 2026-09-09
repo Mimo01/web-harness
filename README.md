@@ -264,4 +264,4 @@ assistant does with your accounts, files, tickets, repositories or systems, nor 
 arising from its use. You are the operator: review permission prompts, use Plan mode for anything sensitive, and keep
 your credentials to yourself. Use at your own risk.
 
-Found it useful? Buy Milan a beer 🍺 (the link lives in `H.ABOUT.beerUrl` in `js/settings.js`; Settings → About).
+Found it useful? Buy Milan a beer 🍺, in person. No links, no donations.

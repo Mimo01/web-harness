@@ -631,7 +631,7 @@ H.ui = (() => {
 
   function aboutPanel() {
     const a = H.ABOUT;
-    const beer = el('button', { class: 'btn primary', onclick: () => { if (a.beerUrl) window.open(a.beerUrl, '_blank', 'noopener'); else H.toast(`${a.author} has not set a beer link yet (H.ABOUT.beerUrl in js/settings.js). Say thanks in person instead!`, 'info', 7000); } }, [H.icon('beer'), 'Buy me a beer']);
+    const beer = el('div', { class: 'note', style: 'color:var(--fg-2);background:var(--accent-soft)' }, [H.icon('beer'), ` No links, no donations: if this saved you time, buy ${a.author} a beer in person. 🍻`]);
     return el('div', {}, [
       el('div', { class: 'about-hero' }, [el('div', { class: 'logo' }, [H.icon('cube')]), el('div', {}, [el('h3', {}, ['LLM Harness']), el('div', { class: 'muted small' }, [`Version ${a.version} · made by ${a.author}`])])]),
       sec('Updates', null, [el('div', { class: 'row gap wrap' }, [
@@ -640,7 +640,7 @@ H.ui = (() => {
       ]), el('p', { class: 'help', style: 'margin-top:8px' }, ['Checks fetch a small version file from GitHub on startup and every 6 hours; nothing else is sent. Turn it off in Security & privacy. Updating = download the newer folder and replace this one; your data stays in the browser.'])]),
       sec('What it is', null, [el('p', { class: 'sec-desc', style: 'margin:0' }, ['A browser-only harness for LLMs: chats, tools, skills, plugins, plan mode and a browser-session bridge, talking straight to your LiteLLM proxy. No installation, no backend, nothing leaves your browser except the requests you configure.'])]),
       sec('Disclaimer', null, [el('div', { class: 'note' }, [`This software is provided "as is", without warranty of any kind. ${a.author} is not responsible for anything the assistant does with your accounts, files, tickets, repositories or systems, nor for any data loss, costs, or damage arising from its use. You are the operator: review permission prompts, use Plan mode for anything sensitive, and keep your credentials to yourself. Use at your own risk.`])]),
-      sec('Found it useful?', null, [el('p', { class: 'sec-desc' }, [`If this saved you time, ${a.author} would happily accept a beer.`]), el('div', { class: 'row gap' }, [beer])]),
+      sec('Found it useful?', null, [beer]),
     ]);
   }
 
