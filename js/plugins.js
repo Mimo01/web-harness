@@ -17,6 +17,7 @@ H.plugins = (() => {
   const mergeSecrets = (pub) => { const sec = H.tryJSON(H.secrets.get('plugin:' + pub.id), {}); const p = H.deepClone(pub); if (sec.auth) p.auth = sec.auth; if (sec.headers) p.headers = { ...(p.headers || {}), ...sec.headers }; return p; };
   let plugins = (H.tryJSON(localStorage.getItem(KEY), null) || []).map(mergeSecrets);
   const save = () => {
+    invalidateTools();
     const pubs = plugins.map(p => { const { pub, sec } = splitSecrets(p); H.secrets.set('plugin:' + p.id, Object.keys(sec).length ? JSON.stringify(sec) : ''); return pub; });
     localStorage.setItem(KEY, JSON.stringify(pubs)); H.bus.emit('plugins', plugins);
   };
@@ -388,8 +389,10 @@ H.plugins = (() => {
 
   /* ----------------------------- TOOL PROJECTION ----------------------------- */
   const cachedTools = { key: '', list: [] };
+  let toolsVersion = 1;                      // bumped whenever plugins or MCP tool lists change
+  const invalidateTools = () => { toolsVersion++; };
   function tools() {
-    const key = JSON.stringify(plugins.map(p => [p.id, p.enabled, p.kind === 'rest' ? p.tools?.length : (mcpCache.get(p.id)?.tools?.length || 0)]));
+    const key = toolsVersion;
     if (cachedTools.key === key) return cachedTools.list;
     const list = [];
     for (const p of plugins) {
@@ -402,11 +405,11 @@ H.plugins = (() => {
 
   async function connectEnabledMcp() {
     for (const p of plugins) if (p.kind === 'mcp' && p.enabled) { try { await mcpConnect(p, true); } catch (e) { H.toast(`MCP ${p.name}: ${e.message}`, 'error', 6000); } }
-    cachedTools.key = ''; H.bus.emit('plugins', plugins);
+    invalidateTools(); H.bus.emit('plugins', plugins);
   }
 
   async function test(p) {
-    if (p.kind === 'mcp') { const c = await mcpConnect(p, true); cachedTools.key = ''; return `Connected: ${c.serverInfo?.name || 'server'} — ${c.tools.length} tools: ${c.tools.map(t => t.name).join(', ')}`; }
+    if (p.kind === 'mcp') { const c = await mcpConnect(p, true); invalidateTools(); return `Connected: ${c.serverInfo?.name || 'server'} — ${c.tools.length} tools: ${c.tools.map(t => t.name).join(', ')}`; }
     const t = (p.tools || []).find(x => ['myself', 'whoami', 'ping', 'list_projects', 'list_repos'].includes(x.name)) || (p.tools || [])[0];
     if (!t) return 'No tools defined.';
     const r = await runRest(p, t, {});
@@ -436,9 +439,9 @@ H.plugins = (() => {
   return {
     createPassThrough, promptSection,
     list: () => plugins, get: (id) => plugins.find(p => p.id === id), templates,
-    upsert: (p) => { const i = plugins.findIndex(x => x.id === p.id); if (i >= 0) plugins[i] = p; else plugins.push(p); mcpCache.delete(p.id); cachedTools.key = ''; save(); },
-    remove: (id) => { plugins = plugins.filter(p => p.id !== id); mcpCache.delete(id); cachedTools.key = ''; save(); },
-    setEnabled: async (id, on) => { const p = plugins.find(x => x.id === id); if (!p) return; p.enabled = on; save(); if (on && p.kind === 'mcp') { try { await mcpConnect(p, true); cachedTools.key = ''; H.bus.emit('plugins', plugins); } catch (e) { H.toast('MCP connect failed: ' + e.message, 'error', 6000); } } },
+    upsert: (p) => { const i = plugins.findIndex(x => x.id === p.id); if (i >= 0) plugins[i] = p; else plugins.push(p); mcpCache.delete(p.id); invalidateTools(); save(); },
+    remove: (id) => { plugins = plugins.filter(p => p.id !== id); mcpCache.delete(id); invalidateTools(); save(); },
+    setEnabled: async (id, on) => { const p = plugins.find(x => x.id === id); if (!p) return; p.enabled = on; save(); if (on && p.kind === 'mcp') { try { await mcpConnect(p, true); invalidateTools(); H.bus.emit('plugins', plugins); } catch (e) { H.toast('MCP connect failed: ' + e.message, 'error', 6000); } } },
     tools, test, connectEnabledMcp, mcpConnect,
     exportAll: () => JSON.stringify(plugins.map(p => splitSecrets(p).pub), null, 2),
     exportSafe: (p) => splitSecrets(p).pub,

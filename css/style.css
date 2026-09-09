@@ -540,3 +540,4 @@ label.check .help { margin: 0; font-size: 12px; }
 .summary-card .md { padding: 0 14px 12px; font-size: 13px; color: var(--fg-2); }
 .msg.compacted, .tool-card.compacted { opacity: .55; }
 .msg.compacted:hover, .msg.assistant.turn.compacted:hover { opacity: .9; }
+.load-earlier { text-align: center; padding: 6px 0 14px; }

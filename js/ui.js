@@ -30,12 +30,20 @@ H.ui = (() => {
 
   /* ---------------- messages ---------------- */
   const nodeFor = new Map();
-  function renderChat(chat) {
+  const WINDOW = 120;   // messages rendered initially; older ones on demand (a long tool-heavy chat can hold thousands)
+  let renderFrom = 0;
+  function renderChat(chat, { from } = {}) {
     const box = $('#messages'); box.innerHTML = ''; nodeFor.clear(); turnOf.clear(); closeTurn();
     const wrap = el('div', { class: 'msg-wrap' }); box.append(wrap);
     if (!chat || !chat.messages.length) { wrap.append(emptyState()); updateContextMeter(); return; }
-    chat.messages.forEach((m, i) => placeMessage(wrap, m, i));
-    scrollBottom(true); updateContextMeter();
+    const msgs = chat.messages;
+    let start = from ?? Math.max(0, msgs.length - WINDOW);
+    while (start > 0 && msgs[start].role !== 'user') start--;   // start at a turn boundary so responses are never split
+    renderFrom = start;
+    if (start > 0) wrap.append(el('div', { class: 'load-earlier' }, [el('button', { class: 'btn sm', onclick: () => { const keep = box.scrollHeight - box.scrollTop; renderChat(chat, { from: Math.max(0, start - WINDOW) }); box.scrollTop = box.scrollHeight - keep; } }, [`Show earlier messages (${start} hidden)`])]));
+    for (let i = start; i < msgs.length; i++) placeMessage(wrap, msgs[i], i);
+    if (from === undefined) scrollBottom(true);
+    updateContextMeter();
   }
   function emptyState() {
     const tips = [
@@ -219,12 +227,14 @@ H.ui = (() => {
     ]);
   }
   function updateTool(node, m) {
+    const bodyKey = (m.meta?.running ? 'r' : 'd') + '|' + (m.meta?.error || '') + '|' + (m.content?.length || 0) + '|' + (m.meta?.question ? JSON.stringify(m.meta.question.answered ?? null) : '');
+    const bodyChanged = node._bodyKey !== bodyKey; node._bodyKey = bodyKey;
     if (m.meta?.question) {   // ask_user: the card IS the question
       node.classList.add('ask'); node.open = true;
       const st = node.querySelector('.tstate'); st.textContent = m.meta.question.answered === undefined ? 'waiting for you' : 'answered';
       node.classList.toggle('running', m.meta.question.answered === undefined); node.classList.toggle('ok', m.meta.question.answered !== undefined);
       node.querySelector('.targs').textContent = m.meta.question.text;
-      const body = node.querySelector('.tbody'); body.innerHTML = ''; body.append(questionCard(m));
+      if (bodyChanged) { const body = node.querySelector('.tbody'); body.innerHTML = ''; body.append(questionCard(m)); }
       return;
     }
     const st = node.querySelector('.tstate'); const args = node.querySelector('.targs');
@@ -234,6 +244,7 @@ H.ui = (() => {
     else if (m.meta?.denied) { node.classList.add('denied'); st.textContent = 'denied'; }
     else if (m.meta?.error) { node.classList.add('error'); st.textContent = 'error'; }
     else { node.classList.add('ok'); st.textContent = m.meta?.ms != null ? m.meta.ms + ' ms' : 'done'; }
+    if (!bodyChanged) return;   // status ticks while running only touch the summary line above
     const ta = node.querySelector('.tactions'); ta.innerHTML = '';
     const tool = H.tools.get(m.name);
     if (tool?.rerun && !m.meta?.running && typeof a === 'object') {

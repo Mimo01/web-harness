@@ -429,7 +429,13 @@ H.tools = (() => {
 
   /* ---------- registry API ---------- */
   function all() { return [...registry.values(), ...H.plugins.tools()]; }
-  function get(name) { return registry.get(name) || H.plugins.tools().find(t => t.name === name); }
+  let pluginIndex = null, pluginIndexFor = null;
+  function get(name) {
+    const r = registry.get(name); if (r) return r;
+    const list = H.plugins.tools();
+    if (pluginIndexFor !== list) { pluginIndex = new Map(list.map(t => [t.name, t])); pluginIndexFor = list; }   // re-index only when the list object changes
+    return pluginIndex.get(name);
+  }
   function enabled() { const dis = new Set(H.settings.get('disabledTools') || []); return all().filter(t => !dis.has(t.name) && H.perms.policyFor(t) !== 'deny' && (!t.plugin || H.plugins.get(t.plugin)?.enabled)); }
   function openaiSpecs() { return enabled().map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters || { type: 'object', properties: {} } } })); }
   function groups() { const g = {}; for (const t of all()) (g[t.group || 'Other'] ||= []).push(t); return g; }

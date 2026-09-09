@@ -280,7 +280,8 @@ runs (plain-text markdown, no Python).
 
 Designed to stay light on modest laptops: no framework, nothing runs while idle, libraries load only when needed.
 Streaming renders at most once per animation frame (syntax highlighting happens once, when the reply is complete),
-the sidebar works from a small index instead of reloading every chat, and storage writes are coalesced. The heavy
+long chats render their most recent part with a "Show earlier messages" control, tool cards rebuild their body only
+when the result changes, the sidebar works from a small in-memory index, and storage writes are coalesced. The heavy
 optional parts are Pyodide (Python, ~10 MB download and a few seconds of CPU on first use) and parsing very large
 PDFs; both happen only when you use them.
 

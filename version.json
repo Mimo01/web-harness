@@ -1,6 +1,6 @@
 {
-  "version": "1.12.2",
+  "version": "1.12.3",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Fixes: MCP notifications use the plugin route, path values are encoded, multi-character CSV delimiters, lighter sidebar updates, cached prompt tokens priced correctly."
+  "notes": "Performance: windowed rendering of long chats, cheaper tool-card updates, faster tool lookups and context estimates."
 }

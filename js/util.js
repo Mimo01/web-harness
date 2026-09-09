@@ -105,8 +105,10 @@ H.toast = (msg, kind = 'info', ms = 3500) => {
 
 H.download = (name, content, type = 'text/plain') => {
   const blob = content instanceof Blob ? content : new Blob([content], { type });
-  const a = H.el('a', { href: URL.createObjectURL(blob), download: name });
+  const url = URL.createObjectURL(blob);
+  const a = H.el('a', { href: url, download: name });
   document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);   // long enough for the browser to start the download
 };
 
 H.readFileAsText = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(file); });

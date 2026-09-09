@@ -59,6 +59,8 @@ H.usage = (() => {
   const cost_ = (m, p, c) => cost(m, p, c);
 
   /* estimate the current context size of a chat (tokens that would be sent on the next request) */
+  let specsMemo = { list: null, tokens: 0 };
+  function specsEstimate() { const specs = H.tools.openaiSpecs(); const key = specs.map(s => s.function.name).join(','); if (specsMemo.list !== key) specsMemo = { list: key, tokens: H.estTokens(JSON.stringify(specs)) }; return specsMemo.tokens; }
   function contextEstimate(chat) {
     if (!chat) return 0;
     const msgs = chat.messages;
@@ -71,7 +73,7 @@ H.usage = (() => {
       return est;
     }
     // no usage figure to anchor on (fresh chat or just compacted): estimate what would be sent now
-    let est = H.estTokens(H.agent.systemPrompt()) + H.estTokens(JSON.stringify(H.tools.openaiSpecs()));
+    let est = H.estTokens(H.agent.systemPrompt()) + specsEstimate();
     for (const m of H.agent.apiMessages(msgs)) est += H.estTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + (m.tool_calls ? H.estTokens(JSON.stringify(m.tool_calls)) : 0) + 4;
     return est;
   }
