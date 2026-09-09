@@ -1,6 +1,6 @@
 {
-  "version": "1.8.1",
+  "version": "1.8.2",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "One-click reconnect for bridge plugins from the home screen and top bar; only enabled plugins are shown."
+  "notes": "Context window fullness shown as a percentage ring in the message box."
 }

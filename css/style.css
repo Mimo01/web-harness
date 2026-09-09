@@ -363,3 +363,11 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 .conn.action { border-color: var(--warn); background: var(--warn-soft); color: var(--fg); } .conn.action .conn-state { color: var(--warn); font-weight: 600; }
 .conn.action:hover { filter: brightness(1.08); }
 .reconnect-toast { border-left-color: var(--warn); max-width: 420px; }
+#ctx-meter .track { display: none; }
+#ctx-meter .ring { width: 18px; height: 18px; transform: rotate(-90deg); flex-shrink: 0; }
+#ctx-meter .ring circle { fill: none; stroke-width: 4; }
+#ctx-meter .ring .bg { stroke: var(--surface-3); }
+#ctx-meter .ring .fg { stroke: var(--accent); stroke-linecap: round; transition: stroke-dasharray .4s; }
+#ctx-meter.warn .ring .fg { stroke: var(--warn); } #ctx-meter.danger .ring .fg { stroke: var(--danger); }
+#ctx-meter .txt { font-weight: 600; color: var(--fg-2); }
+#ctx-meter.warn .txt { color: var(--warn); } #ctx-meter.danger .txt { color: var(--danger); }

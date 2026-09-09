@@ -219,14 +219,15 @@ H.ui = (() => {
     const est = H.usage.contextEstimate(chat);
     const p = H.usage.priceFor(model); const ctx = p.context || 128000;
     const pct = Math.min(100, Math.round(est / ctx * 100));
-    const bar = $('#ctx-meter'); bar.querySelector('.fill').style.width = pct + '%';
+    const bar = $('#ctx-meter'); const circ = 2 * Math.PI * 15.5;
+    bar.querySelector('.fg').style.strokeDasharray = `${circ * pct / 100} ${circ}`;
     bar.classList.toggle('warn', pct >= 70); bar.classList.toggle('danger', pct >= 90);
-    bar.querySelector('.txt').textContent = `${H.usage.fmtTok(est)} / ${H.usage.fmtTok(ctx)}`;
+    bar.querySelector('.txt').textContent = `${pct}%` + (pct >= 90 ? ' context full' : pct >= 70 ? ' context' : '');
     const u = chat?.usage || { prompt: 0, completion: 0 };
     const cc = H.usage.chatCost(chat);
     const costTxt = H.settings.get('showCost') ? ' · ' + (cc.known ? H.usage.fmtCost(cc.cost) : 'set pricing') : '';
     $('#usage').textContent = `${H.usage.fmtTok((u.prompt || 0) + (u.completion || 0))} tok${costTxt}`;
-    bar.title = `Context: ~${est.toLocaleString()} of ${ctx.toLocaleString()} tokens (${pct}%)\nChat total: ${(u.prompt || 0).toLocaleString()} in / ${(u.completion || 0).toLocaleString()} out` + (cc.known ? `\nCost: ${H.usage.fmtCost(cc.cost)}${cc.partial ? ' (some messages have no pricing)' : ''}` : '\nCost unknown: set pricing in Settings > Usage & costs');
+    bar.title = `Context window: ~${est.toLocaleString()} of ${ctx.toLocaleString()} tokens used (${pct}%)${pct >= 70 ? '\nTip: start a new chat for unrelated work; long chats cost more per message.' : ''}\nChat total: ${(u.prompt || 0).toLocaleString()} in / ${(u.completion || 0).toLocaleString()} out` + (cc.known ? `\nCost: ${H.usage.fmtCost(cc.cost)}${cc.partial ? ' (some messages have no pricing)' : ''}` : '\nCost unknown: set pricing in Settings > Usage & costs');
   }
 
   /* ---------------- sidebar ---------------- */
