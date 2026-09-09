@@ -371,3 +371,8 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 #ctx-meter.warn .ring .fg { stroke: var(--warn); } #ctx-meter.danger .ring .fg { stroke: var(--danger); }
 #ctx-meter .txt { font-weight: 600; color: var(--fg-2); }
 #ctx-meter.warn .txt { color: var(--warn); } #ctx-meter.danger .txt { color: var(--danger); }
+/* continuation messages (after a tool card): keep the hover actions inside the message, not over the card */
+.msg.assistant.continuation { margin-top: 6px; }
+.msg.assistant.continuation .role { height: 18px; margin: 0 0 2px; overflow: hidden; }
+.msg.assistant.continuation .role .actions { position: static; }
+.msg.assistant.continuation .role .name { display: none; }
