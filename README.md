@@ -66,7 +66,7 @@ Don't want the check? Turn it off in Settings → Security & privacy; it only ev
 4. Settings → **Plugins** → *Set up* Jira or GitLab, click the bookmarklet on your logged-in tab, then ask:
    *"What are my open issues? Group them by status."*
 
-## Features
+## 📚 Features in detail
 
 ### Chats
 Multiple persisted conversations, streaming responses, markdown + syntax highlighting, reasoning traces
