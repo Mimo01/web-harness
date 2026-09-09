@@ -387,3 +387,17 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 .msg.assistant.tools-only .content { display: none; }
 .msg.assistant.tools-only .role { margin-bottom: 0; }
 .msg.hover .actions, .msg.hover .role .ts { opacity: 1; }
+
+/* ---------- Turn-based response rendering ---------- */
+.msg.assistant.turn .tbody-wrap { flex: 1; min-width: 0; }
+.msg.assistant.turn .role .stats { margin-left: 2px; }
+.msg.assistant.turn .body > .part + .part { margin-top: 8px; }
+.msg.assistant.turn .body > .part.text.blank { display: none; }
+.msg.assistant.turn .body > .tool-card { margin-left: 0; margin-bottom: 0; }
+.msg.assistant.turn .body > .tool-card + .tool-card { margin-top: 0; }
+.msg.assistant.turn .body > .tool-card.first { margin-top: 8px; }
+.msg.assistant.turn .body > .tool-card:has(+ .part.text) { margin-bottom: 8px; }
+.msg.assistant.turn .body > .part.text:first-child { margin-top: 0; }
+.msg.assistant.turn:hover .role .ts, .msg.assistant.turn:hover .role .actions { opacity: 1; }
+.msg.assistant.turn .role .stats, .msg.assistant.turn .role .ts { white-space: nowrap; }
+.msg.assistant.turn .role { flex-wrap: nowrap; overflow: hidden; }

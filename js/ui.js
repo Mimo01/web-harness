@@ -31,10 +31,10 @@ H.ui = (() => {
   /* ---------------- messages ---------------- */
   const nodeFor = new Map();
   function renderChat(chat) {
-    const box = $('#messages'); box.innerHTML = ''; nodeFor.clear();
+    const box = $('#messages'); box.innerHTML = ''; nodeFor.clear(); turnOf.clear(); closeTurn();
     const wrap = el('div', { class: 'msg-wrap' }); box.append(wrap);
     if (!chat || !chat.messages.length) { wrap.append(emptyState()); updateContextMeter(); return; }
-    chat.messages.forEach((m, i) => wrap.append(renderMessage(m, i)));
+    chat.messages.forEach((m, i) => placeMessage(wrap, m, i));
     scrollBottom(true); updateContextMeter();
   }
   function emptyState() {
@@ -110,53 +110,68 @@ H.ui = (() => {
     pill.append(el('span', { class: 'dot' }), bad.length ? `${bad.length} of ${enabled.length} not connected` : `${enabled.length} connected`);
     pill.title = st.map(x => `${shortName(x.p)}: ${x.s.label}`).join('\n') + '\nClick to check / configure.';
   }
-  function renderMessage(m, idx) {
-    let node;
-    const msgs = H.agent.current()?.messages || [];
-    const prev = idx > 0 ? msgs[idx - 1] : null;
-    if (m.role === 'user') {
-      node = el('div', { class: 'msg user' + (m.meta?.planExec ? ' plan-exec' : '') }, [el('div', { class: 'body' }, [
-        el('div', { class: 'role' }, [el('span', { class: 'actions' }, [
-          el('button', { class: 'btn sm ghost', title: 'Copy', onclick: () => { navigator.clipboard.writeText(m.display || (typeof m.content === 'string' ? m.content : '')); H.toast('Copied', 'success', 1200); } }, ['Copy']),
-          el('button', { class: 'btn sm ghost icon', title: 'Delete', onclick: () => H.agent.deleteMessage(idx) }, [H.icon('x')])]), el('span', { class: 'muted small ts', title: H.fmtTime(m.ts) }, [H.fmtClock(m.ts)])]),
-        el('div', { class: 'text' }, [m.display || (typeof m.content === 'string' ? m.content : '')]),
-        m.attachments?.length ? el('div', { class: 'attachments' }, m.attachments.map(a => el('span', { class: 'chip' + (a.empty ? ' risk-danger' : ''), title: a.empty ? 'No text could be extracted from this file; the model cannot read it. ' + (a.note || '') : (a.chars ? `${a.chars.toLocaleString()} characters of text were sent to the model` : '') }, [H.icon('clip'), `${a.name} (${H.fmtBytes(a.size || 0)})`, a.empty ? ' · no text!' : '']))) : null,
-      ])]);
-      if (m.meta?.system) node.classList.add('system');
-    } else if (m.role === 'assistant') {
-      const cont = prev && prev.role === 'tool';
-      node = el('div', { class: 'msg assistant' + (cont ? ' continuation' : '') }, [el('div', { class: 'avatar' }, [H.icon('cube')]), el('div', { class: 'body' }, [
-        el('div', { class: 'role' }, [el('span', { class: 'name' }, ['Assistant']), el('span', { class: 'muted small ts', title: H.fmtTime(m.ts) }, [H.fmtClock(m.ts)]), el('span', { class: 'spacer' }), el('span', { class: 'actions' }, [
-          el('button', { class: 'btn sm ghost', title: 'Copy markdown', onclick: () => { navigator.clipboard.writeText(m.content || ''); H.toast('Copied', 'success', 1200); } }, ['Copy']),
-          el('button', { class: 'btn sm ghost', title: 'Regenerate', onclick: () => H.agent.regenerate() }, ['Retry']),
-        ])]),
-        el('div', { class: 'reasoning-slot' }), el('div', { class: 'thinking hidden' }, [el('span'), el('span'), el('span')]), el('div', { class: 'md content' }), el('div', { class: 'tc-slot' }), el('div', { class: 'err-slot' }), el('div', { class: 'plan-slot' }),
-      ])]);
-      updateAssistant(node, m);
-      if (cont) linkHover(node);
-    } else if (m.role === 'tool') {
-      const first = !prev || prev.role !== 'tool';
-      node = el('details', { class: 'tool-card' + (first ? ' first' : '') }, [el('summary', {}, [el('span', { class: 'tstate' }), el('span', { class: 'tname' }, [m.name]), el('span', { class: 'targs' }), el('span', { class: 'tactions' })]), el('div', { class: 'tbody' })]);
-      linkHover(node);
-      updateTool(node, m);
-    } else return el('div');
-    nodeFor.set(m, node);
+  /* ===== Rendering model =====
+     A user message is one element. An assistant *turn* (everything the assistant does until the next user message:
+     text, tool calls, more text, a plan) is ONE element: a header (avatar, name, time, tokens/cost, Copy, Retry)
+     and a body made of parts. Hover, copy and retry therefore apply to the whole response. */
+  let openTurn = null;                       // the turn currently receiving parts (closed by any user message)
+  const turnOf = new Map();                  // part node -> turn
+  function closeTurn() { openTurn = null; }
+
+  function userNode(m, idx) {
+    const node = el('div', { class: 'msg user' + (m.meta?.planExec ? ' plan-exec' : '') + (m.meta?.system ? ' system' : '') }, [el('div', { class: 'body' }, [
+      el('div', { class: 'role' }, [el('span', { class: 'actions' }, [
+        el('button', { class: 'btn sm ghost', title: 'Copy', onclick: () => { navigator.clipboard.writeText(m.display || (typeof m.content === 'string' ? m.content : '')); H.toast('Copied', 'success', 1200); } }, ['Copy']),
+        el('button', { class: 'btn sm ghost icon', title: 'Delete', onclick: () => H.agent.deleteMessage(idx) }, [H.icon('x')])]), el('span', { class: 'muted small ts', title: H.fmtTime(m.ts) }, [H.fmtClock(m.ts)])]),
+      el('div', { class: 'text' }, [m.display || (typeof m.content === 'string' ? m.content : '')]),
+      m.attachments?.length ? el('div', { class: 'attachments' }, m.attachments.map(a => el('span', { class: 'chip' + (a.empty ? ' risk-danger' : ''), title: a.empty ? 'No text could be extracted from this file; the model cannot read it. ' + (a.note || '') : (a.chars ? `${a.chars.toLocaleString()} characters of text were sent to the model` : '') }, [H.icon('clip'), `${a.name} (${H.fmtBytes(a.size || 0)})`, a.empty ? ' · no text!' : '']))) : null,
+    ])]);
     return node;
   }
-  /* hovering any part of a response (tool cards, continuation text) highlights the response's first message */
-  function turnHead(node) { let n = node.previousElementSibling; while (n && (n.classList.contains('tool-card') || n.classList.contains('continuation'))) n = n.previousElementSibling; return n && n.classList.contains('msg') && n.classList.contains('assistant') ? n : null; }
-  function linkHover(node) {
-    node.addEventListener('mouseenter', () => turnHead(node)?.classList.add('hover'));
-    node.addEventListener('mouseleave', () => turnHead(node)?.classList.remove('hover'));
+  function newTurn(firstMsg) {
+    const body = el('div', { class: 'body' });
+    const stats = el('span', { class: 'muted small stats' });
+    const node = el('div', { class: 'msg assistant turn' }, [el('div', { class: 'avatar' }, [H.icon('cube')]), el('div', { class: 'tbody-wrap' }, [
+      el('div', { class: 'role' }, [el('span', { class: 'name' }, ['Assistant']), el('span', { class: 'muted small ts', title: H.fmtTime(firstMsg.ts) }, [H.fmtClock(firstMsg.ts)]), stats, el('span', { class: 'spacer' }), el('span', { class: 'actions' }, [
+        el('button', { class: 'btn sm ghost', title: 'Copy the whole response (markdown)', onclick: () => { navigator.clipboard.writeText(turn.msgs.filter(x => x.role === 'assistant' && x.content).map(x => x.content).join('\n\n')); H.toast('Response copied', 'success', 1200); } }, ['Copy']),
+        el('button', { class: 'btn sm ghost', title: 'Regenerate this response', onclick: () => H.agent.regenerate() }, ['Retry']),
+      ])]),
+      body,
+    ])]);
+    const turn = { node, body, stats, msgs: [] };
+    return turn;
+  }
+  function updateTurnStats(turn) {
+    let p = 0, c = 0, cost = 0, known = false;
+    for (const m of turn.msgs) { const u = m.meta?.usage; if (!u) continue; p += u.prompt_tokens || 0; c += u.completion_tokens || 0; const k = H.usage.cost(m.meta.model || H.settings.get('model'), u.prompt_tokens, u.completion_tokens); if (k != null) { cost += k; known = true; } }
+    turn.stats.textContent = (p || c) ? `· ${H.usage.fmtTok(p)} in / ${H.usage.fmtTok(c)} out` + (known && H.settings.get('showCost') ? ` · ${H.usage.fmtCost(cost)}` : '') : '';
+  }
+  function assistantPart(m) {
+    return el('div', { class: 'part text' }, [
+      el('div', { class: 'reasoning-slot' }), el('div', { class: 'thinking hidden' }, [el('span'), el('span'), el('span')]), el('div', { class: 'md content' }), el('div', { class: 'tc-slot' }), el('div', { class: 'err-slot' }), el('div', { class: 'plan-slot' }),
+    ]);
+  }
+  function toolPart(m) {
+    return el('details', { class: 'tool-card' }, [el('summary', {}, [el('span', { class: 'tstate' }), el('span', { class: 'tname' }, [m.name]), el('span', { class: 'targs' }), el('span', { class: 'tactions' })]), el('div', { class: 'tbody' })]);
+  }
+  /* place a message into the DOM (returns nothing; appends to wrap or to the open turn) */
+  function placeMessage(wrap, m, idx) {
+    if (m.role === 'user') { closeTurn(); wrap.append(userNode(m, idx)); return; }
+    if (m.role !== 'assistant' && m.role !== 'tool') return;
+    if (!openTurn) { openTurn = newTurn(m); wrap.append(openTurn.node); }
+    const turn = openTurn;
+    const part = m.role === 'assistant' ? assistantPart(m) : toolPart(m);
+    const prevPart = turn.body.lastElementChild;
+    if (m.role === 'tool') part.classList.toggle('first', !prevPart || !prevPart.classList.contains('tool-card'));
+    turn.body.append(part); turn.msgs.push(m); nodeFor.set(m, part); turnOf.set(part, turn);
+    if (m.role === 'assistant') updateAssistant(part, m); else updateTool(part, m);
   }
   function updateAssistant(node, m) {
     const c = node.querySelector('.content');
     c.innerHTML = md(m.content);
     c.classList.toggle('cursor', !!m.meta?.streaming && !!m.content && !m.tool_calls?.length);
     node.querySelector('.thinking').classList.toggle('hidden', !(m.meta?.streaming && !m.content && !m.reasoning && !m.tool_calls?.length));
-    const hasTools = !!m.tool_calls?.length;
-    node.classList.toggle('empty', !m.content && !m.meta?.streaming && !m.meta?.error && !m.reasoning && !hasTools);
-    node.classList.toggle('tools-only', !m.content && !m.meta?.streaming && !m.meta?.error && !m.reasoning && hasTools);
+    node.classList.toggle('blank', !m.content && !m.meta?.streaming && !m.meta?.error && !m.reasoning);   // e.g. a turn that goes straight to a tool call
     enhanceCode(c);
     const rs = node.querySelector('.reasoning-slot'); rs.innerHTML = '';
     if (m.reasoning) rs.append(el('details', { class: 'reasoning' }, [el('summary', {}, ['Reasoning']), el('div', { class: 'md', html: md(m.reasoning) })]));
@@ -165,7 +180,7 @@ H.ui = (() => {
     const es = node.querySelector('.err-slot'); es.innerHTML = '';
     if (m.meta?.error) es.append(el('div', { class: 'error-box' }, ['Error: ' + m.meta.error]));
     if (m.meta?.aborted) es.append(el('div', { class: 'muted small' }, ['(stopped)']));
-    if (m.meta?.usage) { const u = m.meta.usage; const c = H.usage.cost(m.meta.model || H.settings.get('model'), u.prompt_tokens, u.completion_tokens); node.querySelector('.ts').textContent = `${H.fmtClock(m.ts)} · ${H.usage.fmtTok(u.prompt_tokens || 0)} in / ${H.usage.fmtTok(u.completion_tokens || 0)} out` + (c != null && H.settings.get('showCost') ? ` · ${H.usage.fmtCost(c)}` : ''); }
+    const turn = turnOf.get(node); if (turn) updateTurnStats(turn);
     const ps = node.querySelector('.plan-slot'); ps.innerHTML = '';
     if (m.meta?.plan && !m.meta.streaming) {
       const isLast = H.agent.current()?.messages.at(-1) === m;
@@ -210,9 +225,8 @@ H.ui = (() => {
   function onMessageAdded(m, chatId) {
     if (chatId && chatId !== H.agent.current()?.id) { renderChatList(); return; }   // belongs to a chat running in the background
     const wrap = $('#messages .msg-wrap'); const empty = $('#empty'); if (empty) empty.remove();
-    // refresh plan bars of earlier messages (they become stale)
-    for (const [msg, node] of nodeFor) if (msg.role === 'assistant' && msg.meta?.plan) updateAssistant(node, msg);
-    wrap.append(renderMessage(m, H.agent.current()?.messages.indexOf(m) ?? 0)); scrollBottom(); updateContextMeter();
+    for (const [msg, node] of nodeFor) if (msg.role === 'assistant' && msg.meta?.plan) updateAssistant(node, msg);   // earlier plan bars go stale
+    placeMessage(wrap, m, H.agent.current()?.messages.indexOf(m) ?? 0); scrollBottom(); updateContextMeter();
   }
   function onMessageUpdated(m, chatId) {
     if (chatId && chatId !== H.agent.current()?.id) return;
