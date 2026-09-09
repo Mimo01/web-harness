@@ -745,11 +745,8 @@ H.ui = (() => {
     $('#attach-btn').onclick = () => { const i = el('input', { type: 'file', multiple: true }); i.onchange = () => addFiles([...i.files]); i.click(); };
     $('#new-chat').onclick = () => H.agent.reset();
     $('#settings-btn').onclick = () => openSettings('connection');
-    $('#tools-btn').onclick = () => openSettings('tools');
-    $('#plugins-btn').onclick = () => openSettings('plugins');
-    $('#skills-btn').onclick = () => openSettings('skills');
     $('#usage').onclick = () => openSettings('usage'); $('#ctx-meter').onclick = () => openSettings('usage');
-    $('#sidebar').querySelector('footer').append(el('button', { class: 'btn sm', onclick: bugReport, title: 'Open a pre-filled GitHub issue' }, [H.icon('bug'), 'Report bug']));
+    $('#sidebar-bug-btn').onclick = bugReport;
     $('#toggle-sidebar').onclick = () => $('#sidebar').classList.toggle('collapsed');
     $('#ws-btn').onclick = async () => { try { await H.fs.pick(); H.toast('Workspace: ' + H.fs.name(), 'success'); } catch (e) { if (e.name !== 'AbortError') H.toast(e.message, 'error', 6000); } };
     $('#model-select').onchange = (e) => { H.settings.set({ model: e.target.value }); updateContextMeter(); };

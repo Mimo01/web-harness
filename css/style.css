@@ -340,3 +340,7 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 .composer-bar .hint { display: none; }
 #send-btn, #stop-btn { padding: 5px 12px; }
 @media (max-width: 800px) { #chat-title { max-width: 40%; } .composer-bar #ctx-meter, .composer-bar #usage { display: none; } }
+#sidebar footer { display: flex; gap: 6px; align-items: center; padding: 10px; }
+#sidebar footer #settings-btn { flex: 1; justify-content: center; background: var(--surface-2); border-color: var(--border); padding: 8px 12px; font-size: 13px; }
+#sidebar footer #settings-btn:hover { background: var(--surface-3); }
+#sidebar footer #sidebar-bug-btn { color: var(--muted); }
