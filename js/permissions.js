@@ -51,7 +51,7 @@ H.perms = (() => {
         H.el('p', { class: 'small muted', style: 'margin:0 0 10px' }, [tool.description || '']),
         H.el('pre', { class: 'perm-args' }, [H.clamp(argStr, 4000)]),
         H.el('textarea', { class: 'perm-msg', placeholder: 'Optional: tell the assistant why you are denying / what to do instead', rows: 2 }),
-        H.el('div', { class: 'row gap wrap' }, [
+        H.el('div', { class: 'row gap wrap perm-actions' }, [
           H.el('button', { class: 'btn primary', onclick: () => done('once') }, ['Allow once']),
           H.el('button', { class: 'btn', onclick: () => done('session') }, ['Allow for session']),
           H.el('button', { class: 'btn', onclick: () => done('always') }, ['Always allow']),

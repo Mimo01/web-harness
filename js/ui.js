@@ -875,7 +875,8 @@ H.ui = (() => {
         if (e.key === 'Escape') { hideSlash(); return; }
       }
       const mode = H.settings.get('sendKey');
-      if (e.key === 'Enter' && ((mode === 'enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) || (mode === 'ctrlenter' && (e.ctrlKey || e.metaKey)))) { e.preventDefault(); submit(); }
+      const touch = window.matchMedia('(hover: none) and (pointer: coarse)').matches;   // phones/tablets: Enter makes a new line, the button sends
+      if (e.key === 'Enter' && !touch && ((mode === 'enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) || (mode === 'ctrlenter' && (e.ctrlKey || e.metaKey)))) { e.preventDefault(); submit(); }
     });
     input.addEventListener('paste', (e) => { const files = [...(e.clipboardData?.files || [])]; if (files.length) { e.preventDefault(); addFiles(files); } });
     document.addEventListener('dragover', (e) => e.preventDefault());

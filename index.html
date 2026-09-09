@@ -8,7 +8,7 @@
 <meta name="referrer" content="no-referrer">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="css/style.css?v=20260910w">
+<link rel="stylesheet" href="css/style.css?v=20260910y">
 <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js" crossorigin="anonymous"></script>
@@ -95,6 +95,7 @@
           <textarea id="input" rows="1" placeholder="Message… type / for skills, drop files to attach"></textarea>
           <div class="composer-bar">
             <button id="attach-btn" class="btn icon ghost" title="Attach files (or drag & drop / paste)"><svg class="ico"><use href="#i-clip"/></svg></button>
+            <div class="pill-strip">
             <label class="pill-select" title="Model"><svg class="ico"><use href="#i-cube"/></svg><select id="model-select"></select></label>
             <label class="pill-select" id="mode-wrap" title="Chat mode"><svg class="ico"><use href="#i-shield"/></svg><select id="mode-select">
               <option value="default">Default</option>
@@ -104,6 +105,7 @@
             <span class="spacer"></span>
             <div id="ctx-meter" title="Context usage (click for details)"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.5"/><circle class="fg" cx="18" cy="18" r="15.5"/></svg><span class="txt"></span></div>
             <span id="usage" class="small muted" title="Chat tokens and cost (click for details)"></span>
+            </div>
             <button id="send-btn" class="btn primary" title="Send (Enter)">Send<svg class="ico"><use href="#i-send"/></svg></button>
             <button id="stop-btn" class="btn danger hidden" title="Stop"><svg class="ico"><use href="#i-stop"/></svg>Stop</button>
           </div>
@@ -114,23 +116,23 @@
 
   <div id="toasts"></div>
 
-  <script src="js/util.js?v=20260910w"></script>
-  <script src="js/db.js?v=20260910w"></script>
-  <script src="js/settings.js?v=20260910w"></script>
-  <script src="js/usage.js?v=20260910w"></script>
-  <script src="js/bridge.js?v=20260910w"></script>
-  <script src="js/ext.js?v=20260910w"></script>
-  <script src="js/extract.js?v=20260910w"></script>
-  <script src="js/update.js?v=20260910w"></script>
-  <script src="js/permissions.js?v=20260910w"></script>
-  <script src="js/llm.js?v=20260910w"></script>
-  <script src="js/fs.js?v=20260910w"></script>
-  <script src="js/runtime.js?v=20260910w"></script>
-  <script src="js/skills.js?v=20260910w"></script>
-  <script src="js/plugins.js?v=20260910w"></script>
-  <script src="js/tools.js?v=20260910w"></script>
-  <script src="js/agent.js?v=20260910w"></script>
-  <script src="js/ui.js?v=20260910w"></script>
-  <script src="js/app.js?v=20260910w"></script>
+  <script src="js/util.js?v=20260910y"></script>
+  <script src="js/db.js?v=20260910y"></script>
+  <script src="js/settings.js?v=20260910y"></script>
+  <script src="js/usage.js?v=20260910y"></script>
+  <script src="js/bridge.js?v=20260910y"></script>
+  <script src="js/ext.js?v=20260910y"></script>
+  <script src="js/extract.js?v=20260910y"></script>
+  <script src="js/update.js?v=20260910y"></script>
+  <script src="js/permissions.js?v=20260910y"></script>
+  <script src="js/llm.js?v=20260910y"></script>
+  <script src="js/fs.js?v=20260910y"></script>
+  <script src="js/runtime.js?v=20260910y"></script>
+  <script src="js/skills.js?v=20260910y"></script>
+  <script src="js/plugins.js?v=20260910y"></script>
+  <script src="js/tools.js?v=20260910y"></script>
+  <script src="js/agent.js?v=20260910y"></script>
+  <script src="js/ui.js?v=20260910y"></script>
+  <script src="js/app.js?v=20260910y"></script>
 </body>
 </html>
