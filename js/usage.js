@@ -40,6 +40,18 @@ H.usage = (() => {
     return c;
   }
 
+  /* cost of a chat computed from per-message token counts at today's prices (so late-arriving pricing still applies) */
+  function chatCost(chat) {
+    let cost = 0, known = false, partial = false;
+    for (const m of chat?.messages || []) {
+      const u = m.meta?.usage; if (!u) continue;
+      const c = cost_(m.meta.model || H.settings.get('model'), u.prompt_tokens, u.completion_tokens);
+      if (c == null) partial = true; else { cost += c; known = true; }
+    }
+    return { cost, known, partial };
+  }
+  const cost_ = (m, p, c) => cost(m, p, c);
+
   /* estimate the current context size of a chat (tokens that would be sent on the next request) */
   function contextEstimate(chat) {
     if (!chat) return 0;
@@ -66,6 +78,7 @@ H.usage = (() => {
           info[m.model_name] = { maxInput: mi.max_input_tokens || mi.max_tokens || null, maxOutput: mi.max_output_tokens || null, inCost: mi.input_cost_per_token ?? null, outCost: mi.output_cost_per_token ?? null, provider: mi.litellm_provider || null };
         }
         H.settings.set({ modelInfo: info });
+        H.bus.emit('usage');
         return info;
       } catch { }
     }
@@ -80,5 +93,5 @@ H.usage = (() => {
     return out;
   }
 
-  return { priceFor, cost, fmtCost, fmtTok, record, contextEstimate, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
+  return { priceFor, cost, chatCost, fmtCost, fmtTok, record, contextEstimate, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
 })();

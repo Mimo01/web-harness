@@ -95,7 +95,7 @@ H.ui = (() => {
     const es = node.querySelector('.err-slot'); es.innerHTML = '';
     if (m.meta?.error) es.append(el('div', { class: 'error-box' }, ['Error: ' + m.meta.error]));
     if (m.meta?.aborted) es.append(el('div', { class: 'muted small' }, ['(stopped)']));
-    if (m.meta?.usage) { const u = m.meta.usage; node.querySelector('.ts').textContent = `${H.fmtClock(m.ts)} · ${H.usage.fmtTok(u.prompt_tokens || 0)} in / ${H.usage.fmtTok(u.completion_tokens || 0)} out` + (m.meta.cost != null && H.settings.get('showCost') ? ` · ${H.usage.fmtCost(m.meta.cost)}` : ''); }
+    if (m.meta?.usage) { const u = m.meta.usage; const c = H.usage.cost(m.meta.model || H.settings.get('model'), u.prompt_tokens, u.completion_tokens); node.querySelector('.ts').textContent = `${H.fmtClock(m.ts)} · ${H.usage.fmtTok(u.prompt_tokens || 0)} in / ${H.usage.fmtTok(u.completion_tokens || 0)} out` + (c != null && H.settings.get('showCost') ? ` · ${H.usage.fmtCost(c)}` : ''); }
     const ps = node.querySelector('.plan-slot'); ps.innerHTML = '';
     if (m.meta?.plan && !m.meta.streaming) {
       const isLast = H.agent.current()?.messages.at(-1) === m;
@@ -161,10 +161,11 @@ H.ui = (() => {
     const bar = $('#ctx-meter'); bar.querySelector('.fill').style.width = pct + '%';
     bar.classList.toggle('warn', pct >= 70); bar.classList.toggle('danger', pct >= 90);
     bar.querySelector('.txt').textContent = `${H.usage.fmtTok(est)} / ${H.usage.fmtTok(ctx)}`;
-    const u = chat?.usage || { prompt: 0, completion: 0, cost: 0 };
-    const costTxt = H.settings.get('showCost') ? ' · ' + (p.source === 'unknown' ? 'cost n/a' : H.usage.fmtCost(u.cost || 0)) : '';
+    const u = chat?.usage || { prompt: 0, completion: 0 };
+    const cc = H.usage.chatCost(chat);
+    const costTxt = H.settings.get('showCost') ? ' · ' + (cc.known ? H.usage.fmtCost(cc.cost) : 'set pricing') : '';
     $('#usage').textContent = `${H.usage.fmtTok((u.prompt || 0) + (u.completion || 0))} tok${costTxt}`;
-    bar.title = `Context: ~${est.toLocaleString()} of ${ctx.toLocaleString()} tokens (${pct}%)\nChat total: ${(u.prompt || 0).toLocaleString()} in / ${(u.completion || 0).toLocaleString()} out` + (p.source !== 'unknown' ? `\nCost: ${H.usage.fmtCost(u.cost || 0)} (pricing: ${p.source})` : '\nCost unknown: set pricing in Settings > Usage');
+    bar.title = `Context: ~${est.toLocaleString()} of ${ctx.toLocaleString()} tokens (${pct}%)\nChat total: ${(u.prompt || 0).toLocaleString()} in / ${(u.completion || 0).toLocaleString()} out` + (cc.known ? `\nCost: ${H.usage.fmtCost(cc.cost)}${cc.partial ? ' (some messages have no pricing)' : ''}` : '\nCost unknown: set pricing in Settings > Usage & costs');
   }
 
   /* ---------------- sidebar ---------------- */
@@ -255,7 +256,14 @@ H.ui = (() => {
   function updateModeUI() {
     const mode = H.perms.effectiveMode(); const sel = $('#mode-select'); sel.value = H.settings.get('chatMode');
     document.body.dataset.mode = mode;
-    $('#mode-banner').classList.toggle('hidden', mode !== 'plan');
+    $('#mode-wrap').title = { default: 'Default: read-only tools run, writes ask you first', auto: 'Allow all: every tool runs without asking', plan: 'Plan: read-only investigation, then a plan you can execute' }[mode] || 'Chat mode';
+    $('#input').placeholder = mode === 'plan' ? 'Plan mode: describe what you want planned…' : 'Message… type / for skills, drop files to attach';
+  }
+  function updateTitle() { const c = H.agent.current(); $('#chat-title').textContent = c?.title || 'New chat'; }
+  function bugReport() {
+    const s = H.settings.get(); const c = H.agent.current();
+    const body = `**What happened**\n\n\n**What I expected**\n\n\n**Steps to reproduce**\n1.\n\n---\nVersion: ${H.ABOUT.version} · Browser: ${navigator.userAgent} · Origin: ${/^https?:/.test(location.origin) ? location.origin : 'file://'} · Mode: ${s.chatMode} · Model: ${s.model || '-'} · Plugins enabled: ${H.plugins.list().filter(p => p.enabled).map(p => p.id).join(', ') || 'none'} · Bridges: ${H.bridge.list().length}${c?.messages.length ? ` · Last tool error: ${(c.messages.filter(m => m.role === 'tool' && m.meta?.error).at(-1)?.meta.error || '-').slice(0, 200)}` : ''}`;
+    window.open(`${H.ABOUT.repoUrl}/issues/new?title=${encodeURIComponent('Bug: ')}&body=${encodeURIComponent(body)}`, '_blank', 'noopener');
   }
 
   /* ================= SETTINGS ================= */
@@ -561,22 +569,23 @@ H.ui = (() => {
   function usagePanel() {
     const wrap = el('div', {});
     const stat = (label, value, sub) => el('div', { class: 'stat' }, [el('div', { class: 'stat-v' }, [value]), el('div', { class: 'stat-l' }, [label]), sub ? el('div', { class: 'stat-s' }, [sub]) : null]);
-    const chat = H.agent.current(); const u = chat?.usage || { prompt: 0, completion: 0, cost: 0, requests: 0 };
+    const chat = H.agent.current(); const u = chat?.usage || { prompt: 0, completion: 0, requests: 0 };
     const model = H.settings.get('model'); const p = H.usage.priceFor(model);
-    const est = H.usage.contextEstimate(chat);
+    const est = H.usage.contextEstimate(chat); const cc = H.usage.chatCost(chat);
     wrap.append(sec('Current chat', null, [el('div', { class: 'stats' }, [
       stat('Context in use', `${H.usage.fmtTok(est)}`, `of ${H.usage.fmtTok(p.context)} (${Math.round(est / p.context * 100)}%)`),
       stat('Input tokens', H.usage.fmtTok(u.prompt || 0)), stat('Output tokens', H.usage.fmtTok(u.completion || 0)),
-      stat('Cost', p.source === 'unknown' ? 'n/a' : H.usage.fmtCost(u.cost || 0), `${u.requests || 0} requests`),
+      stat('Cost', cc.known ? H.usage.fmtCost(cc.cost) : 'set pricing', `${u.requests || 0} requests${cc.partial ? ' · partly unpriced' : ''}`),
     ])]));
     const totalBox = el('div', {}, [el('p', { class: 'muted small' }, ['Loading…'])]);
     wrap.append(sec('All time (this browser)', 'Aggregated over every request made from this device, including deleted chats.', [totalBox]));
     (async () => {
       const t = await H.usage.loadTotal(); const agg = await H.usage.aggregateChats();
       totalBox.innerHTML = '';
-      totalBox.append(el('div', { class: 'stats' }, [stat('Requests', String(t.requests)), stat('Input tokens', H.usage.fmtTok(t.prompt)), stat('Output tokens', H.usage.fmtTok(t.completion)), stat('Cost', H.usage.fmtCost(t.cost), `${agg.chats} chats stored`)]));
       const models = Object.entries(t.byModel).sort((a, b) => b[1].prompt + b[1].completion - a[1].prompt - a[1].completion);
-      if (models.length) totalBox.append(el('table', { class: 'table' }, [el('thead', {}, [el('tr', {}, ['Model', 'Requests', 'Input', 'Output', 'Cost'].map(h => el('th', {}, [h])))]), el('tbody', {}, models.map(([m, v]) => el('tr', {}, [el('td', { class: 'mono' }, [m]), el('td', {}, [String(v.requests)]), el('td', {}, [H.usage.fmtTok(v.prompt)]), el('td', {}, [H.usage.fmtTok(v.completion)]), el('td', {}, [H.usage.fmtCost(v.cost)])])))]));
+      const totalCost = models.reduce((acc, [m, v]) => acc + (H.usage.cost(m, v.prompt, v.completion) || 0), 0);
+      totalBox.append(el('div', { class: 'stats' }, [stat('Requests', String(t.requests)), stat('Input tokens', H.usage.fmtTok(t.prompt)), stat('Output tokens', H.usage.fmtTok(t.completion)), stat('Cost', H.usage.fmtCost(totalCost), `${agg.chats} chats stored · at current prices`)]));
+      if (models.length) totalBox.append(el('table', { class: 'table' }, [el('thead', {}, [el('tr', {}, ['Model', 'Requests', 'Input', 'Output', 'Cost'].map(h => el('th', {}, [h])))]), el('tbody', {}, models.map(([m, v]) => { const c = H.usage.cost(m, v.prompt, v.completion); return el('tr', {}, [el('td', { class: 'mono' }, [m]), el('td', {}, [String(v.requests)]), el('td', {}, [H.usage.fmtTok(v.prompt)]), el('td', {}, [H.usage.fmtTok(v.completion)]), el('td', {}, [c == null ? 'set pricing' : H.usage.fmtCost(c)])]); }))]));
       const days = Object.entries(t.byDay).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 14);
       if (days.length) { const max = Math.max(...days.map(([, v]) => v.prompt + v.completion)); totalBox.append(el('div', { class: 'bars' }, days.reverse().map(([d, v]) => el('div', { class: 'bar', title: `${d}: ${(v.prompt + v.completion).toLocaleString()} tokens · ${H.usage.fmtCost(v.cost)}` }, [el('div', { class: 'bar-fill', style: `height:${Math.max(3, (v.prompt + v.completion) / max * 60)}px` }), el('span', {}, [d.slice(5)])])))); }
       if (agg.top.length) totalBox.append(el('table', { class: 'table' }, [el('thead', {}, [el('tr', {}, ['Most expensive chats', 'Tokens', 'Cost'].map(h => el('th', {}, [h])))]), el('tbody', {}, agg.top.map(c => el('tr', {}, [el('td', {}, [el('a', { href: '#', onclick: (e) => { e.preventDefault(); settingsModal?.remove(); settingsModal = null; H.agent.load(c.id); } }, [c.title])]), el('td', {}, [H.usage.fmtTok(c.tokens)]), el('td', {}, [H.usage.fmtCost(c.cost)])])))]));
@@ -724,11 +733,16 @@ H.ui = (() => {
     $('#plugins-btn').onclick = () => openSettings('plugins');
     $('#skills-btn').onclick = () => openSettings('skills');
     $('#usage').onclick = () => openSettings('usage'); $('#ctx-meter').onclick = () => openSettings('usage');
+    $('#sidebar').querySelector('footer').append(el('button', { class: 'btn sm', onclick: bugReport, title: 'Open a pre-filled GitHub issue' }, [H.icon('bug'), 'Report bug']));
     $('#toggle-sidebar').onclick = () => $('#sidebar').classList.toggle('collapsed');
     $('#ws-btn').onclick = async () => { try { await H.fs.pick(); H.toast('Workspace: ' + H.fs.name(), 'success'); } catch (e) { if (e.name !== 'AbortError') H.toast(e.message, 'error', 6000); } };
     $('#model-select').onchange = (e) => { H.settings.set({ model: e.target.value }); updateContextMeter(); };
     $('#mode-select').onchange = (e) => { H.settings.set({ chatMode: e.target.value }); updateModeUI(); };
-    $('#mode-banner .exit').onclick = () => { H.settings.set({ chatMode: 'default' }); updateModeUI(); };
+    $('#more-btn').onclick = (e) => { e.stopPropagation(); $('#more-menu').classList.toggle('hidden'); };
+    document.addEventListener('click', () => $('#more-menu').classList.add('hidden'));
+    $('#usage-btn').onclick = () => openSettings('usage');
+    $('#bug-btn').onclick = bugReport;
+    $('#chat-title').onclick = () => { const c = H.agent.current(); if (!c) return; const t = prompt('Chat title', c.title); if (t && t.trim()) { H.agent.rename(t.trim()).then(() => { updateTitle(); renderChatList(); }); } };
     $('#preview-close').onclick = () => $('#preview').classList.add('hidden');
     $('#preview-open').onclick = () => window.open($('#preview').dataset.url, '_blank');
     $('#export-chat').onclick = () => { const c = H.agent.current(); if (!c) return; const text = c.messages.map(m => m.role === 'tool' ? `### tool:${m.name}\n\`\`\`\n${H.clamp(m.content, 4000)}\n\`\`\`` : `### ${m.role}\n${m.display || (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))}${m.tool_calls?.length ? '\n\n' + m.tool_calls.map(t => `→ ${t.function.name}(${t.function.arguments})`).join('\n') : ''}`).join('\n\n'); H.download((c.title || 'chat').replace(/[^\w-]+/g, '_') + '.md', `# ${c.title}\n\n${text}`, 'text/markdown'); };
@@ -736,10 +750,10 @@ H.ui = (() => {
     $('#scroll-bottom').onclick = () => { stick = true; scrollBottom(true); };
     $('#chat-search').addEventListener('input', () => renderChatList());
     fillModelSelect($('#model-select'), H.settings.get('models') || [], H.settings.get('model'));
-    updateModeUI();
+    updateModeUI(); updateTitle();
 
-    H.bus.on('chat-loaded', (c) => { renderChat(c); renderChatList(); });
-    H.bus.on('chat-updated', () => renderChatList());
+    H.bus.on('chat-loaded', (c) => { renderChat(c); renderChatList(); updateTitle(); });
+    H.bus.on('chat-updated', () => { renderChatList(); updateTitle(); });
     H.bus.on('message-added', onMessageAdded);
     H.bus.on('message-updated', onMessageUpdated);
     H.bus.on('run-state', (r) => { $('#send-btn').classList.toggle('hidden', r); $('#stop-btn').classList.toggle('hidden', !r); });

@@ -95,7 +95,7 @@ Click **📁 Workspace** to grant access to a local folder; file tools operate i
 Browsers without the File System Access API fall back to an in-memory workspace.
 
 ### Chat modes & permissions
-Pick a mode in the top bar:
+Pick a mode (and the model) in the pills under the message box; both apply to the chat you are in and to new chats:
 
 | Mode | Behaviour |
 |---|---|
@@ -114,7 +114,7 @@ not sent to the model. Tools that change state (write, edit, plugin POST/PUT) as
 ones (delete, merge) and interactive ones (ask_user, sleep, sub-agent) cannot be re-run.
 
 ### Usage & costs
-The top bar shows the estimated context in use versus the model's window, and the chat's tokens and cost. Prices and
+The message box shows the estimated context in use versus the model's window, and the chat's tokens and cost. Prices and
 context sizes are read from LiteLLM's `/model/info` when the proxy exposes it; otherwise set them in
 Settings → Usage & costs (USD per 1M tokens). The Usage section also shows all-time totals per model and per day.
 

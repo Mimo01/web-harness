@@ -1,6 +1,6 @@
 {
-  "version": "1.4.1",
+  "version": "1.5.0",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Chats are always named automatically (retry + fallback)."
+  "notes": "Cleaner layout: model and mode live in the composer; cost counter fixed; one-click bug reports."
 }
