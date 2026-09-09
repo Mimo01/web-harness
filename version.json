@@ -1,6 +1,6 @@
 {
-  "version": "1.7.0",
+  "version": "1.7.1",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Plugin usage guides for the model, loop guard against repeated tool calls, bridge keep-awake option."
+  "notes": "Chats keep running in the background when you switch; attachments without extractable text are flagged clearly."
 }

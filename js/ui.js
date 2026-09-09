@@ -60,7 +60,7 @@ H.ui = (() => {
           el('button', { class: 'btn sm ghost', title: 'Copy', onclick: () => { navigator.clipboard.writeText(m.display || (typeof m.content === 'string' ? m.content : '')); H.toast('Copied', 'success', 1200); } }, ['Copy']),
           el('button', { class: 'btn sm ghost icon', title: 'Delete', onclick: () => H.agent.deleteMessage(idx) }, [H.icon('x')])]), el('span', { class: 'muted small ts', title: H.fmtTime(m.ts) }, [H.fmtClock(m.ts)])]),
         el('div', { class: 'text' }, [m.display || (typeof m.content === 'string' ? m.content : '')]),
-        m.attachments?.length ? el('div', { class: 'attachments' }, m.attachments.map(a => el('span', { class: 'chip' }, [H.icon('clip'), `${a.name} (${H.fmtBytes(a.size || 0)})`]))) : null,
+        m.attachments?.length ? el('div', { class: 'attachments' }, m.attachments.map(a => el('span', { class: 'chip' + (a.empty ? ' risk-danger' : ''), title: a.empty ? 'No text could be extracted from this file; the model cannot read it. ' + (a.note || '') : (a.chars ? `${a.chars.toLocaleString()} characters of text were sent to the model` : '') }, [H.icon('clip'), `${a.name} (${H.fmtBytes(a.size || 0)})`, a.empty ? ' · no text!' : '']))) : null,
       ])]);
       if (m.meta?.system) node.classList.add('system');
     } else if (m.role === 'assistant') {
@@ -137,13 +137,15 @@ H.ui = (() => {
     slot.innerHTML = '';
     slot.append(el('div', { class: 'lbl' }, ['Re-run result', el('span', { class: 'lbl-extra' }, [H.fmtClock(Date.now()) + ' · not sent to the model'])]), el('pre', {}, [H.clamp(typeof out === 'string' ? out : JSON.stringify(out, null, 2), 20000)]));
   }
-  function onMessageAdded(m) {
+  function onMessageAdded(m, chatId) {
+    if (chatId && chatId !== H.agent.current()?.id) { renderChatList(); return; }   // belongs to a chat running in the background
     const wrap = $('#messages .msg-wrap'); const empty = $('#empty'); if (empty) empty.remove();
     // refresh plan bars of earlier messages (they become stale)
     for (const [msg, node] of nodeFor) if (msg.role === 'assistant' && msg.meta?.plan) updateAssistant(node, msg);
     wrap.append(renderMessage(m, H.agent.current()?.messages.indexOf(m) ?? 0)); scrollBottom(); updateContextMeter();
   }
-  function onMessageUpdated(m) {
+  function onMessageUpdated(m, chatId) {
+    if (chatId && chatId !== H.agent.current()?.id) return;
     const node = nodeFor.get(m); if (!node) return;
     if (m.role === 'assistant') updateAssistant(node, m); else if (m.role === 'tool') updateTool(node, m);
     scrollBottom(); if (!m.meta?.streaming) updateContextMeter();
@@ -181,7 +183,9 @@ H.ui = (() => {
     if (!filtered.length) list.append(el('div', { class: 'side-empty' }, [q ? 'No matching chats' : 'No chats yet']));
     for (const c of filtered) {
       const b = H.dateBucket(c.updated); if (b !== bucket) { bucket = b; list.append(el('div', { class: 'side-label' }, [b])); }
-      list.append(el('div', { class: 'chat-item' + (cur?.id === c.id ? ' active' : ''), onclick: () => H.agent.load(c.id), title: `${c.title}\n${c.messages.length} messages · ${H.relTime(c.updated)}` }, [
+      const running = H.agent.isRunning(c.id);
+      list.append(el('div', { class: 'chat-item' + (cur?.id === c.id ? ' active' : '') + (running ? ' running' : ''), onclick: () => H.agent.load(c.id), title: `${c.title}\n${c.messages.length} messages · ${H.relTime(c.updated)}${running ? '\nRunning…' : ''}` }, [
+        running ? el('span', { class: 'spinner' }) : null,
         el('span', { class: 'title' }, [c.title]),
         el('button', { class: 'btn sm icon del', title: 'Rename', onclick: (e) => { e.stopPropagation(); const t = prompt('Chat title', c.title); if (t) { c.title = t; H.db.putChat(c).then(() => { if (cur?.id === c.id) cur.title = t; renderChatList(); }); } } }, [H.icon('edit')]),
         el('button', { class: 'btn sm icon del', title: 'Delete', onclick: (e) => { e.stopPropagation(); if (confirm('Delete chat "' + c.title + '"?')) H.agent.remove(c.id); } }, [H.icon('x')]),
@@ -769,8 +773,10 @@ H.ui = (() => {
     H.bus.on('chat-updated', () => { renderChatList(); updateTitle(); });
     H.bus.on('message-added', onMessageAdded);
     H.bus.on('message-updated', onMessageUpdated);
-    H.bus.on('run-state', (r) => { $('#send-btn').classList.toggle('hidden', r); $('#stop-btn').classList.toggle('hidden', !r); });
-    H.bus.on('usage', updateContextMeter);
+    const syncRunButtons = () => { const r = H.agent.isRunning(); $('#send-btn').classList.toggle('hidden', r); $('#stop-btn').classList.toggle('hidden', !r); };
+    H.bus.on('run-state', () => { syncRunButtons(); renderChatList(); });
+    H.bus.on('chat-loaded', syncRunButtons);
+    H.bus.on('usage', (c) => { if (!c || c === H.agent.current()) updateContextMeter(); });
     H.bus.on('mode', updateModeUI);
     H.bus.on('bridge', (l) => { const pill = $('#bridge-pill'); pill.classList.toggle('hidden', !l.length); pill.innerHTML = ''; pill.append(H.icon('link'), `${l.length} bridge${l.length === 1 ? '' : 's'}`); pill.title = 'Browser session bridge: ' + l.map(b => b.origin + (b.tabs > 1 ? ` (${b.tabs} tabs)` : '')).join(', ') + '\nClick to check the connection.'; });
     $('#bridge-pill').onclick = async () => { const h = await H.bridge.health(); if (!h.length) return H.toast('No bridge connected.', 'warn'); for (const b of h) H.toast(`${b.origin}: ${b.ok ? 'responding ✓' : 'NOT responding: click the bookmark on that tab again'}`, b.ok ? 'success' : 'error', 6000); };

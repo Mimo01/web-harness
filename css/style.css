@@ -347,3 +347,4 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 #sidebar footer #settings-btn { background: transparent; border-color: transparent; color: var(--muted); font-weight: 500; justify-content: flex-start; padding: 7px 10px; }
 #sidebar footer #settings-btn:hover { background: var(--surface-3); color: var(--fg); }
 #sidebar footer #settings-btn .ico { color: var(--muted); }
+.chat-item.running .title { color: var(--fg); } .chat-item .spinner { width: 10px; height: 10px; flex-shrink: 0; }

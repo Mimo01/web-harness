@@ -11,6 +11,10 @@ http.createServer((req, res) => {
   let body = ''; req.on('data', c => body += c); req.on('end', () => {
     let j; try { j = JSON.parse(body); } catch { res.writeHead(400); return res.end('bad json'); } const msgs = j.messages; const last = msgs[msgs.length - 1];
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    const slow = msgs.some(m => m.role === 'user' && typeof m.content === 'string' && /slow/i.test(m.content));
+    if (slow) { const wait = (ms) => new Promise(r => setTimeout(r, ms)); (async () => { await wait(3000); go(); })(); return; }
+    go();
+    function go() {
     const id = 'chatcmpl-' + Date.now();
     const chunk = (delta, finish = null) => send(res, { id, object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: finish }] });
     const toolNames = (j.tools || []).map(t => t.function.name);
@@ -39,5 +43,6 @@ http.createServer((req, res) => {
     }
     send(res, { id, choices: [], usage: { prompt_tokens: 123, completion_tokens: 45 } });
     res.write('data: [DONE]\n\n'); res.end();
+    }
   });
 }).listen(4000, '127.0.0.1', () => console.log('mock litellm on :4000'));
