@@ -133,17 +133,21 @@ H.ui = (() => {
         el('div', { class: 'reasoning-slot' }), el('div', { class: 'thinking hidden' }, [el('span'), el('span'), el('span')]), el('div', { class: 'md content' }), el('div', { class: 'tc-slot' }), el('div', { class: 'err-slot' }), el('div', { class: 'plan-slot' }),
       ])]);
       updateAssistant(node, m);
+      if (cont) linkHover(node);
     } else if (m.role === 'tool') {
       const first = !prev || prev.role !== 'tool';
       node = el('details', { class: 'tool-card' + (first ? ' first' : '') }, [el('summary', {}, [el('span', { class: 'tstate' }), el('span', { class: 'tname' }, [m.name]), el('span', { class: 'targs' }), el('span', { class: 'tactions' })]), el('div', { class: 'tbody' })]);
-      // hovering a tool card highlights the assistant message it belongs to (the previous non-tool sibling)
-      const owner = () => { let n = node.previousElementSibling; while (n && n.classList.contains('tool-card')) n = n.previousElementSibling; return n && n.classList.contains('msg') ? n : null; };
-      node.addEventListener('mouseenter', () => owner()?.classList.add('hover'));
-      node.addEventListener('mouseleave', () => owner()?.classList.remove('hover'));
+      linkHover(node);
       updateTool(node, m);
     } else return el('div');
     nodeFor.set(m, node);
     return node;
+  }
+  /* hovering any part of a response (tool cards, continuation text) highlights the response's first message */
+  function turnHead(node) { let n = node.previousElementSibling; while (n && (n.classList.contains('tool-card') || n.classList.contains('continuation'))) n = n.previousElementSibling; return n && n.classList.contains('msg') && n.classList.contains('assistant') ? n : null; }
+  function linkHover(node) {
+    node.addEventListener('mouseenter', () => turnHead(node)?.classList.add('hover'));
+    node.addEventListener('mouseleave', () => turnHead(node)?.classList.remove('hover'));
   }
   function updateAssistant(node, m) {
     const c = node.querySelector('.content');
