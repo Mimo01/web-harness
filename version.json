@@ -1,6 +1,6 @@
 {
-  "version": "1.9.0",
+  "version": "1.9.1",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Responses render as one unit: one header with Copy/Retry and totals for the whole turn, tool calls inside."
+  "notes": "Performance: smooth streaming on slow machines, lighter sidebar and storage writes."
 }

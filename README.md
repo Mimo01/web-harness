@@ -241,6 +241,14 @@ Libraries (marked, DOMPurify, highlight.js, fonts) load from public CDNs so the 
 build step; Pyodide is fetched from jsDelivr on first Python use. Without network access to the CDNs the app still
 runs (plain-text markdown, no Python).
 
+## ⚡ Performance
+
+Designed to stay light on modest laptops: no framework, nothing runs while idle, libraries load only when needed.
+Streaming renders at most once per animation frame (syntax highlighting happens once, when the reply is complete),
+the sidebar works from a small index instead of reloading every chat, and storage writes are coalesced. The heavy
+optional parts are Pyodide (Python, ~10 MB download and a few seconds of CPU on first use) and parsing very large
+PDFs; both happen only when you use them.
+
 ## 💻 Platform notes (macOS / Windows / Linux)
 
 - **Browsers**: Chrome and Edge give the full feature set (workspace folders via the File System Access API).

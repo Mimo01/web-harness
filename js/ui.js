@@ -14,12 +14,12 @@ H.ui = (() => {
     if (window.DOMPurify) html = DOMPurify.sanitize(html, { ADD_ATTR: ['target'] });
     return html;
   }
-  function enhanceCode(root) {
+  function enhanceCode(root, { highlight = true } = {}) {
     root.querySelectorAll('pre').forEach(pre => {
       if (pre.parentElement?.classList.contains('codeblock')) return;
       const code = pre.querySelector('code');
       const lang = (code?.className.match(/language-([\w+-]+)/) || [])[1] || '';
-      if (code && window.hljs && !code.dataset.hl) { try { hljs.highlightElement(code); code.dataset.hl = '1'; } catch { } }
+      if (highlight && code && window.hljs && !code.dataset.hl && code.textContent.length < 30000) { try { hljs.highlightElement(code); code.dataset.hl = '1'; } catch { } }
       const wrap = el('div', { class: 'codeblock' });
       pre.replaceWith(wrap);
       const copy = el('button', { class: 'btn sm ghost', onclick: () => { navigator.clipboard.writeText(code ? code.innerText : pre.innerText); copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy', 1200); } }, ['Copy']);
@@ -168,13 +168,20 @@ H.ui = (() => {
   }
   function updateAssistant(node, m) {
     const c = node.querySelector('.content');
-    c.innerHTML = md(m.content);
-    c.classList.toggle('cursor', !!m.meta?.streaming && !!m.content && !m.tool_calls?.length);
-    node.querySelector('.thinking').classList.toggle('hidden', !(m.meta?.streaming && !m.content && !m.reasoning && !m.tool_calls?.length));
-    node.classList.toggle('blank', !m.content && !m.meta?.streaming && !m.meta?.error && !m.reasoning);   // e.g. a turn that goes straight to a tool call
-    enhanceCode(c);
-    const rs = node.querySelector('.reasoning-slot'); rs.innerHTML = '';
-    if (m.reasoning) rs.append(el('details', { class: 'reasoning' }, [el('summary', {}, ['Reasoning']), el('div', { class: 'md', html: md(m.reasoning) })]));
+    const streaming = !!m.meta?.streaming;
+    // re-render markdown only when the text changed; while streaming, skip syntax highlighting (done once at the end)
+    const key = (m.content || '') + '\u0000' + (streaming ? 's' : 'f');
+    if (node._key !== key) {
+      node._key = key;
+      c.innerHTML = md(m.content);
+      enhanceCode(c, { highlight: !streaming });
+    }
+    c.classList.toggle('cursor', streaming && !!m.content && !m.tool_calls?.length);
+    node.querySelector('.thinking').classList.toggle('hidden', !(streaming && !m.content && !m.reasoning && !m.tool_calls?.length));
+    node.classList.toggle('blank', !m.content && !streaming && !m.meta?.error && !m.reasoning);   // e.g. a turn that goes straight to a tool call
+    const rs = node.querySelector('.reasoning-slot');
+    const rkey = m.reasoning || '';
+    if (rs._key !== rkey) { rs._key = rkey; rs.innerHTML = ''; if (m.reasoning) rs.append(el('details', { class: 'reasoning' }, [el('summary', {}, ['Reasoning']), el('div', { class: 'md', html: md(m.reasoning) })])); }
     const tcs = node.querySelector('.tc-slot'); tcs.innerHTML = '';
     if (m.meta?.streaming && m.tool_calls?.length) tcs.append(el('div', { class: 'muted small' }, [el('span', { class: 'spinner' }), ' Calling ', el('code', {}, [m.tool_calls.map(t => t.function.name).join(', ')])]));
     const es = node.querySelector('.err-slot'); es.innerHTML = '';
@@ -228,11 +235,19 @@ H.ui = (() => {
     for (const [msg, node] of nodeFor) if (msg.role === 'assistant' && msg.meta?.plan) updateAssistant(node, msg);   // earlier plan bars go stale
     placeMessage(wrap, m, H.agent.current()?.messages.indexOf(m) ?? 0); scrollBottom(); updateContextMeter();
   }
+  /* streaming deltas arrive many times per second: coalesce them into one render per animation frame */
+  const dirty = new Set(); let raf = 0;
+  function flushUpdates() {
+    raf = 0;
+    for (const m of dirty) { const node = nodeFor.get(m); if (!node) continue; if (m.role === 'assistant') updateAssistant(node, m); else if (m.role === 'tool') updateTool(node, m); }
+    dirty.clear(); scrollBottom();
+  }
   function onMessageUpdated(m, chatId) {
     if (chatId && chatId !== H.agent.current()?.id) return;
-    const node = nodeFor.get(m); if (!node) return;
-    if (m.role === 'assistant') updateAssistant(node, m); else if (m.role === 'tool') updateTool(node, m);
-    scrollBottom(); if (!m.meta?.streaming) updateContextMeter();
+    if (!nodeFor.has(m)) return;
+    dirty.add(m);
+    if (!m.meta?.streaming) { if (raf) cancelAnimationFrame(raf); flushUpdates(); updateContextMeter(); return; }   // final state: render now
+    if (!raf) raf = requestAnimationFrame(flushUpdates);
   }
   let stick = true;
   function scrollBottom(force) { const b = $('#messages'); if (force || stick) b.scrollTop = b.scrollHeight; updateScrollBtn(); }
@@ -256,23 +271,35 @@ H.ui = (() => {
   }
 
   /* ---------------- sidebar ---------------- */
+  /* the sidebar works from a small index (id, title, dates, counts, searchable text), rebuilt from storage only when needed */
+  let chatIndex = null; let indexVersion = 1; let indexLoaded = 0; let listTimer = 0;
+  H.bus.on('chat-updated', () => { indexVersion++; });
+  async function getIndex() {
+    if (chatIndex && indexLoaded === indexVersion) return chatIndex;
+    const v = indexVersion;
+    const chats = await H.db.listChats();
+    const idx = chats.map(c => ({ id: c.id, title: c.title, updated: c.updated, count: c.messages.length, text: (c.title + ' ' + c.messages.filter(m => m.role === 'user').slice(0, 20).map(m => String(m.display || m.content || '').slice(0, 300)).join(' ')).toLowerCase() }));
+    if (v === indexVersion) { chatIndex = idx; indexLoaded = v; return idx; }   // a write happened meanwhile: reload
+    return getIndex();
+  }
+  function renderChatList() { clearTimeout(listTimer); listTimer = setTimeout(renderChatListNow, 120); }   // coalesce bursts of events
   let listVersion = 0;
-  async function renderChatList() {
+  async function renderChatListNow() {
     const v = ++listVersion;
-    const chats = await H.db.listChats(); const cur = H.agent.current();
+    const chats = await getIndex(); const cur = H.agent.current();
     if (v !== listVersion) return;
     const list = $('#chat-list'); list.innerHTML = '';
     const q = ($('#chat-search')?.value || '').trim().toLowerCase();
     let bucket = null;
-    const filtered = chats.filter(c => !q || c.title.toLowerCase().includes(q) || c.messages.some(m => m.role === 'user' && String(m.display || m.content || '').toLowerCase().includes(q)));
+    const filtered = chats.filter(c => !q || c.text.includes(q));
     if (!filtered.length) list.append(el('div', { class: 'side-empty' }, [q ? 'No matching chats' : 'No chats yet']));
     for (const c of filtered) {
       const b = H.dateBucket(c.updated); if (b !== bucket) { bucket = b; list.append(el('div', { class: 'side-label' }, [b])); }
       const running = H.agent.isRunning(c.id);
-      list.append(el('div', { class: 'chat-item' + (cur?.id === c.id ? ' active' : '') + (running ? ' running' : ''), onclick: () => H.agent.load(c.id), title: `${c.title}\n${c.messages.length} messages · ${H.relTime(c.updated)}${running ? '\nRunning…' : ''}` }, [
+      list.append(el('div', { class: 'chat-item' + (cur?.id === c.id ? ' active' : '') + (running ? ' running' : ''), onclick: () => H.agent.load(c.id), title: `${c.title}\n${c.count} messages · ${H.relTime(c.updated)}${running ? '\nRunning…' : ''}` }, [
         running ? el('span', { class: 'spinner' }) : null,
-        el('span', { class: 'title' + (c.messages.length ? '' : ' muted') }, [c.messages.length ? c.title : 'New chat (empty)']),
-        el('button', { class: 'btn sm icon del', title: 'Rename', onclick: (e) => { e.stopPropagation(); const t = prompt('Chat title', c.title); if (t) { c.title = t; H.db.putChat(c).then(() => { if (cur?.id === c.id) cur.title = t; renderChatList(); }); } } }, [H.icon('edit')]),
+        el('span', { class: 'title' + (c.count ? '' : ' muted') }, [c.count || c.title !== 'New chat' ? c.title : 'New chat (empty)']),
+        el('button', { class: 'btn sm icon del', title: 'Rename', onclick: async (e) => { e.stopPropagation(); const t = prompt('Chat title', c.title); if (t) { if (cur?.id === c.id) { await H.agent.rename(t); } else { const full = await H.db.getChat(c.id); if (full) { full.title = t; await H.db.putChat(full); } } indexVersion++; renderChatList(); } } }, [H.icon('edit')]),
         el('button', { class: 'btn sm icon del', title: 'Delete', onclick: (e) => { e.stopPropagation(); if (confirm('Delete chat "' + c.title + '"?')) H.agent.remove(c.id); } }, [H.icon('x')]),
       ]));
     }
@@ -862,6 +889,7 @@ H.ui = (() => {
       $('#input').value = drafts.get(c.id) || ''; autoresize();
     });
     H.bus.on('chat-updated', () => { renderChatList(); updateTitle(); });
+    H.bus.on('run-state', () => renderChatList());
     H.bus.on('message-added', onMessageAdded);
     H.bus.on('message-updated', onMessageUpdated);
     const syncRunButtons = () => { const r = H.agent.isRunning(); $('#send-btn').classList.toggle('hidden', r); $('#stop-btn').classList.toggle('hidden', !r); };

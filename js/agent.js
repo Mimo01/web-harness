@@ -39,7 +39,18 @@ When you have enough information, write a concrete, numbered implementation plan
     });
   }
 
-  async function persist(c = chat) { if (!c || deleted.has(c.id)) return; c.updated = Date.now(); await H.db.putChat(c); H.bus.emit('chat-updated', c); }
+  /* writes are coalesced: many tool results in a row produce one storage write (trailing 400 ms), the final one is immediate */
+  const pendingPersist = new Map();
+  function persist(c = chat, { now = false } = {}) {
+    if (!c || deleted.has(c.id)) return Promise.resolve();
+    c.updated = Date.now();
+    if (now) { const t = pendingPersist.get(c.id); if (t) { clearTimeout(t.timer); pendingPersist.delete(c.id); } return H.db.putChat(c).then(() => H.bus.emit('chat-updated', c)); }
+    return new Promise((resolve) => {
+      const prev = pendingPersist.get(c.id); if (prev) { clearTimeout(prev.timer); prev.resolvers.forEach(r => r()); }
+      const timer = setTimeout(async () => { pendingPersist.delete(c.id); if (!deleted.has(c.id)) { await H.db.putChat(c); H.bus.emit('chat-updated', c); } resolve(); }, 400);
+      pendingPersist.set(c.id, { timer, resolvers: [resolve] });
+    });
+  }
 
   async function executeToolCall(tc, ctx) {
     const name = tc.function.name;
@@ -164,7 +175,7 @@ When you have enough information, write a concrete, numbered implementation plan
     }
     chat.messages.push(userMsg);
     H.bus.emit('message-added', userMsg, chat.id);
-    await persist();
+    await persist(chat, { now: true });
     await run();
   }
 
@@ -183,7 +194,7 @@ When you have enough information, write a concrete, numbered implementation plan
     finally {
       runs.delete(c.id);
       H.bus.emit('run-state', false, c.id);
-      await persist(c);
+      await persist(c, { now: true });
       if (chat !== c) H.toast(`Chat "${c.title}" finished in the background.`, 'success', 5000);
       if (H.settings.get('autoTitle') && c.title === 'New chat' && c.messages.length >= 2) autoTitle(c);
     }
@@ -239,13 +250,14 @@ When you have enough information, write a concrete, numbered implementation plan
   async function remove(id) {
     deleted.add(id); stop(id); live.delete(id);
     await H.db.delChat(id);
+    H.bus.emit('chat-updated');            // sidebar index must forget it
     if (chat?.id === id) {
       chat = null;
       const next = (await H.db.listChats()).find(c => c.id !== id);   // most recent remaining chat
       if (next) await load(next.id); else await reset();
-    } else H.bus.emit('chat-updated');
+    }
   }
-  async function rename(title) { if (chat) { chat.title = title; await persist(); } }
+  async function rename(title) { if (chat) { chat.title = title; await persist(chat, { now: true }); } }
   async function deleteMessage(idx) { if (!chat || runs.has(chat.id)) return; chat.messages.splice(idx, 1); H.bus.emit('chat-loaded', chat); await persist(); }
   const isRunning = (id) => runs.has(id || chat?.id);
   const runningIds = () => [...runs.keys()];
