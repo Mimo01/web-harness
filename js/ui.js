@@ -47,8 +47,47 @@ H.ui = (() => {
       el('div', { class: 'logo' }, [H.icon('cube')]),
       el('h2', {}, ['What can I help with?']),
       el('p', {}, ['Chat, tools, skills and plugins — running entirely in your browser against your LiteLLM proxy.']),
+      connectionsStrip(),
       el('div', { class: 'tips' }, tips.map(([ic, t, d, prompt]) => el('div', { class: 'tip', onclick: () => { $('#input').value = prompt; autoresize(); $('#input').focus(); } }, [el('div', { class: 'ti' }, [H.icon(ic)]), el('div', {}, [el('b', {}, [t]), el('div', { class: 'small muted' }, [d])])]))),
     ]);
+  }
+  /* ---------------- connections (plugins) status ---------------- */
+  function pluginStatus(p) {
+    if (!p.enabled) return { state: 'off', label: 'off' };
+    const origin = (() => { try { return new URL(p.kind === 'mcp' ? (p.url || H.settings.get('baseUrl')) : p.baseUrl).origin; } catch { return ''; } })();
+    const r = p.route?.type || 'direct';
+    if (r === 'bridge') return H.bridge.has(origin) ? { state: 'on', label: 'bridge connected' } : { state: 'warn', label: 'bridge not connected' };
+    if (r === 'extension') return H.ext.available() ? { state: 'on', label: 'via extension' } : { state: 'warn', label: 'extension missing' };
+    if (p.useLitellmKey) return H.settings.apiKey() ? { state: 'on', label: 'via LiteLLM' } : { state: 'warn', label: 'no API key' };
+    return { state: 'on', label: r === 'direct' ? 'direct' : r === 'litellm' ? 'via LiteLLM' : 'via proxy' };
+  }
+  const shortName = (p) => ({ jira: 'Jira Cloud', jira2: 'Jira Server', git: 'GitHub', gitlab: 'GitLab', 'litellm-mcp': 'LiteLLM MCP' })[p.id] || p.name.replace(/ \(.*\)$/, '');
+  function connectionsStrip() {
+    const box = el('div', { class: 'connections' });
+    const paint = () => {
+      box.innerHTML = '';
+      const list = H.plugins.list().filter(p => p.id !== 'litellm-mcp' || p.enabled);
+      box.append(el('span', { class: 'conn-label' }, ['Connections']));
+      for (const p of list) {
+        const s = pluginStatus(p);
+        box.append(el('button', { class: 'conn ' + s.state, title: `${p.name}: ${s.label}. Click to configure.`, onclick: () => { openSettings('plugins'); } }, [el('span', { class: 'dot' }), shortName(p), el('span', { class: 'conn-state' }, [s.label])]));
+      }
+      box.append(el('button', { class: 'conn add', title: 'Manage plugins', onclick: () => openSettings('plugins') }, [H.icon('plus'), 'plugin']));
+    };
+    paint();
+    const off = [H.bus.on('bridge', paint), H.bus.on('plugins', paint), H.bus.on('ext', paint), H.bus.on('settings', paint)];
+    const iv = setInterval(() => { if (!document.body.contains(box)) { off.forEach(f => f()); clearInterval(iv); } else paint(); }, 5000);
+    return box;
+  }
+  function updateConnPill() {
+    const pill = $('#bridge-pill');
+    const enabled = H.plugins.list().filter(p => p.enabled);
+    if (!enabled.length) { pill.classList.add('hidden'); return; }
+    const st = enabled.map(p => ({ p, s: pluginStatus(p) }));
+    const bad = st.filter(x => x.s.state === 'warn');
+    pill.classList.remove('hidden'); pill.className = 'conn-pill ' + (bad.length ? 'warn' : 'on'); pill.innerHTML = '';
+    pill.append(el('span', { class: 'dot' }), bad.length ? `${bad.length} of ${enabled.length} not connected` : `${enabled.length} connected`);
+    pill.title = st.map(x => `${shortName(x.p)}: ${x.s.label}`).join('\n') + '\nClick to check / configure.';
   }
   function renderMessage(m, idx) {
     let node;
@@ -778,8 +817,10 @@ H.ui = (() => {
     H.bus.on('chat-loaded', syncRunButtons);
     H.bus.on('usage', (c) => { if (!c || c === H.agent.current()) updateContextMeter(); });
     H.bus.on('mode', updateModeUI);
-    H.bus.on('bridge', (l) => { const pill = $('#bridge-pill'); pill.classList.toggle('hidden', !l.length); pill.innerHTML = ''; pill.append(H.icon('link'), `${l.length} bridge${l.length === 1 ? '' : 's'}`); pill.title = 'Browser session bridge: ' + l.map(b => b.origin + (b.tabs > 1 ? ` (${b.tabs} tabs)` : '')).join(', ') + '\nClick to check the connection.'; });
-    $('#bridge-pill').onclick = async () => { const h = await H.bridge.health(); if (!h.length) return H.toast('No bridge connected.', 'warn'); for (const b of h) H.toast(`${b.origin}: ${b.ok ? 'responding ✓' : 'NOT responding: click the bookmark on that tab again'}`, b.ok ? 'success' : 'error', 6000); };
+    H.bus.on('bridge', updateConnPill); H.bus.on('plugins', updateConnPill); H.bus.on('ext', updateConnPill); H.bus.on('settings', updateConnPill);
+    setInterval(async () => { if (H.plugins.list().some(p => p.enabled && p.route?.type === 'bridge')) { await H.bridge.health(); } updateConnPill(); }, 20000);
+    updateConnPill();
+    $('#bridge-pill').onclick = async () => { const h = await H.bridge.health(); for (const b of h) H.toast(`${b.origin}: ${b.ok ? 'bridge responding ✓' : 'bridge NOT responding: click the bookmark on that tab again'}`, b.ok ? 'success' : 'error', 6000); updateConnPill(); openSettings('plugins'); };
     H.bus.on('workspace', updateWorkspaceBtn);
     H.bus.on('preview', showPreview);
     H.bus.on('settings', (s) => { if ($('#mode-select').value !== s.chatMode) updateModeUI(); if ($('#model-select').value !== s.model) fillModelSelect($('#model-select'), s.models || [], s.model); });

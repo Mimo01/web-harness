@@ -1,6 +1,6 @@
 {
-  "version": "1.7.1",
+  "version": "1.8.0",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Chats keep running in the background when you switch; attachments without extractable text are flagged clearly."
+  "notes": "Connection status of every plugin at a glance on the home screen and in the top bar."
 }
