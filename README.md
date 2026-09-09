@@ -1,25 +1,70 @@
-# Web LLM Harness
+<h1 align="center">🧰 Web LLM Harness</h1>
 
-A complete LLM agent harness that runs **entirely in the browser**. No install, no backend, no build step.
-It talks straight to your **LiteLLM proxy** (any OpenAI-compatible endpoint works) and gives the model
-chats, tools, skills, permissions and plugins (REST-based Jira & GitHub, plus remote MCP servers).
+<p align="center"><b>A full AI agent workbench that runs in a browser tab. Nothing to install. Nothing to host. Nothing leaves your machine except the requests you configure.</b></p>
 
-## Run it
+<p align="center">
+  <a href="https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip"><img alt="Download" src="https://img.shields.io/badge/download-zip-6d8cff?style=for-the-badge"></a>
+  <img alt="No install" src="https://img.shields.io/badge/install-none-3f9d6a?style=for-the-badge">
+  <img alt="Runs on" src="https://img.shields.io/badge/runs%20on-Chrome%20%7C%20Edge%20%7C%20Firefox%20%7C%20Safari-555?style=for-the-badge">
+  <img alt="Backend" src="https://img.shields.io/badge/backend-your%20LiteLLM%20proxy-555?style=for-the-badge">
+</p>
 
-You only need a browser (Chrome or Edge recommended, for the File System Access API).
+Point it at your **LiteLLM proxy** (or any OpenAI-compatible endpoint) and the model gets hands: it reads and edits
+files in a folder you choose, runs Python and JavaScript, calls REST APIs, works your **Jira**, **GitHub** and
+**GitLab**, follows reusable **skills**, and asks before doing anything risky. Locked-down laptop? That's the
+whole point: it's a folder of static files. Double-click `index.html` and you're in.
 
-| Option | How |
-|---|---|
-| Download | [Download the zip](https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip) from GitHub and unzip it anywhere. |
-| Open the file | Double-click `index.html`. Everything works from `file://`. |
-| Any static host | Upload the folder to GitHub Pages, S3, Netlify, an internal web server, SharePoint… |
-| Local static server (if you happen to have Python) | `python3 -m http.server 8765` then open http://localhost:8765 |
+## 🚀 Install
 
-On first launch, Settings opens: enter the LiteLLM **base URL** (without `/v1`) and your **API key**, click
-*Test connection & load models*, pick a model. Everything is stored in your browser (localStorage + IndexedDB).
+**1. Download** → [web-harness.zip](https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip)
+**2. Unzip** it anywhere (Desktop, Documents, a network share…). Rename the folder if you like.
+**3. Open** `index.html` in Chrome or Edge (Firefox and Safari work too, without local-folder access).
+**4. Connect**: Settings opens by itself. Paste your LiteLLM **base URL** (without `/v1`) and **API key**, click
+*Test connection*, pick a model. Done.
 
-> CORS: the browser calls LiteLLM directly, so the proxy must allow your page origin. LiteLLM allows `*` by default.
-> If your proxy is locked down, ask its admin to add your origin (or `null` for `file://`) to `allow_origins`.
+<details>
+<summary>Prefer a URL instead of a file? (recommended for the Jira/GitLab bridge)</summary>
+
+Drop the folder on any static host you already have: an internal web server, SharePoint, GitHub Pages, S3,
+Netlify. No build step, no configuration. If you happen to have Python: `python3 -m http.server 8765` and open
+http://localhost:8765.
+</details>
+
+> **CORS note**: your browser talks to LiteLLM directly, so the proxy must allow your page origin. LiteLLM allows
+> all origins by default; if yours is locked down, ask its admin to add your origin (or `null` for `file://`).
+
+## 🔄 Update
+
+The app checks this repository on startup and every 6 hours. When a newer version exists you get a small notice
+with a **Download** button (Settings → About → *Check for updates* does it on demand).
+
+**To update**: download the zip again, unzip it **over your existing folder** (replace all files), reload the tab.
+Your chats, settings, skills, plugins and credentials live in the browser, not in the folder, so nothing is lost.
+Don't want the check? Turn it off in Settings → Security & privacy; it only ever fetches a public `version.json`.
+
+## ✨ What you get
+
+- **Chats** that stream, render markdown and code, remember everything locally, show tokens and cost per message.
+- **40+ built-in tools**: files, code execution (Python via Pyodide, JavaScript in a sandbox), web, data, memory.
+- **Three chat modes**: *Default* asks before writes, *Allow all* just goes, *Plan* investigates read-only and
+  hands you a plan with an **Execute** button.
+- **Skills**: reusable playbooks you trigger with `/name` or the model picks up on its own.
+- **Plugins**: Jira Cloud, Jira Server/Data Center, GitHub, GitLab out of the box, any REST API via a JSON manifest,
+  and remote **MCP** servers.
+- **Browser session bridge**: APIs that block browsers (Jira Cloud!) still work: a bookmarklet lets your logged-in
+  tab do the calls. No admin, no proxy, no token.
+- **Permissions you control**: per-tool allow / ask / deny, session grants, re-runnable tool cards.
+- **Usage & costs**: context meter, per-chat and all-time totals, prices from LiteLLM or your own table.
+- **Security first**: no backend, no telemetry, no third-party fetch services by default, secrets in a separate
+  store you can keep session-only, sandboxed code and previews.
+
+## 🧭 Quick tour
+
+1. Click **Workspace** and pick a project folder. Ask: *"List the files and summarize what this project does."*
+2. Switch to **Plan mode** and ask: *"Plan how to add unit tests."* Review the plan, hit **Execute**.
+3. Type `/research` followed by a topic, or `/review` on a file, to use a skill.
+4. Settings → **Plugins** → *Set up* Jira or GitLab, click the bookmarklet on your logged-in tab, then ask:
+   *"What are my open issues? Group them by status."*
 
 ## Features
 
@@ -134,7 +179,7 @@ Alternative for Jira/Confluence/GitHub: the **LiteLLM MCP gateway** plugin. The 
 (e.g. Atlassian's remote MCP) in LiteLLM; the harness talks to `<LiteLLM>/mcp/` with your LiteLLM key, so no extra
 credentials live in the browser and there is no CORS issue.
 
-## Security & privacy
+## 🔒 Security & privacy
 
 - **No backend, no telemetry.** The only network traffic is: your LiteLLM proxy, the APIs of plugins you enabled,
   and pages the model fetches with `web_fetch` / `http_request` (requested directly by your browser).
@@ -158,7 +203,7 @@ credentials live in the browser and there is no CORS issue.
 - **Residual risks.** Anything stored in the browser profile is readable by other extensions or someone with access
   to your machine. Serve the app from a trusted origin; if you open it via `file://` the origin is `null`.
 
-## Files
+## 🗂 Files
 ```
 index.html        shell
 css/style.css
@@ -181,7 +226,7 @@ skills/           example skills to import
 dev/              optional dev helpers: serve.js (static server), mock-litellm.js (fake OpenAI API for testing)
 ```
 
-## Developing / testing without a real LLM
+## 🧪 Developing / testing without a real LLM
 
 ```bash
 node dev/mock-litellm.js   # fake OpenAI-compatible API on :4000 (echoes, emits sample tool calls)
@@ -193,13 +238,7 @@ Libraries (marked, DOMPurify, highlight.js, fonts) load from public CDNs so the 
 build step; Pyodide is fetched from jsDelivr on first Python use. Without network access to the CDNs the app still
 runs (plain-text markdown, no Python).
 
-## Updates
-
-The app checks `version.json` in this repository on startup and every 6 hours and shows a notice with a download
-link when a newer version exists (Settings → About → Check for updates; disable in Security & privacy). To update,
-download the zip and replace your folder; chats, settings and secrets live in the browser and are kept.
-
-## Platform notes (macOS / Windows / Linux)
+## 💻 Platform notes (macOS / Windows / Linux)
 
 - **Browsers**: Chrome and Edge give the full feature set (workspace folders via the File System Access API).
   Firefox and Safari run everything else; file tools then use an in-memory workspace.
@@ -216,7 +255,7 @@ download the zip and replace your folder; chats, settings and secrets live in th
 - **Tool errors are explanatory**: every failed tool call returns the cause and the fix (missing parameters, wrong
   types, unknown paths, CORS, expired permissions, HTTP status meanings), so the model can correct itself.
 
-## Credits & disclaimer
+## 🍺 Credits & disclaimer
 
 Made by **Milan Mozolak**.
 
