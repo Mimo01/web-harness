@@ -1,6 +1,6 @@
 {
-  "version": "1.11.1",
+  "version": "1.11.2",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Opening the app resumes your most recent chat."
+  "notes": "Cleaner checkbox rows in Settings."
 }

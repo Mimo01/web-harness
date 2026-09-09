@@ -526,3 +526,11 @@ html, body { height: 100dvh; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .error-box .btn { flex-shrink: 0; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* checkbox rows: one per line, box aligned with the first text line, help beneath */
+.check-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 6px; }
+label.check { display: flex; align-items: flex-start; gap: 10px; padding: 6px 8px; margin: 0; border-radius: var(--r-sm); color: var(--fg); line-height: 1.4; }
+label.check:hover { background: var(--surface-2); }
+label.check input[type=checkbox] { margin-top: 3px; flex-shrink: 0; width: 16px; height: 16px; }
+label.check > span { display: flex; flex-direction: column; gap: 1px; }
+label.check .help { margin: 0; font-size: 12px; }
+.row.gap.wrap > label.check, .row.gap > label.check { margin-right: 0; }

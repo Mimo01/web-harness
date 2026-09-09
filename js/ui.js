@@ -444,7 +444,7 @@ H.ui = (() => {
       sec('Interface', null, [
         selectField('Send message with', 'sendKey', [['enter', 'Enter (Shift+Enter for a new line)'], ['ctrlenter', 'Ctrl / Cmd + Enter']]),
         selectField('Theme', 'theme', [['system', 'Follow system'], ['dark', 'Dark'], ['light', 'Light']], applyTheme),
-        check('Stream responses', 'streaming'), check('Auto-title new chats', 'autoTitle', 'uses one extra small request per chat'),
+        el('div', { class: 'check-list' }, [check('Stream responses', 'streaming', 'show the reply while it is being generated'), check('Auto-title new chats', 'autoTitle', 'uses one extra small request per chat')]),
       ]),
     ]);
   }
