@@ -1,6 +1,6 @@
 {
-  "version": "1.11.2",
+  "version": "1.11.3",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Cleaner checkbox rows in Settings."
+  "notes": "Python now runs in a worker: timeouts terminate runaway code instead of freezing the tab."
 }

@@ -198,7 +198,8 @@ credentials live in the browser and there is no CORS issue.
   API key and plugin credentials: a separate secret store, either `localStorage` (remembered) or `sessionStorage`
   (cleared when the tab closes) — toggle in Security & privacy. Exports never contain secrets. Plugin manifests are
   saved with credentials stripped.
-- **Sandboxing.** JavaScript runs in a Web Worker (no DOM, no workspace); Python in Pyodide/WebAssembly; HTML previews
+- **Sandboxing.** JavaScript runs in a Web Worker (no DOM, no workspace); Python in Pyodide/WebAssembly inside its
+  own Worker, so a timeout terminates runaway code instead of freezing the page; HTML previews
   in a sandboxed iframe; plugin manifest expressions (`transform`, `prepare`, `pathFn`) run in the same Worker sandbox
   with no access to the page, storage or secrets, and importing a manifest that contains them shows a warning;
   CDN scripts and stylesheets carry Subresource Integrity hashes; model markdown is sanitized with DOMPurify; `<meta name="referrer" content="no-referrer">`

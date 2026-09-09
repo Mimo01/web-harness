@@ -28,45 +28,79 @@ H.runtime = (() => {
     });
   }
 
-  /* ---- Python via Pyodide (loaded lazily from CDN) ---- */
-  let pyodide = null, loading = null;
-  async function getPyodide(onStatus) {
-    if (pyodide) return pyodide;
-    if (loading) return loading;
-    if (!H.settings.get('allowPyodideCdn')) throw new Error('Python is disabled: downloading the Pyodide runtime is turned off in Settings > Security & privacy. Ask the user to enable it, or use run_javascript instead.');
-    loading = (async () => {
-      onStatus && onStatus('Loading Pyodide runtime (~10 MB, first time only)…');
-      if (!window.loadPyodide) {
-        await new Promise((res, rej) => { const s = document.createElement('script'); s.src = H.settings.get('pyodideUrl'); s.onload = res; s.onerror = () => rej(new Error('Failed to load Pyodide from ' + s.src)); document.head.append(s); });
+  /* ---- Python via Pyodide, inside a dedicated Worker ----
+     The interpreter is loaded once and kept alive between runs. Because it runs off the main thread, a timeout can
+     terminate it (an infinite loop cannot freeze the page); the next run then reloads the runtime. ---- */
+  let pyWorker = null, pyReady = false, pyLoading = null, pyId = 0;
+  const pyPending = new Map();   // id -> { resolve, timer, onStatus }
+  function pyWorkerSource() {
+    return `
+      let py = null;
+      const post = (m) => self.postMessage(m);
+      async function ensure(url, indexURL, id) {
+        if (py) return py;
+        post({ type: 'status', id, text: 'Loading Pyodide runtime (~10 MB, first time only)…' });
+        importScripts(url);
+        py = await self.loadPyodide({ indexURL });
+        post({ type: 'status', id, text: 'Pyodide ready' });
+        return py;
       }
-      const indexURL = H.settings.get('pyodideUrl').replace(/pyodide\.js$/, '');
-      try { pyodide = await window.loadPyodide({ indexURL }); } catch (e) { loading = null; throw new Error('Pyodide failed to initialise: ' + e.message); }
-      onStatus && onStatus('Pyodide ready');
-      return pyodide;
-    })();
-    return loading;
+      self.onmessage = async (e) => {
+        const m = e.data;
+        if (m.type !== 'run') return;
+        let stdout = '', stderr = '', result, error;
+        try {
+          const p = await ensure(m.url, m.indexURL, m.id);
+          if (m.packages && m.packages.length) {
+            post({ type: 'status', id: m.id, text: 'Installing packages: ' + m.packages.join(', ') });
+            try { await p.loadPackage(m.packages); }
+            catch { await p.loadPackage('micropip'); const mp = p.pyimport('micropip'); await mp.install(m.packages); }
+          }
+          for (const [name, content] of Object.entries(m.files || {})) p.FS.writeFile(name, content);
+          p.setStdout({ batched: (s) => { stdout += s + '\\n'; } });
+          p.setStderr({ batched: (s) => { stderr += s + '\\n'; } });
+          await p.loadPackagesFromImports(m.code);
+          result = await p.runPythonAsync(m.code);
+          if (result && typeof result.toJs === 'function') { try { result = result.toJs({ dict_converter: Object.fromEntries }); } catch { result = String(result); } }
+          if (result !== undefined && typeof result === 'object') { try { result = JSON.parse(JSON.stringify(result)); } catch { result = String(result); } }
+        } catch (err) {
+          error = String(err && err.message || err);
+          const mm = error.match(/(\\w+Error: .*)$/m); if (mm) error = mm[1] + ' (see stderr/traceback; fix the code and run again)';
+        }
+        post({ type: 'result', id: m.id, stdout: stdout.trimEnd(), stderr: stderr.trimEnd(), result, error });
+      };`;
   }
-  async function runPython(code, { packages = [], files = {}, timeout = 60000, onStatus } = {}) {
-    const py = await getPyodide(onStatus);
-    if (packages.length) {
-      onStatus && onStatus('Installing packages: ' + packages.join(', '));
-      try { await py.loadPackage(packages); }
-      catch { await py.loadPackage('micropip'); const mp = py.pyimport('micropip'); await mp.install(packages); }
-    }
-    for (const [name, content] of Object.entries(files)) py.FS.writeFile(name, content);
-    let stdout = '', stderr = '';
-    py.setStdout({ batched: (s) => { stdout += s + '\n'; } });
-    py.setStderr({ batched: (s) => { stderr += s + '\n'; } });
-    let result, error;
-    const timer = new Promise((_, rej) => setTimeout(() => rej(new Error('Timed out after ' + timeout + ' ms')), timeout));
-    try {
-      await py.loadPackagesFromImports(code);
-      result = await Promise.race([py.runPythonAsync(code), timer]);
-      if (result && typeof result.toJs === 'function') { try { result = result.toJs({ dict_converter: Object.fromEntries }); } catch { result = String(result); } }
-      if (result !== undefined && typeof result === 'object') { try { result = JSON.parse(JSON.stringify(result)); } catch { result = String(result); } }
-    } catch (e) { error = String(e && e.message || e); const m = error.match(/(\w+Error: .*)$/m); if (m) error = m[1] + ' (see stderr/traceback; fix the code and run again)'; }
-    return { stdout: stdout.trimEnd(), stderr: stderr.trimEnd(), result, error };
+  function pyStart() {
+    const url = URL.createObjectURL(new Blob([pyWorkerSource()], { type: 'application/javascript' }));
+    pyWorker = new Worker(url); URL.revokeObjectURL(url); pyReady = false;
+    pyWorker.onmessage = (e) => {
+      const m = e.data; const p = pyPending.get(m.id);
+      if (m.type === 'status') { if (m.text === 'Pyodide ready') pyReady = true; p?.onStatus?.(m.text); return; }
+      if (m.type === 'result' && p) { clearTimeout(p.timer); pyPending.delete(m.id); p.resolve({ stdout: m.stdout, stderr: m.stderr, result: m.result, error: m.error }); }
+    };
+    pyWorker.onerror = (e) => { for (const [id, p] of pyPending) { clearTimeout(p.timer); pyPending.delete(id); p.resolve({ error: 'Python worker error: ' + (e.message || 'unknown') + '. If Pyodide failed to load, check the network / Pyodide URL in Settings > Security & privacy.', stdout: '', stderr: '' }); } pyWorker = null; pyReady = false; };
   }
+  function pyKill(reason) {
+    if (!pyWorker) return;
+    try { pyWorker.terminate(); } catch { }
+    pyWorker = null; pyReady = false;
+    for (const [id, p] of pyPending) { clearTimeout(p.timer); pyPending.delete(id); p.resolve({ error: reason, stdout: '', stderr: '' }); }
+  }
+  function runPython(code, { packages = [], files = {}, timeout = 60000, onStatus } = {}) {
+    if (!H.settings.get('allowPyodideCdn')) return Promise.resolve({ error: 'Python is disabled: downloading the Pyodide runtime is turned off in Settings > Security & privacy. Ask the user to enable it, or use run_javascript instead.', stdout: '', stderr: '' });
+    if (!pyWorker) pyStart();
+    const id = ++pyId;
+    const url = H.settings.get('pyodideUrl'); const indexURL = url.replace(/pyodide\.js$/, '');
+    // first run includes the runtime download; give it extra time
+    const budget = timeout + (pyReady ? 0 : 120000);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => pyKill(`Python timed out after ${Math.round(timeout / 1000)} s and was terminated (infinite loop or very slow code?). The runtime will reload on the next run. Increase timeoutMs or simplify the code.`), budget);
+      pyPending.set(id, { resolve, timer, onStatus });
+      try { pyWorker.postMessage({ type: 'run', id, code, packages, files, url, indexURL }); }
+      catch (e) { clearTimeout(timer); pyPending.delete(id); resolve({ error: 'Could not start Python: ' + e.message, stdout: '', stderr: '' }); }
+    });
+  }
+  const getPyodide = () => { throw new Error('Pyodide runs in a worker; use runPython'); };
 
   /* ---- HTML preview in a sandboxed iframe / new tab ---- */
   function previewHTML(html, { title = 'Preview' } = {}) {
@@ -83,5 +117,5 @@ H.runtime = (() => {
     if (r.error) throw new Error(`${kind} expression failed: ${String(r.error).split('\n')[0]}`);
     return r.result;
   }
-  return { runJS, runPython, previewHTML, getPyodide, evalExpr, pyodideLoaded: () => !!pyodide };
+  return { runJS, runPython, previewHTML, getPyodide, evalExpr, pyodideLoaded: () => pyReady };
 })();
