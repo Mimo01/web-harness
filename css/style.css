@@ -401,3 +401,5 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 .msg.assistant.turn:hover .role .ts, .msg.assistant.turn:hover .role .actions { opacity: 1; }
 .msg.assistant.turn .role .stats, .msg.assistant.turn .role .ts { white-space: nowrap; }
 .msg.assistant.turn .role { flex-wrap: nowrap; overflow: hidden; }
+.msg.assistant.turn .role .stats { opacity: 0; transition: opacity .12s; }
+.msg.assistant.turn:hover .role .stats { opacity: 1; }
