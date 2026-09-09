@@ -10,13 +10,19 @@ H.tools = (() => {
   const obj = (props, required = []) => ({ type: 'object', properties: props, required });
   const ok = (data) => data;
 
-  async function fetchWithProxy(url, init = {}) {
+  const SENSITIVE = /^(authorization|cookie|x-api-key|api-key|private-token|x-auth-token|x-atlassian-token|proxy-authorization)$/i;
+  /* direct fetch; if the browser blocks it (CORS) and the user configured a proxy, retry through the proxy —
+     but never replay requests that carry credentials or a body, never after a timeout/abort, and only GET/HEAD */
+  async function fetchWithProxy(url, init = {}, { allowProxy = true } = {}) {
     const proxy = H.settings.get('corsProxy');
     try { return await fetch(url, init); }
     catch (e) {
-      if (proxy) {
+      const method = (init.method || 'GET').toUpperCase();
+      const hasSecret = Object.keys(init.headers || {}).some(h => SENSITIVE.test(h));
+      const eligible = allowProxy && proxy && e.name !== 'AbortError' && (method === 'GET' || method === 'HEAD') && init.body === undefined && !hasSecret;
+      if (eligible) {
         const p = proxy.includes('{url}') ? proxy.replace('{url}', encodeURIComponent(url)) : proxy + (proxy.endsWith('=') || proxy.endsWith('?') ? encodeURIComponent(url) : url);
-        return await fetch(p, init);
+        return await fetch(p, { method, headers: init.headers, signal: init.signal });
       }
       throw e;
     }
@@ -232,7 +238,7 @@ H.tools = (() => {
       const headers = { 'Accept': 'application/json, text/plain' };
       const hk = H.settings.get('searchKeyHeader'), hv = H.settings.get('searchKeyValue');
       if (hk && hv) headers[hk] = hv;
-      const r = await fetchWithProxy(url, { headers });
+      const r = await fetchWithProxy(url, { headers }, { allowProxy: !(hk && hv) });   // a keyed search API is never sent via the proxy
       if (!r.ok) throw new Error(`Search HTTP ${r.status}: ${H.clamp(await r.text(), 500)}`);
       const ct = r.headers.get('content-type') || '';
       let body = await r.text();
@@ -263,7 +269,7 @@ H.tools = (() => {
           const b = await H.bridge.fetch(url, { method, headers: init.headers, body: init.body });
           return ok({ status: b.status, ok: b.ok, via: 'browser session bridge', headers: b.headers || {}, body: H.tryJSON(b.body || '', H.clamp(b.body || '', 30000)) });
         }
-        const r = await fetchWithProxy(url, init);
+        const r = await fetchWithProxy(url, init, { allowProxy: false });   // arbitrary API calls are never replayed through a proxy
         const text = await r.text();
         const hdrs = {}; r.headers.forEach((v, k) => hdrs[k] = v);
         return ok({ status: r.status, ok: r.ok, headers: hdrs, body: H.tryJSON(text, H.clamp(text, 30000)) });

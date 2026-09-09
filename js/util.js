@@ -1,7 +1,7 @@
 /* Shared helpers */
 window.H = window.H || {};
 
-H.uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+H.uid = () => (crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join(''));
 H.now = () => Date.now();
 H.sleep = (ms) => new Promise(r => setTimeout(r, ms));
 H.esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

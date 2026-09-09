@@ -1,15 +1,21 @@
-/* Service worker: performs fetches on behalf of the harness page for allowed origins only. */
-const getAllowed = async () => (await chrome.storage.sync.get({ allowed: [] })).allowed;
+/* Service worker: performs fetches on behalf of the harness page.
+   Two allow-lists (options page): harness page origins that may use the extension, and API origins it may call. */
+const cfg = async () => chrome.storage.sync.get({ allowed: [], harness: [] });
+const originOf = (u) => { try { return new URL(u).origin; } catch { return ''; } };
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg && msg.type === 'open-options') { chrome.runtime.openOptionsPage(); return; }
-  if (!msg || msg.type !== 'harness-fetch') return;
+  if (!msg) return;
+  if (msg.type === 'open-options') { chrome.runtime.openOptionsPage(); return; }
   (async () => {
+    const { allowed, harness } = await cfg();
+    const senderOrigin = sender.origin || originOf(sender.url || '');
+    if (msg.type === 'is-harness-origin') { sendResponse({ ok: harness.includes(senderOrigin) && senderOrigin === msg.origin }); return; }
+    if (msg.type !== 'harness-fetch') return;
+    if (!harness.includes(senderOrigin)) { sendResponse({ error: 'NOT_HARNESS:' + senderOrigin }); return; }
     try {
-      const origin = new URL(msg.url).origin;
-      const allowed = await getAllowed();
+      const origin = originOf(msg.url);
       if (!allowed.includes(origin)) { sendResponse({ error: `NOT_ALLOWED:${origin}` }); return; }
       const init = { method: msg.method || 'GET', headers: msg.headers || {}, credentials: msg.credentials === 'omit' ? 'omit' : 'include', redirect: 'follow' };
       if (msg.body !== undefined && init.method !== 'GET' && init.method !== 'HEAD') init.body = msg.body;
@@ -19,5 +25,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ status: r.status, ok: r.ok, headers, body: await r.text() });
     } catch (e) { sendResponse({ error: String(e && e.message || e) }); }
   })();
-  return true; // async response
+  return true;
 });

@@ -325,7 +325,7 @@ H.plugins = (() => {
     let r;
     if (route.bridge) { const br = await H.bridge.fetch(route.url, { ...init, body: init.body }); r = { ok: br.ok, status: br.status, text: async () => br.body || '' }; }
     else if (route.ext) { const er = await H.ext.fetch(route.url, { ...init, body: init.body, credentials: p.auth?.type === 'none' ? 'include' : 'omit' }); r = { ok: er.ok, status: er.status, text: async () => er.body || '' }; }
-    else { try { r = await H.tools.fetchWithProxy(route.url, init); } catch (e) { throw new Error(corsHelp(p, e, route.url)); } }
+    else { try { r = await H.tools.fetchWithProxy(route.url, init, { allowProxy: false }); } catch (e) { throw new Error(corsHelp(p, e, route.url)); } }
     const text = await r.text();
     if (!r.ok) {
       const hint = { 400: 'the request was rejected as malformed: check parameter values and formats', 401: 'not authenticated: the credentials/session are missing or expired (re-run the plugin setup, or re-login in the bridged tab)', 403: 'authenticated but not permitted: the account lacks rights for this action or a CSRF check failed', 404: 'not found: check the key/id/path and the base URL (context path?)', 405: 'method not allowed at this URL', 409: 'conflict: the resource changed or already exists', 422: 'validation failed: see the response body for the field errors', 429: 'rate limited: wait and retry later', 500: 'server error: retry once, then report it to the user', 502: 'bad gateway', 503: 'service unavailable: retry later' }[r.status] || '';
@@ -347,7 +347,7 @@ H.plugins = (() => {
     let r;
     if (route.bridge) { const br = await H.bridge.fetch(route.url, { method: 'POST', headers, body }); r = { ok: br.ok, status: br.status, headers: { get: (k) => br.headers?.[k.toLowerCase()] || null }, text: async () => br.body || '' }; }
     else if (route.ext) { const er = await H.ext.fetch(route.url, { method: 'POST', headers, body }); r = { ok: er.ok, status: er.status, headers: { get: (k) => er.headers?.[k.toLowerCase()] || null }, text: async () => er.body || '' }; }
-    else { try { r = await H.tools.fetchWithProxy(route.url, { method: 'POST', headers, body }); } catch (e) { throw new Error(corsHelp(p, e, route.url)); } }
+    else { try { r = await H.tools.fetchWithProxy(route.url, { method: 'POST', headers, body }, { allowProxy: false }); } catch (e) { throw new Error(corsHelp(p, e, route.url)); } }
     if (!r.ok) throw new Error(`MCP ${p.name}: HTTP ${r.status} ${H.clamp(await r.text(), 800)}`);
     const sid = r.headers.get('Mcp-Session-Id') || sessionId;
     const ct = r.headers.get('content-type') || '';

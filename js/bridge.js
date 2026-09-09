@@ -70,7 +70,9 @@ H.bridge = (() => {
   function has(url) { try { return bridges.has(new URL(url).origin); } catch { return false; } }
 
   /** fetch through the bridge of url's origin; resolves to { status, ok, headers, body } */
+  const usable = () => myOrigin !== 'null';
   async function fetch(url, init = {}) {
+    if (!usable()) throw new Error('The browser session bridge is disabled when the harness is opened from a file (origin "null"): responses could not be delivered to this page securely. Host the harness on an http(s) address to use the bridge.');
     const origin = new URL(url).origin;
     const had = bridges.has(origin);
     const x = await alive(origin);
@@ -94,8 +96,9 @@ H.bridge = (() => {
   function bookmarklet() {
     // a file:// harness cannot be opened by a web page (browsers block file: URLs), and its path differs per machine:
     // make the bookmark path-free so it works everywhere and relies on the linked tab only
-    const harnessUrl = myOrigin === 'null' ? '' : location.href.split('#')[0];
-    const src = `(()=>{const H=${JSON.stringify(harnessUrl)},HO=${JSON.stringify(myOrigin)},T=HO==='null'?'*':HO,O=(location.origin&&location.origin!=='null')?location.origin:new URL(document.baseURI).origin;
+    if (myOrigin === 'null') return 'javascript:alert("The LLM Harness bridge needs the harness to be served from an http(s) address, not opened from a file.")';
+    const harnessUrl = location.href.split('#')[0];
+    const src = `(()=>{const H=${JSON.stringify(harnessUrl)},HO=${JSON.stringify(myOrigin)},T=HO,O=(location.origin&&location.origin!=='null')?location.origin:new URL(document.baseURI).origin;
 const st=window.__llmBridge||(window.__llmBridge={});
 const alive=w=>{try{return w&&!w.closed}catch(e){return false}};
 if(!alive(st.w)){
@@ -108,9 +111,9 @@ if(!alive(st.w)){
   document.body.append(fr);st.w=fr.contentWindow;st.fr=fr;st.mode='panel';}
  st.T=T;st.ack=0;
  if(!st.listening){st.listening=1;addEventListener('message',async e=>{if(e.source!==st.w)return;const m=e.data;if(!m||typeof m!=='object')return;
-  if(m.type==='llm-bridge-ping'){try{st.w.postMessage({type:'llm-bridge-pong',id:m.id},st.T||'*')}catch(err){}return;}
-  if(m.type==='llm-bridge-ack'){if(!st.ack){const eo=(e.origin&&/^https?:/.test(e.origin))?e.origin:'null';if(HO!=='null'&&eo!=='null'&&eo!==HO){if(!confirm('LLM Harness bridge: this bookmark was created for '+HO+' but the linked harness tab is at '+e.origin+'. Allow it to use your '+location.host+' session?')){return;}}st.T=eo==='null'?'*':eo;st.ack=1;st.harness=(eo==='null'?'a file:// page':eo);paint();}return;}
-  if(m.type!=='llm-bridge-fetch'||!st.ack||(st.T!=='*'&&e.origin!==st.T))return;
+  if(m.type==='llm-bridge-ping'){try{st.w.postMessage({type:'llm-bridge-pong',id:m.id},st.T||HO)}catch(err){}return;}
+  if(m.type==='llm-bridge-ack'){if(!st.ack){const eo=(e.origin&&/^https?:/.test(e.origin))?e.origin:'null';if(eo!==HO){if(!confirm('LLM Harness bridge: this bookmark was created for '+HO+' but the linked harness tab is at '+e.origin+'. Allow it to use your '+location.host+' session?')){return;}}st.T=eo;st.ack=1;st.harness=eo;paint();}return;}
+  if(m.type!=='llm-bridge-fetch'||!st.ack||e.origin!==st.T)return;
   const r={type:'llm-bridge-result',id:m.id};st.n=(st.n||0)+1;st.last='received '+(m.method||'GET')+' '+m.url.replace(O,'')+' \\u2026';paint();
   try{if(!(m.url+'/').startsWith(O+'/'))throw new Error('bridge only allows '+O);
    const h=Object.assign({},m.headers||{});const mt=document.querySelector('meta[name=csrf-token]');
@@ -119,8 +122,8 @@ if(!alive(st.w)){
    r.status=res.status;r.ok=res.ok;r.headers={};res.headers.forEach((v,k)=>r.headers[k]=v);r.body=await res.text();st.last=(m.method||'GET')+' '+m.url.replace(O,'')+' \\u2192 '+res.status;}
   catch(err){r.error=String(err&&err.message||err);st.last=(m.method||'GET')+' '+m.url.replace(O,'')+' \\u2192 ERROR '+r.error;st.err=(st.err||0)+1;console.warn('[LLM bridge]',r.error,m)}
   try{st.w.postMessage(r,st.T);}catch(err){console.warn('[LLM bridge] could not post result',err)}paint();});}
- clearInterval(st.t);const hello=()=>{try{st.w.postMessage({type:'llm-bridge-hello',origin:O,mode:st.mode},st.ack?st.T:'*')}catch(e){}};st.t=setInterval(()=>{hello();paint();},10000);setTimeout(hello,300);st.t0=Date.now();
-if(!st.byeHooked){st.byeHooked=1;const bye=(r)=>{try{st.w.postMessage({type:'llm-bridge-bye',reason:r},st.T||'*')}catch(e){}};addEventListener('pagehide',()=>bye('navigation'));addEventListener('beforeunload',()=>bye('navigation'));document.addEventListener('visibilitychange',()=>{if(!document.hidden)hello();});}
+ clearInterval(st.t);const hello=()=>{try{st.w.postMessage({type:'llm-bridge-hello',origin:O,mode:st.mode},HO)}catch(e){}};st.t=setInterval(()=>{hello();paint();},10000);setTimeout(hello,300);st.t0=Date.now();
+if(!st.byeHooked){st.byeHooked=1;const bye=(r)=>{try{st.w.postMessage({type:'llm-bridge-bye',reason:r},st.T||HO)}catch(e){}};addEventListener('pagehide',()=>bye('navigation'));addEventListener('beforeunload',()=>bye('navigation'));document.addEventListener('visibilitychange',()=>{if(!document.hidden)hello();});}
 }else{try{st.w.focus()}catch(e){}}
 let b=document.getElementById('__llmBridgeBar');
 if(!b){b=document.createElement('div');b.id='__llmBridgeBar';b.style.cssText='position:fixed;top:0;left:0;right:0;box-sizing:border-box;z-index:2147483647;background:#6d8cff;color:#fff;font:13px/1.4 sans-serif;padding:6px 12px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.3)';document.body.append(b);}
@@ -141,5 +144,5 @@ if(!b.querySelector('[data-x]')){const x=document.createElement('span');x.datase
   /** minimal end-to-end check: GET the site root through the bridge */
   async function ping(origin) { const r = await fetch(origin + '/', { method: 'GET', headers: {}, timeout: 15000 }); return { status: r.status, ok: r.ok, bytes: (r.body || '').length }; }
   function diagnostics() { return ['harness: ' + location.href.split('#')[0], 'origin: ' + myOrigin, 'bridges: ' + JSON.stringify(list()), 'pending: ' + pending.size, 'log:', ...log].join('\n'); }
-  return { fetch, ping, has, list, health, bookmarklet, openSite, diagnostics, embedded: () => window.top !== window || location.hash.includes('embedded') };
+  return { fetch, ping, has, list, health, bookmarklet, openSite, diagnostics, usable, embedded: () => window.top !== window || location.hash.includes('embedded') };
 })();

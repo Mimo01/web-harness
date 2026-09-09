@@ -18,7 +18,7 @@ H.ext = (() => {
     const id = H.uid();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { pending.delete(id); reject(new Error('Extension request timed out')); }, (init.timeout || 60000) + 2000);
-      pending.set(id, { resolve: (r) => { if (r.error) { if (r.error.startsWith('NOT_ALLOWED:')) reject(new Error(`${r.error.slice(12)} is not in the extension's allowed sites. Open the extension options (puzzle icon → Web LLM Harness Connector, or the "Allow this site" button in the plugin setup) and add it.`)); else reject(new Error('Extension: ' + r.error)); } else resolve(r); }, timer });
+      pending.set(id, { resolve: (r) => { if (r.error) { if (r.error.startsWith('NOT_ALLOWED:')) reject(new Error(`${r.error.slice(12)} is not in the extension's allowed APIs. Open the extension options (puzzle icon → Web LLM Harness Connector) and add it under "APIs it may call".`)); else if (r.error.startsWith('NOT_HARNESS:')) reject(new Error(`This page (${r.error.slice(12)}) is not registered as a harness origin in the extension options. Add it under "Harness page".`)); else reject(new Error('Extension: ' + r.error)); } else resolve(r); }, timer });
       window.postMessage({ type: 'llm-ext-fetch', id, url, method: init.method || 'GET', headers: init.headers || {}, body: init.body, credentials: init.credentials, timeout: init.timeout }, '*');
     });
   }

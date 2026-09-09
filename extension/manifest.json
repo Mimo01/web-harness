@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Web LLM Harness Connector",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Lets the Web LLM Harness page call REST APIs (Jira, GitLab, internal tools) that block browser pages. Only for sites you allow.",
   "permissions": ["storage"],
   "host_permissions": ["*://*/*"],

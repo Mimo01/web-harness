@@ -104,10 +104,8 @@ H.runtime = (() => {
 
   /* ---- HTML preview in a sandboxed iframe / new tab ---- */
   function previewHTML(html, { title = 'Preview' } = {}) {
-    const blob = new Blob([html], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    H.bus.emit('preview', { url, title, html });
-    return url;
+    H.bus.emit('preview', { title, html });   // rendered via a sandboxed srcdoc iframe (unique origin), never a same-origin blob URL
+    return 'preview';
   }
 
   /* evaluate a plugin-manifest expression in the Worker sandbox (no access to the page, storage or secrets) */

@@ -6,7 +6,12 @@ const [ver, notes, ...flags] = process.argv.slice(2);
 if (!/^\d+\.\d+\.\d+$/.test(ver || '')) { console.error('usage: node dev/release.js <x.y.z> "<notes>" [--push]'); process.exit(1); }
 const root = path.resolve(__dirname, '..');
 const idx = path.join(root, 'index.html'); const vj = path.join(root, 'version.json');
-fs.writeFileSync(idx, fs.readFileSync(idx, 'utf8').replace(/window\.APP_VERSION = '[^']*'/, `window.APP_VERSION = '${ver}'`));
+let html = fs.readFileSync(idx, 'utf8').replace(/window\.APP_VERSION = '[^']*'/, `window.APP_VERSION = '${ver}'`);
+// the CSP allows the two inline scripts by hash; the version script changes each release, so recompute
+const crypto = require('crypto');
+const hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => "'sha256-" + crypto.createHash('sha256').update(m[1]).digest('base64') + "'").join(' ');
+html = html.replace(/(script-src [^;]*?)('sha256-[^;]*)?;/, (all, pre) => `${pre.replace(/\s+'sha256-.*$/, '')} ${hashes};`);
+fs.writeFileSync(idx, html);
 const v = JSON.parse(fs.readFileSync(vj, 'utf8')); v.version = ver; v.date = new Date().toISOString().slice(0, 10); if (notes) v.notes = notes;
 fs.writeFileSync(vj, JSON.stringify(v, null, 2) + '\n');
 console.log(`version ${ver} written to index.html and version.json`);

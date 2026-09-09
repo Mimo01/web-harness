@@ -9,10 +9,10 @@ H.ui = (() => {
   function md(text) {
     if (!text) return '';
     let html;
-    if (window.marked) { try { html = marked.parse(text, { breaks: true, gfm: true }); } catch { html = H.esc(text); } }
-    else html = '<p>' + H.esc(text).replace(/\n/g, '<br>') + '</p>';
-    if (window.DOMPurify) html = DOMPurify.sanitize(html, { ADD_ATTR: ['target'] });
-    return html;
+    // fail closed: without the sanitizer, never insert model-authored HTML; show escaped text instead
+    if (!window.DOMPurify || !window.marked) return '<p>' + H.esc(text).replace(/\n/g, '<br>') + '</p>';
+    try { html = marked.parse(text, { breaks: true, gfm: true }); } catch { return '<p>' + H.esc(text).replace(/\n/g, '<br>') + '</p>'; }
+    return DOMPurify.sanitize(html, { ADD_ATTR: ['target'], FORBID_TAGS: ['style', 'form', 'input', 'button'], FORBID_ATTR: ['style', 'onerror', 'onload'] });
   }
   function enhanceCode(root, { highlight = true } = {}) {
     root.querySelectorAll('pre').forEach(pre => {
@@ -630,13 +630,14 @@ H.ui = (() => {
           el('ol', { class: 'help-list' }, [
             el('li', {}, ['Open ', el('code', {}, ['chrome://extensions']), ' (Edge: ', el('code', {}, ['edge://extensions']), '), switch on ', el('b', {}, ['Developer mode']), ' (top right).']),
             el('li', {}, ['Click ', el('b', {}, ['Load unpacked']), ' and choose the ', el('code', {}, ['extension']), ' folder of the harness.', !/^https?:/.test(location.origin) ? ' Then open the extension\'s Details and enable "Allow access to file URLs" (the harness runs from a file).' : '']),
-            el('li', {}, ['Reload this page. Click the extension icon (puzzle piece) → Web LLM Harness Connector and add ', el('code', {}, [target]), ' to the allowed sites. ', el('button', { class: 'btn sm', onclick: () => { H.ext.openOptions(); } }, ['Open allowed sites'])]),
+            el('li', {}, ['Click the extension icon (puzzle piece) → Web LLM Harness Connector. Under "Harness page" add ', el('code', {}, [/^https?:/.test(location.origin) ? location.origin : 'file://']), '; under "APIs it may call" add ', el('code', {}, [target]), '. Then reload this page. ', el('button', { class: 'btn sm', onclick: () => { H.ext.openOptions(); } }, ['Open options'])]),
           ]),
           status,
           el('p', { class: 'help' }, ['If your company blocks Developer mode in the browser, fall back to the bookmark bridge.']),
         );
       } else if (routeSel.value === 'bridge') {
         const target = (() => { try { return new URL(url.value.trim()).origin; } catch { return '(enter the URL above)'; } })();
+        if (!H.bridge.usable()) { routeDetail.append(el('div', { class: 'note' }, ['The bridge is not available when the harness is opened from a file: the page has no origin the Jira tab could safely send responses to. Put the folder on any http(s) address (internal web server, SharePoint, GitHub Pages) and open it from there.'])); return; }
         const status = el('div', { class: 'setup-result' });
         const upd = () => { const ok = H.bridge.list().find(b => b.origin === target); status.className = 'setup-result ' + (ok ? 'ok' : ''); status.textContent = ok ? `✓ Bridge connected to ${target}` + (ok.mode === 'opener' ? ' (linked tab' : ok.mode ? ` (${ok.mode}` : ' (') + (ok.tabs > 1 ? `, ${ok.tabs} tabs)` : ')') : `Waiting for a bridge from ${target}…\nIf the ${target.replace(/^https?:\/\//, '')} tab already shows a blue bar but nothing happens here, that bar connected to a different harness window (it says "NEW harness window" or "PANEL MODE"). Use the Open button in step 2 below and click the bookmark on the tab it opens: that tab is linked to this one.`; };
         upd(); const off = H.bus.on('bridge', upd); const iv = setInterval(() => { if (!document.body.contains(status)) { off(); off2(); clearInterval(iv); } else upd(); }, 2000);
@@ -858,9 +859,9 @@ H.ui = (() => {
   }
 
   /* ---------------- preview panel ---------------- */
-  function showPreview({ url, title }) {
+  function showPreview({ url, title, html }) {
     const p = $('#preview'); p.classList.remove('hidden');
-    p.querySelector('.ptitle').textContent = title; p.querySelector('iframe').src = url; p.dataset.url = url;
+    p.querySelector('.ptitle').textContent = title; p.querySelector('iframe').srcdoc = html; p.dataset.html = html;
   }
   function effectiveTheme() { const t = H.settings.get('theme'); return t === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : t; }
   function applyTheme() {
@@ -949,7 +950,12 @@ H.ui = (() => {
     $('#bug-btn').onclick = bugReport;
     $('#chat-title').onclick = () => { const c = H.agent.current(); if (!c) return; const t = prompt('Chat title', c.title); if (t && t.trim()) { H.agent.rename(t.trim()).then(() => { updateTitle(); renderChatList(); }); } };
     $('#preview-close').onclick = () => $('#preview').classList.add('hidden');
-    $('#preview-open').onclick = () => window.open($('#preview').dataset.url, '_blank');
+    $('#preview-open').onclick = () => {   // never open the blob URL itself: it would run model HTML on this origin with access to storage
+      const html = $('#preview').dataset.html || ''; const title = $('#preview .ptitle').textContent || 'Preview';
+      const w = window.open('', '_blank'); if (!w) return H.toast('Popup blocked by the browser.', 'warn');
+      w.document.write(`<!doctype html><meta charset="utf-8"><title>${H.esc(title)}</title><style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%}</style><iframe sandbox="allow-scripts allow-forms allow-modals allow-popups" srcdoc="${html.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></iframe>`);
+      w.document.close();
+    };
     $('#export-chat').onclick = () => { const c = H.agent.current(); if (!c) return; const text = c.messages.map(m => m.role === 'tool' ? `### tool:${m.name}\n\`\`\`\n${H.clamp(m.content, 4000)}\n\`\`\`` : `### ${m.role}\n${m.display || (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))}${m.tool_calls?.length ? '\n\n' + m.tool_calls.map(t => `→ ${t.function.name}(${t.function.arguments})`).join('\n') : ''}`).join('\n\n'); H.download((c.title || 'chat').replace(/[^\w-]+/g, '_') + '.md', `# ${c.title}\n\n${text}`, 'text/markdown'); };
     $('#messages').addEventListener('scroll', () => { const b = $('#messages'); stick = b.scrollHeight - b.scrollTop - b.clientHeight < 80; updateScrollBtn(); });
     $('#scroll-bottom').onclick = () => { stick = true; scrollBottom(true); };
