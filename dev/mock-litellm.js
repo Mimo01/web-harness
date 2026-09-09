@@ -23,6 +23,10 @@ http.createServer((req, res) => {
       chunk({ role: 'assistant', content: '' });
       chunk({ tool_calls: [{ index: 0, id: 'call_' + Date.now(), type: 'function', function: { name: 'calculate', arguments: '{"expression":"1+1"}' } }] });
       chunk({}, 'tool_calls');
+    } else if (last.role === 'user' && /question/i.test(last.content) && toolNames.includes('ask_user')) {
+      chunk({ role: 'assistant', content: 'Let me check with you. ' });
+      chunk({ tool_calls: [{ index: 0, id: 'call_q', type: 'function', function: { name: 'ask_user', arguments: JSON.stringify({ question: 'Which colour do you prefer?', choices: ['red', 'blue'] }) } }] });
+      chunk({}, 'tool_calls');
     } else if (last.role === 'user' && /calc/i.test(last.content) && toolNames.includes('calculate')) {
       chunk({ role: 'assistant', content: 'Let me compute that. ' });
       chunk({ tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'calculate', arguments: '{"expr' } }] });

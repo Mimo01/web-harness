@@ -357,16 +357,12 @@ H.tools = (() => {
   /* ===================== USER INTERACTION & MISC ===================== */
   def({
     name: 'ask_user', group: 'Interaction', risk: 'safe',
-    description: 'Ask the user a clarifying question and wait for their answer. Optionally offer choices.',
+    description: 'Ask the user a clarifying question and wait for their answer. The question appears in the chat; the user answers by clicking a choice or typing in the message box. Optionally offer choices.',
     parameters: obj({ question: str('Question to ask'), choices: { type: 'array', items: { type: 'string' }, description: 'Optional list of choices' } }, ['question']),
-    run: ({ question, choices }) => new Promise((res) => {
-      const ov = H.el('div', { class: 'modal-overlay' });
-      const inp = H.el('textarea', { rows: 3, placeholder: 'Your answer…' });
-      const box = H.el('div', { class: 'modal' }, [H.el('h3', {}, ['Question from assistant']), H.el('p', {}, [question])]);
-      if (choices && choices.length) box.append(H.el('div', { class: 'row gap wrap' }, choices.map(c => H.el('button', { class: 'btn', onclick: () => { ov.remove(); res({ answer: c }); } }, [c]))));
-      box.append(inp, H.el('div', { class: 'row gap' }, [H.el('button', { class: 'btn primary', onclick: () => { ov.remove(); res({ answer: inp.value }); } }, ['Send']), H.el('button', { class: 'btn', onclick: () => { ov.remove(); res({ answer: null, cancelled: true }); } }, ['Cancel'])]));
-      ov.append(box); document.body.append(ov); inp.focus();
-    }),
+    run: ({ question, choices }, ctx) => {
+      if (!ctx?.toolMsg) return Promise.resolve({ answer: null, cancelled: true, note: 'ask_user is only available in the main chat.' });
+      return H.agent.askUser(ctx.chatId, ctx.toolMsg, question, choices, ctx.signal);
+    },
   });
   def({
     name: 'notify_user', rerun: 'Show again', group: 'Interaction', risk: 'safe',

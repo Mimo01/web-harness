@@ -199,7 +199,28 @@ H.ui = (() => {
       ]));
     }
   }
+  function questionCard(m) {
+    const q = m.meta.question; const chatId = H.agent.current()?.id;
+    if (q.answered !== undefined) return el('div', { class: 'ask-card answered' }, [el('div', { class: 'ask-q' }, [H.icon('bolt'), q.text]), el('div', { class: 'ask-a' }, [q.answered?.cancelled ? 'No answer (skipped)' : 'Answer: ' + (q.answered?.answer ?? '')])]);
+    const input = el('textarea', { rows: 2, placeholder: 'Type your answer here or in the message box below…' });
+    const send = () => { if (input.value.trim()) H.agent.answerQuestion(chatId, input.value.trim()); };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+    return el('div', { class: 'ask-card' }, [
+      el('div', { class: 'ask-q' }, [H.icon('bolt'), el('b', {}, ['The assistant asks: ']), q.text]),
+      q.choices.length ? el('div', { class: 'row gap wrap', style: 'margin:8px 0' }, q.choices.map(c => el('button', { class: 'btn sm', onclick: () => H.agent.answerQuestion(chatId, c) }, [c]))) : null,
+      input,
+      el('div', { class: 'row gap', style: 'margin-top:6px' }, [el('button', { class: 'btn sm primary', onclick: send }, ['Answer']), el('button', { class: 'btn sm ghost', onclick: () => H.agent.answerQuestion(chatId, '(The user chose not to answer. Proceed with your best judgement or explain what you need.)') }, ['Skip'])]),
+    ]);
+  }
   function updateTool(node, m) {
+    if (m.meta?.question) {   // ask_user: the card IS the question
+      node.classList.add('ask'); node.open = true;
+      const st = node.querySelector('.tstate'); st.textContent = m.meta.question.answered === undefined ? 'waiting for you' : 'answered';
+      node.classList.toggle('running', m.meta.question.answered === undefined); node.classList.toggle('ok', m.meta.question.answered !== undefined);
+      node.querySelector('.targs').textContent = m.meta.question.text;
+      const body = node.querySelector('.tbody'); body.innerHTML = ''; body.append(questionCard(m));
+      return;
+    }
     const st = node.querySelector('.tstate'); const args = node.querySelector('.targs');
     const a = m.meta?.args; args.textContent = typeof a === 'object' ? JSON.stringify(a) : String(a || '');
     node.classList.remove('running', 'ok', 'error', 'denied');
@@ -310,6 +331,7 @@ H.ui = (() => {
   async function submit() {
     const t = $('#input'); const text = t.value.trim();
     if (!text && !attachments.length) return;
+    if (H.agent.pendingQuestion()) { H.agent.answerQuestion(H.agent.current().id, text); t.value = ''; autoresize(); return; }   // answer, not a new message
     if (H.agent.isRunning()) return;
     if (!H.settings.apiKey() && !confirm('No API key configured. Send anyway?')) { openSettings('connection'); return; }
     const att = attachments; attachments = []; renderAttachments();
@@ -372,6 +394,8 @@ H.ui = (() => {
   function updateModeUI() {
     const mode = H.perms.effectiveMode(); const sel = $('#mode-select'); sel.value = H.settings.get('chatMode');
     document.body.dataset.mode = mode;
+    if (H.agent.pendingQuestion()) { $('#input').placeholder = 'Answer the assistant\'s question…'; $('#send-btn').classList.remove('hidden'); $('#stop-btn').classList.add('hidden'); document.body.classList.add('asking'); return; }
+    document.body.classList.remove('asking');
     $('#mode-wrap').title = { default: 'Default: read-only tools run, writes ask you first', auto: 'Allow all: every tool runs without asking', plan: 'Plan: read-only investigation, then a plan you can execute' }[mode] || 'Chat mode';
     $('#input').placeholder = mode === 'plan' ? 'Plan mode: describe what you want planned…' : 'Message… type / for skills, drop files to attach';
   }
@@ -738,7 +762,7 @@ H.ui = (() => {
       ...(s.corsProxy ? [['CORS proxy', s.corsProxy, 'web_fetch / web_search / plugin calls that fail directly (third party unless self-hosted)']] : []),
       ...(s.jinaFallback ? [['r.jina.ai', 'https://r.jina.ai', 'third-party reader: receives the URLs the model fetches']] : []),
       ...(s.searchTemplate ? [['Search provider', s.searchTemplate, 'receives search queries']] : []),
-      ...(s.checkUpdates ? [['GitHub (update check)', H.ABOUT.versionUrl, 'a small version file fetched on startup and every 6 h; no data is sent']] : []),
+      ...(s.checkUpdates ? [['GitHub (update check)', H.ABOUT.versionUrl, 'a small version file fetched on startup and every hour; no data is sent']] : []),
       ['cdnjs.cloudflare.com', 'https://cdnjs.cloudflare.com', 'UI libraries (marked, DOMPurify, highlight.js) at startup, and pdf.js / JSZip / SheetJS only when you attach a PDF, Office or spreadsheet file; files are parsed locally, nothing is uploaded'],
       ['fonts.googleapis.com', 'https://fonts.googleapis.com', 'Inter / JetBrains Mono fonts loaded at startup; no data is sent'],
       ...(s.allowPyodideCdn ? [['Pyodide (jsDelivr)', s.pyodideUrl, 'downloaded only when Python is first used (code and data stay in the browser)']] : []),
@@ -769,7 +793,7 @@ H.ui = (() => {
         el('li', {}, ['Markdown from the model is sanitized with DOMPurify before rendering.']),
         el('li', {}, ['Tool output is treated as untrusted; the system prompt tells the model not to follow instructions embedded in fetched content. Review permission prompts for http_request and plugin write calls, which could exfiltrate data if the model is manipulated.']),
       ])]),
-      sec('Update checks', null, [check('Check GitHub for a newer version (startup and every 6 hours)', 'checkUpdates', 'only a public version file is fetched; no data about you is sent')]),
+      sec('Update checks', null, [check('Check GitHub for a newer version (startup and every hour)', 'checkUpdates', 'only a public version file is fetched; no data about you is sent')]),
       sec('Python runtime', null, [check('Allow downloading Pyodide from the configured URL when Python is first used', 'allowPyodideCdn'), field('Pyodide URL', 'pyodideUrl')]),
     ]);
   }
@@ -792,7 +816,7 @@ H.ui = (() => {
       sec('Updates', null, [el('div', { class: 'row gap wrap' }, [
         el('button', { class: 'btn', onclick: () => H.update.check({ manual: true }) }, [H.icon('refresh'), 'Check for updates']),
         el('a', { class: 'btn ghost', href: a.repoUrl, target: '_blank', rel: 'noopener' }, [H.icon('external'), 'GitHub repository']),
-      ]), el('p', { class: 'help', style: 'margin-top:8px' }, ['Checks fetch a small version file from GitHub on startup and every 6 hours; nothing else is sent. Turn it off in Security & privacy. Updating = download the newer folder and replace this one; your data stays in the browser.'])]),
+      ]), el('p', { class: 'help', style: 'margin-top:8px' }, ['Checks fetch a small version file from GitHub on startup and every hour; nothing else is sent. Turn it off in Security & privacy. Updating = download the newer folder and replace this one; your data stays in the browser.'])]),
       sec('What it is', null, [el('p', { class: 'sec-desc', style: 'margin:0' }, ['A browser-only harness for LLMs: chats, tools, skills, plugins, plan mode and a browser-session bridge, talking straight to your LiteLLM proxy. No installation, no backend, nothing leaves your browser except the requests you configure.'])]),
       sec('Disclaimer', null, [el('div', { class: 'note' }, [`This software is provided "as is", without warranty of any kind. ${a.author} is not responsible for anything the assistant does with your accounts, files, tickets, repositories or systems, nor for any data loss, costs, or damage arising from its use. You are the operator: review permission prompts, use Plan mode for anything sensitive, and keep your credentials to yourself. Use at your own risk.`])]),
       sec('Found it useful?', null, [beer]),
@@ -892,11 +916,12 @@ H.ui = (() => {
     H.bus.on('run-state', () => renderChatList());
     H.bus.on('message-added', onMessageAdded);
     H.bus.on('message-updated', onMessageUpdated);
-    const syncRunButtons = () => { const r = H.agent.isRunning(); $('#send-btn').classList.toggle('hidden', r); $('#stop-btn').classList.toggle('hidden', !r); };
+    const syncRunButtons = () => { const r = H.agent.isRunning() && !H.agent.pendingQuestion(); $('#send-btn').classList.toggle('hidden', r); $('#stop-btn').classList.toggle('hidden', !r); updateModeUI(); };
     H.bus.on('run-state', () => { syncRunButtons(); renderChatList(); });
-    H.bus.on('chat-loaded', syncRunButtons);
+    H.bus.on('chat-loaded', () => { syncRunButtons(); updateModeUI(); });
     H.bus.on('usage', (c) => { if (!c || c === H.agent.current()) updateContextMeter(); });
     H.bus.on('mode', updateModeUI);
+    H.bus.on('question', (chatId, q) => { if (chatId === H.agent.current()?.id) { updateModeUI(); syncRunButtons(); if (q) { $('#input').focus(); if (document.hidden) { try { if (Notification.permission === 'granted') new Notification('The assistant has a question', { body: q.question }); } catch { } } } } });
     H.bus.on('bridge', updateConnPill); H.bus.on('plugins', updateConnPill); H.bus.on('ext', updateConnPill); H.bus.on('settings', updateConnPill);
     setInterval(async () => { if (H.plugins.list().some(p => p.enabled && p.route?.type === 'bridge')) { await H.bridge.health(); } updateConnPill(); }, 20000);
     updateConnPill();

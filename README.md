@@ -36,7 +36,7 @@ http://localhost:8765.
 
 ## 🔄 Update
 
-The app checks this repository on startup and every 6 hours. When a newer version exists you get a small notice
+The app checks this repository on startup and every hour. When a newer version exists you get a small notice
 with a **Download** button (Settings → About → *Check for updates* does it on demand).
 
 **To update**: download the zip again, unzip it **over your existing folder** (replace all files), reload the tab.
@@ -86,7 +86,7 @@ Multiple persisted conversations, streaming responses, markdown + syntax highlig
 | Web | `web_fetch` (direct, HTML → text), `web_search` (needs a configured provider), `http_request` (call any API), `open_url` |
 | Data | `json_query`, `regex_extract`, `csv_parse`, `text_stats`, `base64`, `hash_text` |
 | Memory | `memory_save`, `memory_get`, `memory_list`, `memory_delete` (persistent across chats) |
-| Interaction | `ask_user`, `notify_user`, `clipboard_write` |
+| Interaction | `ask_user` (the question appears in the chat; answer with a click or by typing in the message box), `notify_user`, `clipboard_write` |
 | Utility | `get_datetime`, `sleep`, `browser_info` |
 | Skills | `use_skill`, `list_skills` |
 | Agent | `run_subagent` (fresh context, same tools) |

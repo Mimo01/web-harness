@@ -1,6 +1,6 @@
 {
-  "version": "1.9.1",
+  "version": "1.10.0",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Performance: smooth streaming on slow machines, lighter sidebar and storage writes."
+  "notes": "Questions from the model appear inside the chat (answer by clicking or typing); update check is hourly."
 }

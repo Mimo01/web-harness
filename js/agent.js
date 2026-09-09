@@ -4,6 +4,18 @@ H.agent = (() => {
   let chat = null;
   const runs = new Map();    // chatId -> { abort }   (a chat keeps running in the background when you switch away)
   const deleted = new Set(); // chat ids removed by the user: never write them back
+  const questions = new Map(); // chatId -> { question, choices, toolMsg, resolve }   (ask_user waits for an answer from the chat UI)
+  function askUser(chatId, toolMsg, question, choices, signal) {
+    return new Promise((resolve) => {
+      const q = { question, choices: choices || [], toolMsg, resolve: (answer) => { questions.delete(chatId); toolMsg.meta.question.answered = answer; H.bus.emit('question', chatId, null); H.bus.emit('message-updated', toolMsg, chatId); resolve(answer); } };
+      toolMsg.meta.question = { text: question, choices: choices || [], answered: undefined };
+      questions.set(chatId, q);
+      H.bus.emit('question', chatId, q); H.bus.emit('message-updated', toolMsg, chatId);
+      signal?.addEventListener('abort', () => { if (questions.get(chatId) === q) q.resolve({ answer: null, cancelled: true, note: 'The run was stopped before the user answered.' }); }, { once: true });
+    });
+  }
+  function answerQuestion(chatId, text) { const q = questions.get(chatId); if (!q) return false; q.resolve({ answer: text }); return true; }
+  const pendingQuestion = (chatId) => questions.get(chatId || chat?.id) || null;
   const live = new Map();    // chatId -> chat object currently in memory (so switching back shows live updates)
 
   const newChat = () => ({ id: H.uid(), title: 'New chat', messages: [], created: Date.now(), updated: Date.now(), usage: { prompt: 0, completion: 0, cost: 0, requests: 0 } });
@@ -80,6 +92,7 @@ When you have enough information, write a concrete, numbered implementation plan
     }
   }
 
+  const chatIdOf = (messages) => { for (const c of live.values()) if (c.messages === messages) return c.id; return chat?.id; };
   async function loop(messages, { onEvent, signal, maxIterations, onUsage, mode }) {
     const tools = H.tools.openaiSpecs();
     const model = H.settings.get('model');
@@ -125,7 +138,7 @@ When you have enough information, write a concrete, numbered implementation plan
         const toolMsg = { role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: '', ts: Date.now(), meta: { running: true, args: H.parseArgs(tc.function.arguments).value ?? tc.function.arguments } };
         messages.push(toolMsg);
         onEvent?.('tool-start', toolMsg, tc);
-        const ctx = { signal, finishReason: res.finish_reason, images, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
+        const ctx = { signal, finishReason: res.finish_reason, images, chatId: chatIdOf(messages), toolMsg, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
         const sig = tc.function.name + '|' + (tc.function.arguments || '').trim();
         const prev = seen.get(sig);
         let out;
@@ -162,6 +175,7 @@ When you have enough information, write a concrete, numbered implementation plan
   /* ---------- public: main chat ---------- */
   async function send(text, attachments = [], opts = {}) {
     if (!chat) chat = newChat();
+    if (questions.has(chat.id)) { answerQuestion(chat.id, text); return; }   // the model is waiting for this
     if (runs.has(chat.id)) return;
     const slash = H.skills.expandSlash(text);
     const userMsg = { role: 'user', content: slash ? slash.content : text, display: slash ? slash.display : (opts.display || undefined), ts: Date.now(), attachments: attachments.map(a => ({ name: a.name, size: a.size, kind: a.kind, chars: a.kind === 'text' ? (a.content || '').length : undefined, empty: a.kind === 'text' && !(a.content || '').trim(), note: a.note })), meta: opts.meta };
@@ -269,5 +283,5 @@ When you have enough information, write a concrete, numbered implementation plan
     return text || '(sub-agent produced no final text)';
   }
 
-  return { send, stop, run, regenerate, load, reset, remove, rename, deleteMessage, runOnce, executePlan, current: () => chat, isRunning, runningIds, systemPrompt };
+  return { send, stop, run, regenerate, load, reset, remove, rename, deleteMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, current: () => chat, isRunning, runningIds, systemPrompt };
 })();

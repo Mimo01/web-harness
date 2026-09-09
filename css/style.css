@@ -403,3 +403,11 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 .msg.assistant.turn .role { flex-wrap: nowrap; overflow: hidden; }
 .msg.assistant.turn .role .stats { opacity: 0; transition: opacity .12s; }
 .msg.assistant.turn:hover .role .stats { opacity: 1; }
+/* inline questions from the model */
+.tool-card.ask { border-color: var(--warn); }
+.tool-card.ask summary .targs { white-space: normal; color: var(--fg); }
+.ask-card { padding: 10px 12px; background: var(--warn-soft); }
+.ask-card .ask-q { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; line-height: 1.5; } .ask-card .ask-q .ico { color: var(--warn); margin-top: 3px; flex-shrink: 0; }
+.ask-card textarea { margin-top: 4px; }
+.ask-card.answered { background: var(--surface-2); } .ask-card .ask-a { color: var(--fg-2); font-size: 13px; }
+body.asking .composer-box { border-color: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
