@@ -1,6 +1,6 @@
 {
-  "version": "1.1.1",
+  "version": "1.2.0",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Small fixes."
+  "notes": "Bridge connection is now much more reliable (no more false disconnects in background tabs)."
 }

@@ -464,9 +464,10 @@ H.ui = (() => {
           el('ol', { class: 'help-list' }, [
             el('li', {}, ['Drag this button to your bookmarks bar: ', link, ' ', el('button', { class: 'btn sm ghost', onclick: () => { navigator.clipboard.writeText(H.bridge.bookmarklet()); H.toast('Bookmarklet copied. Create a bookmark and paste it as the address.', 'success'); } }, ['Copy']), el('span', { class: 'help', style: 'margin:2px 0 0' }, [`Do it once; the same bookmark works for every site. It is bound to this harness address (${!/^https?:/.test(location.origin) ? 'file://' : location.origin}); if you move the harness, drag it again.`])]),
             el('li', {}, [el('b', {}, ['Important: ']), 'open the site from this button, so the new tab is linked to this harness tab: ', el('button', { class: 'btn sm primary', onclick: () => { if (target.startsWith('http')) H.bridge.openSite(target); else H.toast('Enter the site URL first', 'warn'); } }, [H.icon('external'), `Open ${target.replace(/^https?:\/\//, '')}`]), ' Log in there if needed. A tab you opened yourself is not linked.']),
-            el('li', {}, ['On that new tab, click the bookmark. The blue bar must say "linked to your harness tab ✓"; keep the tab open while you use the plugin.']),
+            el('li', {}, ['On that new tab, click the bookmark. The blue bar must say "linked to your harness tab ✓". Keep that tab open and ', el('b', {}, ['do not browse in it']), ': every full page load in that tab drops the bookmark script (click it again if the bar disappears). Do your normal Jira work in another tab.']),
           ]),
           el('div', { class: 'row gap', style: 'margin-top:8px' }, [status, pingBtn, diagBtn]), trace,
+          el('p', { class: 'help' }, ['Stays connected while the tab exists, even in the background. It drops when the tab is closed, reloaded, navigated, or put to sleep by the browser\'s memory saver (Chrome: Settings → Performance → add the site to "Always keep these sites active"; Edge: Settings → System and performance → "Never put these sites to sleep"). The pill in the top bar checks the link when clicked.']),
           el('p', { class: 'help' }, ['No popups are needed: the bookmark links back to this tab. If the tabs are not linked (for example you opened the site yourself), it tries a popup, and if that is blocked it opens the harness as a side panel inside the site\'s page instead (that panel has its own settings, so enter your LiteLLM details there once). Requests run with your normal login, so keep "My browser login session" in step 2.' + (!/^https?:/.test(location.origin) ? ' Note: this app is opened via file://, so the bridge cannot verify the harness origin; host it on an http(s) URL for full security.' : '')]),
         );
       } else if (routeSel.value === 'proxy') {
@@ -730,7 +731,8 @@ H.ui = (() => {
     H.bus.on('run-state', (r) => { $('#send-btn').classList.toggle('hidden', r); $('#stop-btn').classList.toggle('hidden', !r); });
     H.bus.on('usage', updateContextMeter);
     H.bus.on('mode', updateModeUI);
-    H.bus.on('bridge', (l) => { const pill = $('#bridge-pill'); pill.classList.toggle('hidden', !l.length); pill.innerHTML = ''; pill.append(H.icon('link'), `${l.length} bridge${l.length === 1 ? '' : 's'}`); pill.title = 'Browser session bridge: ' + l.map(b => b.origin).join(', '); });
+    H.bus.on('bridge', (l) => { const pill = $('#bridge-pill'); pill.classList.toggle('hidden', !l.length); pill.innerHTML = ''; pill.append(H.icon('link'), `${l.length} bridge${l.length === 1 ? '' : 's'}`); pill.title = 'Browser session bridge: ' + l.map(b => b.origin + (b.tabs > 1 ? ` (${b.tabs} tabs)` : '')).join(', ') + '\nClick to check the connection.'; });
+    $('#bridge-pill').onclick = async () => { const h = await H.bridge.health(); if (!h.length) return H.toast('No bridge connected.', 'warn'); for (const b of h) H.toast(`${b.origin}: ${b.ok ? 'responding ✓' : 'NOT responding: click the bookmark on that tab again'}`, b.ok ? 'success' : 'error', 6000); };
     H.bus.on('workspace', updateWorkspaceBtn);
     H.bus.on('preview', showPreview);
     H.bus.on('settings', (s) => { if ($('#mode-select').value !== s.chatMode) updateModeUI(); if ($('#model-select').value !== s.model) fillModelSelect($('#model-select'), s.models || [], s.model); });
