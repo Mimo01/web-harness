@@ -386,3 +386,4 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 .msg.assistant.tools-only { margin-bottom: 4px; }
 .msg.assistant.tools-only .content { display: none; }
 .msg.assistant.tools-only .role { margin-bottom: 0; }
+.msg.hover .actions, .msg.hover .role .ts { opacity: 1; }

@@ -136,6 +136,10 @@ H.ui = (() => {
     } else if (m.role === 'tool') {
       const first = !prev || prev.role !== 'tool';
       node = el('details', { class: 'tool-card' + (first ? ' first' : '') }, [el('summary', {}, [el('span', { class: 'tstate' }), el('span', { class: 'tname' }, [m.name]), el('span', { class: 'targs' }), el('span', { class: 'tactions' })]), el('div', { class: 'tbody' })]);
+      // hovering a tool card highlights the assistant message it belongs to (the previous non-tool sibling)
+      const owner = () => { let n = node.previousElementSibling; while (n && n.classList.contains('tool-card')) n = n.previousElementSibling; return n && n.classList.contains('msg') ? n : null; };
+      node.addEventListener('mouseenter', () => owner()?.classList.add('hover'));
+      node.addEventListener('mouseleave', () => owner()?.classList.remove('hover'));
       updateTool(node, m);
     } else return el('div');
     nodeFor.set(m, node);
