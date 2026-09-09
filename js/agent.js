@@ -133,13 +133,15 @@ When you have enough information, write a concrete, numbered implementation plan
       if (!assistant.tool_calls.length) break;
 
       const images = [];
-      for (const tc of assistant.tool_calls) {
-        if (signal?.aborted) break;
+      // 1) create all tool messages up front, in the model's order (results are sent back in this order)
+      const items = assistant.tool_calls.map(tc => {
         const toolMsg = { role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: '', ts: Date.now(), meta: { running: true, args: H.parseArgs(tc.function.arguments).value ?? tc.function.arguments } };
-        messages.push(toolMsg);
-        onEvent?.('tool-start', toolMsg, tc);
+        messages.push(toolMsg); onEvent?.('tool-start', toolMsg, tc);
+        return { tc, toolMsg, sig: tc.function.name + '|' + (tc.function.arguments || '').trim() };
+      });
+      const execOne = async ({ tc, toolMsg, sig }) => {
+        if (signal?.aborted) { toolMsg.meta.running = false; toolMsg.content = JSON.stringify({ error: 'Cancelled by the user.' }); onEvent?.('tool-end', toolMsg); return; }
         const ctx = { signal, finishReason: res.finish_reason, images, chatId: chatIdOf(messages), toolMsg, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
-        const sig = tc.function.name + '|' + (tc.function.arguments || '').trim();
         const prev = seen.get(sig);
         let out;
         if (prev && prev.count >= 3) {
@@ -156,6 +158,12 @@ When you have enough information, write a concrete, numbered implementation plan
         if (rec.count === 2 && !stalled) str += `\n\n[NOTE: you already made this exact call and got the same result. Do not call it again with the same arguments; change the approach or tell the user what is blocking you.]`;
         toolMsg.content = str;
         onEvent?.('tool-end', toolMsg);
+      };
+      // 2) run them: consecutive read-only calls that need no permission prompt run in parallel; everything else one at a time, in order
+      const parallelOk = (it) => { const t = H.tools.get(it.tc.function.name); return !!t && t.risk === 'safe' && H.perms.policyFor(t) === 'allow' && !['ask_user', 'run_subagent', 'sleep'].includes(t.name); };
+      for (let i = 0; i < items.length;) {
+        if (parallelOk(items[i])) { let j = i; while (j < items.length && parallelOk(items[j])) j++; await Promise.all(items.slice(i, j).map(execOne)); i = j; }
+        else { await execOne(items[i]); i++; }
       }
       if (stalled) {
         messages.push({ role: 'user', content: '[system] Repeated identical tool calls were blocked by the loop guard. Summarize what you found, explain what is blocking you, and ask the user how to proceed. Do not call tools in this reply.', ts: Date.now(), meta: { system: true } });

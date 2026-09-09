@@ -103,6 +103,10 @@ Pick a mode (and the model) in the pills under the message box; both apply to th
 | **Allow all** | everything runs without prompts (explicit per-tool denies still apply). |
 | **Plan** | the model may only use read-only tools. It investigates and writes a numbered plan. A **Plan ready** bar lets you execute it with default permissions or with allow-all; the mode returns to Default afterwards. |
 
+Transient proxy errors (429, 5xx, dropped connections) are retried up to three times with backoff before a reply
+is marked failed, and a failed reply has a Retry button. When the model issues several read-only tool calls at once
+they run in parallel; anything that writes, asks, or needs a permission prompt runs one at a time, in order.
+
 The model also receives a short usage guide for each enabled plugin (issue-key formats, which call comes before
 which, how to handle errors), and a loop guard blocks a tool call repeated with identical arguments and outcome
 more than three times in one turn, then asks the model to report instead.
@@ -195,7 +199,9 @@ credentials live in the browser and there is no CORS issue.
   (cleared when the tab closes) — toggle in Security & privacy. Exports never contain secrets. Plugin manifests are
   saved with credentials stripped.
 - **Sandboxing.** JavaScript runs in a Web Worker (no DOM, no workspace); Python in Pyodide/WebAssembly; HTML previews
-  in a sandboxed iframe; model markdown is sanitized with DOMPurify; `<meta name="referrer" content="no-referrer">`
+  in a sandboxed iframe; plugin manifest expressions (`transform`, `prepare`, `pathFn`) run in the same Worker sandbox
+  with no access to the page, storage or secrets, and importing a manifest that contains them shows a warning;
+  CDN scripts and stylesheets carry Subresource Integrity hashes; model markdown is sanitized with DOMPurify; `<meta name="referrer" content="no-referrer">`
   keeps your page URL out of outbound requests. Workspace access requires you to pick the folder and stays inside it
   (path traversal is rejected).
 - **Prompt injection.** Tool output is untrusted; the system prompt says so. Tools that could exfiltrate data
@@ -228,6 +234,14 @@ js/app.js         bootstrap
 skills/           example skills to import
 dev/              optional dev helpers: serve.js (static server), mock-litellm.js (fake OpenAI API for testing)
 ```
+
+## 🚢 Releasing
+
+```bash
+node dev/release.js 1.12.0 "What changed" --push
+```
+This writes the version to `index.html` (`APP_VERSION`, from which every script and stylesheet gets its cache tag at
+load time) and to `version.json` (what the update check reads), then commits and pushes.
 
 ## 🧪 Developing / testing without a real LLM
 
@@ -265,6 +279,9 @@ PDFs; both happen only when you use them.
   explanation, since tools only operate inside the chosen workspace.
 - **Shortcuts**: Ctrl (Windows/Linux) or Cmd (macOS) + K = new chat, + / = settings, + Enter = send when that mode
   is selected. Show the bookmarks bar with Ctrl/Cmd+Shift+B to drop the bridge bookmark on it.
+- **Accessibility**: dialogs are announced as such and trap focus (Escape closes them, except permission prompts);
+  icon buttons carry labels; a live region announces when the assistant starts, calls a tool, asks a question, and
+  what it replied.
 - **Tool errors are explanatory**: every failed tool call returns the cause and the fix (missing parameters, wrong
   types, unknown paths, CORS, expired permissions, HTTP status meanings), so the model can correct itself.
 

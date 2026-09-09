@@ -1,6 +1,6 @@
 {
-  "version": "1.10.3",
+  "version": "1.11.0",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Mobile message box redesigned: big Send button, clean input, controls beneath."
+  "notes": "Retries on transient errors, parallel read-only tool calls, sandboxed plugin expressions, integrity-checked CDN scripts, accessibility."
 }

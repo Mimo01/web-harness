@@ -25,11 +25,29 @@ H.llm = (() => {
     if (tools && tools.length) { body.tools = tools; body.tool_choice = 'auto'; }
     if (body.stream) body.stream_options = { include_usage: true };
 
-    const r = await fetch(url('/v1/chat/completions'), { method: 'POST', headers: headers(), body: JSON.stringify(body), signal });
-    if (!r.ok) {
-      const t = await r.text();
-      throw new Error(`LLM HTTP ${r.status}: ${H.clamp(t, 2000)}`);
+    /* transient failures (429, 5xx, dropped connection) are retried with backoff, as long as nothing was streamed yet */
+    let r, attempt = 0, delivered = false;
+    const origDelta = onDelta;
+    const wrapDelta = origDelta ? (d) => { delivered = true; origDelta(d); } : null;
+    while (true) {
+      try {
+        r = await fetch(url('/v1/chat/completions'), { method: 'POST', headers: headers(), body: JSON.stringify(body), signal });
+        if (r.ok) break;
+        const t = await r.text();
+        const transient = r.status === 429 || (r.status >= 500 && r.status <= 504);
+        if (!transient || attempt >= 3) throw new Error(`LLM HTTP ${r.status}: ${H.clamp(t, 2000)}`);
+        const ra = parseFloat(r.headers.get('retry-after')); const wait = (isFinite(ra) ? ra * 1000 : 1000 * 2 ** attempt) + Math.random() * 300;
+        H.toast(`LiteLLM answered ${r.status}; retrying in ${Math.round(wait / 1000)} s (${attempt + 1}/3)…`, 'warn', wait);
+        await new Promise((res, rej) => { const t = setTimeout(res, wait); signal?.addEventListener('abort', () => { clearTimeout(t); rej(Object.assign(new Error('aborted'), { name: 'AbortError' })); }, { once: true }); });
+        attempt++;
+      } catch (e) {
+        if (e.name === 'AbortError' || delivered || attempt >= 3 || !/Failed to fetch|NetworkError|Load failed|network/i.test(e.message)) throw e;
+        const wait = 1000 * 2 ** attempt + Math.random() * 300;
+        H.toast(`Connection to LiteLLM failed; retrying in ${Math.round(wait / 1000)} s (${attempt + 1}/3)…`, 'warn', wait);
+        await new Promise((res) => setTimeout(res, wait)); attempt++;
+      }
     }
+    onDelta = wrapDelta;
     if (!body.stream) {
       const j = await r.json();
       const m = j.choices?.[0]?.message || {};

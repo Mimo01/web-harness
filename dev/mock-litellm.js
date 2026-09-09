@@ -10,14 +10,24 @@ http.createServer((req, res) => {
   if (req.method !== 'POST') { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end('{"error":"not found"}'); }
   let body = ''; req.on('data', c => body += c); req.on('end', () => {
     let j; try { j = JSON.parse(body); } catch { res.writeHead(400); return res.end('bad json'); } const msgs = j.messages; const last = msgs[msgs.length - 1];
-    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     const slow = msgs.some(m => m.role === 'user' && typeof m.content === 'string' && /slow/i.test(m.content));
     if (slow) { const wait = (ms) => new Promise(r => setTimeout(r, ms)); (async () => { await wait(3000); go(); })(); return; }
     go();
     function go() {
     const id = 'chatcmpl-' + Date.now();
-    const chunk = (delta, finish = null) => send(res, { id, object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: finish }] });
+    const chunk = (delta, finish = null) => { sse(); send(res, { id, object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: finish }] }); };
     const toolNames = (j.tools || []).map(t => t.function.name);
+    const sse = () => { if (!res.headersSent) res.writeHead(200, { 'Content-Type': 'text/event-stream' }); };
+    /* transient-failure scenario: first request of a "flaky" conversation gets a 503 */
+    global.__flaky = global.__flaky || new Set();
+    const flakyKey = msgs.filter(m => m.role === 'user').map(m => m.content).join('|');
+    if (/flaky/i.test(flakyKey) && !global.__flaky.has(flakyKey)) { global.__flaky.add(flakyKey); res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '1' }); return res.end('{"error":"temporarily overloaded"}'); }
+    /* parallel scenario: three read-only calls at once, each busy for ~400 ms */
+    if (last.role === 'user' && /parallel/i.test(last.content) && toolNames.includes('calculate')) {
+      chunk({ role: 'assistant', content: '' });
+      for (let i = 0; i < 3; i++) chunk({ tool_calls: [{ index: i, id: 'call_p' + i, type: 'function', function: { name: 'calculate', arguments: JSON.stringify({ expression: `(()=>{const t=Date.now();while(Date.now()-t<400);return ${i}})()` }) } }] });
+      chunk({}, 'tool_calls'); send(res, { id, choices: [], usage: { prompt_tokens: 10, completion_tokens: 5 } }); res.write('data: [DONE]\n\n'); return res.end();
+    }
     const anyLoop = msgs.some(m => m.role === 'user' && typeof m.content === 'string' && /loop/i.test(m.content));
     if (anyLoop && toolNames.includes('calculate') && !msgs.some(m => m.role === 'user' && /loop guard/i.test(m.content))) {
       chunk({ role: 'assistant', content: '' });
@@ -45,7 +55,7 @@ http.createServer((req, res) => {
       for (const w of text.split(/(?<= )/)) chunk({ content: w });
       chunk({}, 'stop');
     }
-    send(res, { id, choices: [], usage: { prompt_tokens: 123, completion_tokens: 45 } });
+    sse(); send(res, { id, choices: [], usage: { prompt_tokens: 123, completion_tokens: 45 } });
     res.write('data: [DONE]\n\n'); res.end();
     }
   });

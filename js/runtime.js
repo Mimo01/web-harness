@@ -76,5 +76,12 @@ H.runtime = (() => {
     return url;
   }
 
-  return { runJS, runPython, previewHTML, getPyodide, pyodideLoaded: () => !!pyodide };
+  /* evaluate a plugin-manifest expression in the Worker sandbox (no access to the page, storage or secrets) */
+  async function evalExpr(kind, code, { data, args } = {}) {
+    const body = kind === 'transform' ? `const data = input.data, args = input.args; return (${code});` : `return (${code})(input.args);`;
+    const r = await runJS(body, { input: { data, args }, timeout: 5000 });
+    if (r.error) throw new Error(`${kind} expression failed: ${String(r.error).split('\n')[0]}`);
+    return r.result;
+  }
+  return { runJS, runPython, previewHTML, getPyodide, evalExpr, pyodideLoaded: () => !!pyodide };
 })();

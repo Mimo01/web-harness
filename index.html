@@ -6,14 +6,16 @@
 <title>LLM Harness</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%236d8cff'/><path d='M7 8l5-3 5 3v8l-5 3-5-3z' fill='none' stroke='white' stroke-width='1.8'/></svg>">
 <meta name="referrer" content="no-referrer">
+<script>window.APP_VERSION = '1.11.0';</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="css/style.css?v=20260911b">
-<link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-<link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" crossorigin="anonymous"></script>
+<link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous">
+<link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" integrity="sha384-eFTL69TLRZTkNfYZOLM+G04821K1qZao/4QLJbet1pP4tcF+fdXq/9CdqAbWRl/L" crossorigin="anonymous">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp" crossorigin="anonymous"></script>
+<script>/* app files are versioned from APP_VERSION so a release never serves stale cached code */
+(function () { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'css/style.css?v=' + window.APP_VERSION; document.head.appendChild(l); })();</script>
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -53,7 +55,7 @@
       <h1><span class="logo"><svg class="ico"><use href="#i-cube"/></svg></span>LLM Harness</h1>
       <button id="new-chat" class="btn sm" title="New chat (Ctrl/Cmd+K)"><svg class="ico"><use href="#i-plus"/></svg>New</button>
     </header>
-    <div class="side-search"><svg class="ico"><use href="#i-search"/></svg><input id="chat-search" type="text" placeholder="Search chats"></div>
+    <div class="side-search"><svg class="ico"><use href="#i-search"/></svg><input id="chat-search" type="text" placeholder="Search chats" aria-label="Search chats"></div>
     <div id="chat-list"></div>
     <footer>
       <button id="settings-btn" class="btn" title="Settings (Ctrl/Cmd+/)"><svg class="ico"><use href="#i-settings"/></svg>Settings</button>
@@ -79,7 +81,7 @@
       <span id="status" title="LiteLLM connection"><span class="dot"></span><span class="txt">…</span></span>
     </div>
     <div id="content">
-      <div id="messages"><div class="msg-wrap"></div></div>
+      <div id="messages" role="log" aria-label="Conversation"><div class="msg-wrap"></div></div>
       <button id="scroll-bottom" class="btn icon hidden" title="Scroll to bottom"><svg class="ico"><use href="#i-down"/></svg></button>
       <div id="preview" class="hidden">
         <header><b class="ptitle">Preview</b><span class="spacer"></span><button id="preview-open" class="btn sm ghost"><svg class="ico"><use href="#i-external"/></svg>Open in tab</button><button id="preview-close" class="btn icon ghost"><svg class="ico"><use href="#i-x"/></svg></button></header>
@@ -92,12 +94,12 @@
         <div id="slash-menu" class="hidden"></div>
         <div class="composer-box">
           <div id="attach-list"></div>
-          <textarea id="input" rows="1" placeholder="Message… type / for skills, drop files to attach"></textarea>
+          <textarea id="input" rows="1" aria-label="Message" placeholder="Message… type / for skills, drop files to attach"></textarea>
           <div class="composer-bar">
             <button id="attach-btn" class="btn icon ghost" title="Attach files (or drag & drop / paste)"><svg class="ico"><use href="#i-clip"/></svg></button>
             <div class="pill-strip">
-            <label class="pill-select" title="Model"><svg class="ico"><use href="#i-cube"/></svg><select id="model-select"></select></label>
-            <label class="pill-select" id="mode-wrap" title="Chat mode"><svg class="ico"><use href="#i-shield"/></svg><select id="mode-select">
+            <label class="pill-select" title="Model"><svg class="ico"><use href="#i-cube"/></svg><select id="model-select" aria-label="Model"></select></label>
+            <label class="pill-select" id="mode-wrap" title="Chat mode"><svg class="ico"><use href="#i-shield"/></svg><select id="mode-select" aria-label="Chat mode">
               <option value="default">Default</option>
               <option value="auto">Allow all</option>
               <option value="plan">Plan</option>
@@ -116,23 +118,12 @@
 
   <div id="toasts"></div>
 
-  <script src="js/util.js?v=20260911b"></script>
-  <script src="js/db.js?v=20260911b"></script>
-  <script src="js/settings.js?v=20260911b"></script>
-  <script src="js/usage.js?v=20260911b"></script>
-  <script src="js/bridge.js?v=20260911b"></script>
-  <script src="js/ext.js?v=20260911b"></script>
-  <script src="js/extract.js?v=20260911b"></script>
-  <script src="js/update.js?v=20260911b"></script>
-  <script src="js/permissions.js?v=20260911b"></script>
-  <script src="js/llm.js?v=20260911b"></script>
-  <script src="js/fs.js?v=20260911b"></script>
-  <script src="js/runtime.js?v=20260911b"></script>
-  <script src="js/skills.js?v=20260911b"></script>
-  <script src="js/plugins.js?v=20260911b"></script>
-  <script src="js/tools.js?v=20260911b"></script>
-  <script src="js/agent.js?v=20260911b"></script>
-  <script src="js/ui.js?v=20260911b"></script>
-  <script src="js/app.js?v=20260911b"></script>
+  <div id="sr-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <script>
+  (function () {
+    const files = ['util', 'db', 'settings', 'usage', 'bridge', 'ext', 'extract', 'update', 'permissions', 'llm', 'fs', 'runtime', 'skills', 'plugins', 'tools', 'agent', 'ui', 'app'];
+    for (const f of files) { const s = document.createElement('script'); s.src = 'js/' + f + '.js?v=' + window.APP_VERSION; s.async = false; document.body.appendChild(s); }
+  })();
+  </script>
 </body>
 </html>

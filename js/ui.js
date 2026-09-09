@@ -185,7 +185,7 @@ H.ui = (() => {
     const tcs = node.querySelector('.tc-slot'); tcs.innerHTML = '';
     if (m.meta?.streaming && m.tool_calls?.length) tcs.append(el('div', { class: 'muted small' }, [el('span', { class: 'spinner' }), ' Calling ', el('code', {}, [m.tool_calls.map(t => t.function.name).join(', ')])]));
     const es = node.querySelector('.err-slot'); es.innerHTML = '';
-    if (m.meta?.error) es.append(el('div', { class: 'error-box' }, ['Error: ' + m.meta.error]));
+    if (m.meta?.error) es.append(el('div', { class: 'error-box row gap wrap' }, [el('span', { style: 'flex:1' }, ['Error: ' + m.meta.error]), el('button', { class: 'btn sm', onclick: () => H.agent.regenerate() }, [H.icon('refresh'), 'Retry'])]));
     if (m.meta?.aborted) es.append(el('div', { class: 'muted small' }, ['(stopped)']));
     const turn = turnOf.get(node); if (turn) updateTurnStats(turn);
     const ps = node.querySelector('.plan-slot'); ps.innerHTML = '';
@@ -861,8 +861,40 @@ H.ui = (() => {
   try { matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => applyTheme()); } catch { }
 
   /* ---------------- init ---------------- */
+  /* ---------------- accessibility: dialogs, labels, live announcements ---------------- */
+  const announce = (text) => { const r = $('#sr-live'); if (!r) return; r.textContent = ''; setTimeout(() => { r.textContent = text; }, 30); };
+  function a11yInit() {
+    const labelButtons = (root) => root.querySelectorAll('button[title]:not([aria-label])').forEach(b => b.setAttribute('aria-label', b.title));
+    labelButtons(document);
+    const focusables = (el) => [...el.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(e => e.offsetParent !== null);
+    const setupDialog = (ov) => {
+      const box = ov.querySelector('.modal') || ov;
+      box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.tabIndex = -1;
+      const h = box.querySelector('h3'); if (h) { h.id ||= 'dlg-' + H.uid(); box.setAttribute('aria-labelledby', h.id); }
+      ov._returnFocus = document.activeElement;
+      const first = focusables(box).find(e => !e.classList.contains('bookmarklet')) || box;
+      setTimeout(() => first.focus(), 20);
+      ov.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { if (!ov.classList.contains('perm')) { e.stopPropagation(); ov.remove(); } return; }   // permission prompts need an explicit decision
+        if (e.key !== 'Tab') return;
+        const f = focusables(box); if (!f.length) return;
+        const i = f.indexOf(document.activeElement);
+        if (e.shiftKey && (i <= 0)) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && (i === f.length - 1 || i < 0)) { e.preventDefault(); f[0].focus(); }
+      });
+    };
+    new MutationObserver((muts) => {
+      for (const m of muts) {
+        for (const n of m.addedNodes) { if (n.nodeType !== 1) continue; if (n.classList.contains('modal-overlay')) setupDialog(n); labelButtons(n); }
+        for (const n of m.removedNodes) { if (n.nodeType === 1 && n.classList?.contains('modal-overlay') && n._returnFocus && document.contains(n._returnFocus)) { try { n._returnFocus.focus(); } catch { } } }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+    H.bus.on('run-state', (running, chatId) => { if (chatId === H.agent.current()?.id) announce(running ? 'Assistant is responding.' : 'Assistant finished.'); });
+    H.bus.on('message-added', (m, chatId) => { if (chatId && chatId !== H.agent.current()?.id) return; if (m.role === 'tool') announce(`Running tool ${m.name}.`); });
+    H.bus.on('message-updated', (m, chatId) => { if (chatId && chatId !== H.agent.current()?.id) return; if (m.role === 'assistant' && !m.meta?.streaming && m.content && !m._announced) { m._announced = true; announce('Assistant: ' + H.clamp(m.content, 800)); } if (m.role === 'tool' && m.meta?.question && m.meta.question.answered === undefined && !m._askAnnounced) { m._askAnnounced = true; announce('The assistant asks: ' + m.meta.question.text); } });
+  }
   function init() {
-    applyTheme();
+    applyTheme(); a11yInit();
     const input = $('#input');
     input.addEventListener('input', () => { autoresize(); showSlash(); });
     input.addEventListener('keydown', (e) => {

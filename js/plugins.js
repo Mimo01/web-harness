@@ -307,9 +307,9 @@ H.plugins = (() => {
   }
   async function runRest(p, t, args) {
     let a = { ...(t.defaults || {}), ...args };
-    if (t.prepare) a = (new Function('return (' + t.prepare + ')')())(a);
+    if (t.prepare) a = await H.runtime.evalExpr('prepare', t.prepare, { args: a });          // sandboxed: manifests never run in the page
     const req = t.request;
-    let path = t.pathFn ? (new Function('return (' + t.pathFn + ')')())(a) : H.template(req.path, a);
+    let path = t.pathFn ? await H.runtime.evalExpr('pathFn', t.pathFn, { args: a }) : H.template(req.path, a);
     path = path.split('/').map((seg, i) => i === 0 ? seg : seg).join('/');
     const url = new URL(p.baseUrl.replace(/\/+$/, '') + (path.startsWith('/') ? path : '/' + path));
     for (const [k, v] of Object.entries(req.query || {})) { const val = H.template(String(v), a); if (val !== '') url.searchParams.set(k, val); }
@@ -333,7 +333,7 @@ H.plugins = (() => {
     }
     if (req.raw) return { status: r.status, body: H.clamp(text, 60000) };
     let data = H.tryJSON(text, text);
-    if (t.transform) { try { data = (new Function('data', 'args', 'return (' + t.transform + ')'))(data, a); } catch (e) { return { warning: 'transform failed: ' + e.message, data }; } }
+    if (t.transform) { try { data = await H.runtime.evalExpr('transform', t.transform, { data, args: a }); } catch (e) { return { warning: e.message, data }; } }
     return data;
   }
 
@@ -438,6 +438,13 @@ H.plugins = (() => {
     tools, test, connectEnabledMcp, mcpConnect,
     exportAll: () => JSON.stringify(plugins.map(p => splitSecrets(p).pub), null, 2),
     exportSafe: (p) => splitSecrets(p).pub,
-    importJSON: (json) => { const arr = JSON.parse(json); for (const p of [].concat(arr)) { if (!p.id || !p.kind) throw new Error('Plugin needs id and kind'); H.plugins.upsert(p); } },
+    hasCode: (p) => (p.tools || []).some(t => t.transform || t.prepare || t.pathFn),
+    importJSON: (json) => {
+      const arr = [].concat(JSON.parse(json));
+      for (const p of arr) if (!p.id || !p.kind) throw new Error('Plugin needs id and kind');
+      const withCode = arr.filter(p => H.plugins.hasCode(p));
+      if (withCode.length && !confirm(`The plugin manifest "${withCode.map(p => p.name || p.id).join(', ')}" contains code expressions (transform / prepare / pathFn). They run in a sandbox without access to your page, storage or secrets, but they shape the requests sent with your credentials. Only import manifests from sources you trust.\n\nImport anyway?`)) throw new Error('Import cancelled');
+      for (const p of arr) H.plugins.upsert(p);
+    },
   };
 })();
