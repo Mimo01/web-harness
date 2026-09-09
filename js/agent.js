@@ -229,7 +229,13 @@ When you have enough information, write a concrete, numbered implementation plan
     if (!c) { c = await H.db.getChat(id); if (!c) return; c.usage ||= { prompt: 0, completion: 0, cost: 0, requests: 0 }; live.set(id, c); }
     chat = c; H.bus.emit('chat-loaded', chat);
   }
-  function reset() { chat = newChat(); live.set(chat.id, chat); H.perms.clearSession(); H.bus.emit('chat-loaded', chat); }
+  async function reset() {
+    if (chat && !chat.messages.length && !runs.has(chat.id)) { H.bus.emit('chat-loaded', chat); return chat; }   // already on an empty chat
+    chat = newChat(); live.set(chat.id, chat); H.perms.clearSession();
+    await H.db.putChat(chat);                      // exists right away: visible in the sidebar, switchable, keeps its draft
+    H.bus.emit('chat-loaded', chat); H.bus.emit('chat-updated', chat);
+    return chat;
+  }
   async function remove(id) { stop(id); live.delete(id); await H.db.delChat(id); if (chat?.id === id) reset(); H.bus.emit('chat-updated'); }
   async function rename(title) { if (chat) { chat.title = title; await persist(); } }
   async function deleteMessage(idx) { if (!chat || runs.has(chat.id)) return; chat.messages.splice(idx, 1); H.bus.emit('chat-loaded', chat); await persist(); }

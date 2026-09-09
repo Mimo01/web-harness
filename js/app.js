@@ -5,7 +5,8 @@
   if (H.bridge.embedded()) { document.body.classList.add('embedded'); H.$('#sidebar').classList.add('collapsed'); }
   await H.fs.restore();
   H.ui.updateWorkspaceBtn(H.fs.hasRoot() ? H.fs.name() : '');
-  H.agent.reset();
+  const recent = (await H.db.listChats())[0];
+  if (recent && !recent.messages.length) await H.agent.load(recent.id); else await H.agent.reset();   // reuse an empty chat instead of creating one per reload
   H.ui.renderChatList();
   if (H.settings.apiKey()) { H.ui.refreshModels().catch(() => { }); H.usage.refreshModelInfo(); } else { H.ui.setStatus('', 'not configured'); H.ui.openSettings('connection'); }
   H.plugins.connectEnabledMcp();

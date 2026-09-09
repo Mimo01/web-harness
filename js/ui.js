@@ -3,6 +3,7 @@ H.ui = (() => {
   const $ = H.$, el = H.el;
   let attachments = [];
   let slashIdx = -1;
+  const drafts = new Map();   // chatId -> unsent text
 
   /* ---------------- markdown ---------------- */
   function md(text) {
@@ -246,7 +247,7 @@ H.ui = (() => {
       const running = H.agent.isRunning(c.id);
       list.append(el('div', { class: 'chat-item' + (cur?.id === c.id ? ' active' : '') + (running ? ' running' : ''), onclick: () => H.agent.load(c.id), title: `${c.title}\n${c.messages.length} messages · ${H.relTime(c.updated)}${running ? '\nRunning…' : ''}` }, [
         running ? el('span', { class: 'spinner' }) : null,
-        el('span', { class: 'title' }, [c.title]),
+        el('span', { class: 'title' + (c.messages.length ? '' : ' muted') }, [c.messages.length ? c.title : 'New chat (empty)']),
         el('button', { class: 'btn sm icon del', title: 'Rename', onclick: (e) => { e.stopPropagation(); const t = prompt('Chat title', c.title); if (t) { c.title = t; H.db.putChat(c).then(() => { if (cur?.id === c.id) cur.title = t; renderChatList(); }); } } }, [H.icon('edit')]),
         el('button', { class: 'btn sm icon del', title: 'Delete', onclick: (e) => { e.stopPropagation(); if (confirm('Delete chat "' + c.title + '"?')) H.agent.remove(c.id); } }, [H.icon('x')]),
       ]));
@@ -261,7 +262,7 @@ H.ui = (() => {
     if (H.agent.isRunning()) return;
     if (!H.settings.apiKey() && !confirm('No API key configured. Send anyway?')) { openSettings('connection'); return; }
     const att = attachments; attachments = []; renderAttachments();
-    t.value = ''; autoresize(); hideSlash();
+    t.value = ''; autoresize(); hideSlash(); drafts.delete(H.agent.current()?.id);
     await H.agent.send(text, att);
   }
   function renderAttachments() {
@@ -829,7 +830,13 @@ H.ui = (() => {
     fillModelSelect($('#model-select'), H.settings.get('models') || [], H.settings.get('model'));
     updateModeUI(); updateTitle();
 
-    H.bus.on('chat-loaded', (c) => { renderChat(c); renderChatList(); updateTitle(); });
+    let shownChatId = null;
+    H.bus.on('chat-loaded', (c) => {
+      if (shownChatId && shownChatId !== c.id) drafts.set(shownChatId, $('#input').value);   // keep the unsent text of the chat we leave
+      shownChatId = c.id;
+      renderChat(c); renderChatList(); updateTitle();
+      $('#input').value = drafts.get(c.id) || ''; autoresize();
+    });
     H.bus.on('chat-updated', () => { renderChatList(); updateTitle(); });
     H.bus.on('message-added', onMessageAdded);
     H.bus.on('message-updated', onMessageUpdated);

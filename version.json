@@ -1,6 +1,6 @@
 {
-  "version": "1.8.2",
+  "version": "1.8.3",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Context window fullness shown as a percentage ring in the message box."
+  "notes": "New chats are created immediately and each chat keeps its unsent draft when you switch."
 }
