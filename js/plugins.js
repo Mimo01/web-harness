@@ -30,7 +30,7 @@ H.plugins = (() => {
     id: 'jira', name: 'Jira', kind: 'rest', enabled: false,
     description: 'Atlassian Jira Cloud REST API v3 (search, read, create, update, comment, transition issues).',
     baseUrl: 'https://your-domain.atlassian.net',
-    auth: { type: 'none' }, route: { type: 'bridge' },
+    auth: { type: 'none' }, route: { type: 'extension' },
     headers: { 'Accept': 'application/json' },
     notes: 'Jira Cloud: create an API token at https://id.atlassian.com/manage-profile/security/api-tokens. Jira Cloud does not send CORS headers, so set a CORS proxy in Settings > Web (or use a browser extension that adds CORS headers) when running from the browser. Jira Data Center: use auth type "bearer" with a PAT.',
     tools: [
@@ -134,7 +134,7 @@ H.plugins = (() => {
     id: 'jira2', name: 'Jira Server / Data Center (API v2)', kind: 'rest', enabled: false,
     description: 'Jira Server / Data Center REST API v2 (also works with Jira Cloud v2 endpoints). Plain-text descriptions and comments.',
     baseUrl: 'https://jira.your-company.com',
-    auth: { type: 'none' }, route: { type: 'bridge' },
+    auth: { type: 'none' }, route: { type: 'extension' },
     headers: { 'Accept': 'application/json', 'X-Atlassian-Token': 'no-check' },
     notes: 'Direct REST calls work once a Jira administrator adds this page\'s origin to Jira\'s Allowlist (Administration → System → Allowlist, "Allow incoming"). Requires Jira 8.9+ for preflight support.',
     setup: {
@@ -185,7 +185,7 @@ H.plugins = (() => {
   const GITLAB = {
     id: 'gitlab', name: 'Git (GitLab)', kind: 'rest', enabled: false,
     description: 'GitLab REST API v4: projects, branches, files, commits, merge requests, issues, pipelines. Works with gitlab.com and self-hosted GitLab.',
-    baseUrl: 'https://gitlab.com/api/v4', auth: { type: 'none' }, route: { type: 'bridge' }, headers: {},
+    baseUrl: 'https://gitlab.com/api/v4', auth: { type: 'none' }, route: { type: 'extension' }, headers: {},
     notes: 'Recommended: the browser session bridge (click the bookmarklet on your logged-in GitLab tab). Alternatively a personal access token, if your GitLab allows cross-origin API calls from this page.',
     setup: {
       urlLabel: 'GitLab API base URL', urlPlaceholder: 'https://gitlab.com/api/v4', urlHelp: 'For self-hosted GitLab use https://<host>/api/v4.',
@@ -222,12 +222,14 @@ H.plugins = (() => {
     ],
   };
   const templates = { jira: JIRA, jira2: JIRA2, git: GITHUB, gitlab: GITLAB, mcp: MCP_EXAMPLE, litellmMcp: LITELLM_MCP };
+  setTimeout(() => localStorage.setItem('harness.migrated.ext', '1'), 0);
   for (const p of plugins) {
     const t = Object.values(templates).find(x => x.id === p.id); if (!t) continue;
     p.setup = t.setup; p.notes = t.notes; p.headers = { ...(t.headers || {}), ...(p.headers || {}) };
     const real = (v) => !!v && !/^<.*>$/.test(v);
     const hasCreds = !!(p.auth && (real(p.auth.token) || real(p.auth.password) || real(p.auth.value)));
     if (!p.route && t.route && !hasCreds) { p.route = H.deepClone(t.route); p.auth = { type: 'none' }; }  // never set up: adopt the recommended route
+    if (p.route?.type === 'bridge' && !hasCreds && t.route?.type === 'extension' && !localStorage.getItem('harness.migrated.ext')) p.route = H.deepClone(t.route);  // 1.6: extension replaces the bridge as default
   }
   if (!plugins.length) { plugins = [H.deepClone(JIRA), H.deepClone(JIRA2), H.deepClone(GITHUB)]; save(); }
   else if (!plugins.find(p => p.id === 'jira2')) { plugins.splice(1, 0, H.deepClone(JIRA2)); save(); }
@@ -254,6 +256,7 @@ H.plugins = (() => {
       return { url: base + fullUrl.slice(target.length), headers: { Authorization: 'Bearer ' + H.settings.apiKey(), 'x-litellm-api-key': H.settings.apiKey() }, dropAuth: !r.forwardAuth, host: u.host };
     }
     if (r.type === 'bridge') return { url: fullUrl, headers: {}, dropAuth: p.auth?.type === 'none' || !!r.useSession, bridge: true };
+    if (r.type === 'extension') return { url: fullUrl, headers: {}, dropAuth: p.auth?.type === 'none', ext: true };
     if (r.type === 'proxy' && r.proxyUrl) {
       const pu = r.proxyUrl.includes('{url}') ? r.proxyUrl.replace('{url}', encodeURIComponent(fullUrl)) : r.proxyUrl + fullUrl;
       return { url: pu, headers: {}, dropAuth: false };
@@ -265,7 +268,7 @@ H.plugins = (() => {
     const via = p.route?.type === 'litellm' ? ' (routed through your LiteLLM proxy: is the pass-through endpoint configured?)' : p.route?.type === 'proxy' ? ' (via your CORS proxy)' : '';
     return `${p.name}: the browser could not reach ${attempted || (p.kind === 'mcp' ? p.url : p.baseUrl)}${via} (${e.message}). ` +
       `This is almost always CORS: the API does not allow requests from web pages at origin ${origin}. Browsers block this regardless of your token. ` +
-      `Options (plugin setup, step 3): (1) "Browser session bridge": log in to the site in another tab and click the bookmarklet, no admin needed; (2) route through your LiteLLM proxy (pass-through endpoint or MCP gateway); (3) ask the API admin to allow origin ${origin}; (4) a CORS proxy you trust.`;
+      `Options (plugin setup, step 3): (1) the Web LLM Harness Connector browser extension (reliable, no admin, no tab to keep open); (2) the "Browser session bridge" bookmarklet; (3) ask the API admin to allow origin ${origin}; (4) a LiteLLM pass-through or a CORS proxy you trust.`;
   }
   async function runRest(p, t, args) {
     let a = { ...(t.defaults || {}), ...args };
@@ -286,6 +289,7 @@ H.plugins = (() => {
     }
     let r;
     if (route.bridge) { const br = await H.bridge.fetch(route.url, { ...init, body: init.body }); r = { ok: br.ok, status: br.status, text: async () => br.body || '' }; }
+    else if (route.ext) { const er = await H.ext.fetch(route.url, { ...init, body: init.body, credentials: p.auth?.type === 'none' ? 'include' : 'omit' }); r = { ok: er.ok, status: er.status, text: async () => er.body || '' }; }
     else { try { r = await H.tools.fetchWithProxy(route.url, init); } catch (e) { throw new Error(corsHelp(p, e, route.url)); } }
     const text = await r.text();
     if (!r.ok) {
@@ -307,6 +311,7 @@ H.plugins = (() => {
     const body = JSON.stringify({ jsonrpc: '2.0', id: H.uid(), method, params: params || {} });
     let r;
     if (route.bridge) { const br = await H.bridge.fetch(route.url, { method: 'POST', headers, body }); r = { ok: br.ok, status: br.status, headers: { get: (k) => br.headers?.[k.toLowerCase()] || null }, text: async () => br.body || '' }; }
+    else if (route.ext) { const er = await H.ext.fetch(route.url, { method: 'POST', headers, body }); r = { ok: er.ok, status: er.status, headers: { get: (k) => er.headers?.[k.toLowerCase()] || null }, text: async () => er.body || '' }; }
     else { try { r = await H.tools.fetchWithProxy(route.url, { method: 'POST', headers, body }); } catch (e) { throw new Error(corsHelp(p, e, route.url)); } }
     if (!r.ok) throw new Error(`MCP ${p.name}: HTTP ${r.status} ${H.clamp(await r.text(), 800)}`);
     const sid = r.headers.get('Mcp-Session-Id') || sessionId;
@@ -369,7 +374,22 @@ H.plugins = (() => {
     return `${t.name} OK: ${H.clamp(JSON.stringify(r), 400)}`;
   }
 
+  /* try to create a pass-through endpoint on the LiteLLM proxy with the user's key (works only if the key has admin rights) */
+  async function createPassThrough(p, path) {
+    const base = H.settings.get('baseUrl').replace(/\/+$/, '');
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + H.settings.apiKey() };
+    const target = (p.baseUrl || '').replace(/\/+$/, '');
+    const fwd = { ...(p.headers || {}), ...authHeaders(p) }; delete fwd['<secret>'];
+    const body = { path: '/' + path, target, headers: fwd };
+    const r = await fetch(base + '/config/pass_through_endpoint', { method: 'POST', headers, body: JSON.stringify(body) });
+    const text = await r.text();
+    if (r.status === 401 || r.status === 403) throw new Error('Your LiteLLM key is not allowed to create pass-through endpoints (admin rights needed). Ask the LiteLLM admin to add the YAML snippet.');
+    if (!r.ok) throw new Error(`LiteLLM answered HTTP ${r.status}: ${H.clamp(text, 300)}`);
+    return text;
+  }
+
   return {
+    createPassThrough,
     list: () => plugins, get: (id) => plugins.find(p => p.id === id), templates,
     upsert: (p) => { const i = plugins.findIndex(x => x.id === p.id); if (i >= 0) plugins[i] = p; else plugins.push(p); mcpCache.delete(p.id); cachedTools.key = ''; save(); },
     remove: (id) => { plugins = plugins.filter(p => p.id !== id); mcpCache.delete(id); cachedTools.key = ''; save(); },

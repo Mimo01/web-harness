@@ -395,7 +395,7 @@ H.ui = (() => {
       wrap.innerHTML = '';
       wrap.append(sec('Plugins', 'Plugins add tools that call external APIs (REST) or remote MCP servers. Credentials are stored as secrets on this device and are only ever sent to the plugin\'s own URL.', []));
       for (const p of H.plugins.list()) {
-        const configured = p.useLitellmKey ? !!H.settings.apiKey() : (p.route?.type === 'litellm' || p.route?.type === 'bridge') ? !/your-domain|your-company|example\.com/.test(p.baseUrl || p.url || '') : p.kind === 'mcp' ? !!p.url && !/example\.com/.test(p.url) : !!(p.auth && (p.auth.token || p.auth.password || p.auth.value)) && !/your-domain|your-company|<.*>/.test(p.baseUrl || '');
+        const configured = p.useLitellmKey ? !!H.settings.apiKey() : (p.route?.type === 'litellm' || p.route?.type === 'bridge' || p.route?.type === 'extension') ? !/your-domain|your-company|example\.com/.test(p.baseUrl || p.url || '') : p.kind === 'mcp' ? !!p.url && !/example\.com/.test(p.url) : !!(p.auth && (p.auth.token || p.auth.password || p.auth.value)) && !/your-domain|your-company|<.*>/.test(p.baseUrl || '');
         const card = el('div', { class: 'card plugin-card' });
         const status = el('span', { class: 'small muted' });
         card.append(el('div', { class: 'row gap wrap' }, [
@@ -406,7 +406,7 @@ H.ui = (() => {
           el('label', { class: 'check small' }, [el('input', { type: 'checkbox', checked: !!p.enabled, onchange: async (e) => { if (e.target.checked && !configured) { e.target.checked = false; setupWizard(p, render); return; } await H.plugins.setEnabled(p.id, e.target.checked); render(); } }), 'enabled']),
         ]));
         card.append(el('div', { class: 'small muted' }, [p.description || '']));
-        card.append(el('div', { class: 'small mono muted' }, [p.kind === 'rest' ? `${p.baseUrl} · ${(p.tools || []).length} tools` : `${p.url || (p.useLitellmKey ? H.settings.get('baseUrl').replace(/\/+$/, '') + '/mcp/' : '')} · ${(H.plugins.tools().filter(t => t.plugin === p.id).length)} tools`, p.route?.type === 'litellm' ? ` · via LiteLLM /${p.route.path}` : p.route?.type === 'proxy' ? ' · via proxy' : p.route?.type === 'bridge' ? (H.bridge.has(p.baseUrl || p.url) ? ' · bridge connected' : ' · bridge (not connected)') : '']));
+        card.append(el('div', { class: 'small mono muted' }, [p.kind === 'rest' ? `${p.baseUrl} · ${(p.tools || []).length} tools` : `${p.url || (p.useLitellmKey ? H.settings.get('baseUrl').replace(/\/+$/, '') + '/mcp/' : '')} · ${(H.plugins.tools().filter(t => t.plugin === p.id).length)} tools`, p.route?.type === 'litellm' ? ` · via LiteLLM /${p.route.path}` : p.route?.type === 'proxy' ? ' · via proxy' : p.route?.type === 'bridge' ? (H.bridge.has(p.baseUrl || p.url) ? ' · bridge connected' : ' · bridge (not connected)') : p.route?.type === 'extension' ? (H.ext.available() ? ' · via extension' : ' · via extension (not installed)') : '']));
         card.append(el('div', { class: 'row gap wrap', style: 'margin-top:10px' }, [
           el('button', { class: 'btn sm ' + (configured ? '' : 'primary'), onclick: () => setupWizard(p, render) }, [configured ? 'Configure' : 'Set up']),
           el('button', { class: 'btn sm', onclick: async () => { status.textContent = 'testing…'; try { status.textContent = '✓ ' + await H.plugins.test(p); } catch (e) { status.textContent = '✕ ' + e.message; } } }, ['Test']),
@@ -456,9 +456,10 @@ H.ui = (() => {
     const snippet = el('pre', { class: 'perm-args small' });
     const routeDetail = el('div', {});
     const routeSel = el('select', {}, [
-      el('option', { value: 'direct', selected: route.type === 'direct' }, ['Direct from the browser (API must allow CORS)']),
-      el('option', { value: 'bridge', selected: route.type === 'bridge' }, ['Browser session bridge (bookmarklet in my logged-in tab; no admin needed)']),
-      el('option', { value: 'litellm', selected: route.type === 'litellm' }, ['Through my LiteLLM proxy (pass-through endpoint)']),
+      el('option', { value: 'extension', selected: route.type === 'extension' }, [`Browser extension connector${H.ext.available() ? ' (installed ✓)' : ' (not installed)'} — recommended`]),
+      el('option', { value: 'bridge', selected: route.type === 'bridge' }, ['Browser session bridge (bookmarklet in a logged-in tab) — fallback']),
+      el('option', { value: 'direct', selected: route.type === 'direct' }, ['Direct from the browser (only if the API allows CORS)']),
+      el('option', { value: 'litellm', selected: route.type === 'litellm' }, ['Through a LiteLLM pass-through endpoint (needs proxy admin)']),
       el('option', { value: 'proxy', selected: route.type === 'proxy' }, ['Through a CORS proxy URL I trust']),
     ]);
     const renderRoute = () => {
@@ -466,8 +467,23 @@ H.ui = (() => {
       if (routeSel.value === 'litellm') {
         const path = rPath.value.trim().replace(/^\/+|\/+$/g, '') || p.id;
         snippet.textContent = `# LiteLLM config.yaml (ask your LiteLLM admin)\ngeneral_settings:\n  pass_through_endpoints:\n    - path: "/${path}"\n      target: "${url.value.trim().replace(/\/+$/, '') || '<API base URL>'}"\n      headers:\n        ${curAuth.type === 'basic' ? 'Authorization: "Basic <base64 of email:api-token>"' : curAuth.type === 'header' ? (curAuth.fixedName || '<Header-Name>') + ': "<token>"' : 'Authorization: "Bearer <token>"'}\n        Accept: "application/json"`;
+        const tryBtn = el('button', { class: 'btn sm', onclick: async () => { collect(); tryBtn.disabled = true; try { await H.plugins.createPassThrough(p, path); H.toast('Pass-through endpoint created on the proxy. Test the connection now.', 'success', 8000); } catch (e) { H.toast(e.message, 'error', 10000); } finally { tryBtn.disabled = false; } } }, ['Try to create it with my key']);
         routeDetail.append(el('label', { class: 'field' }, [el('span', {}, ['Pass-through path on the proxy']), rPath]),
-          el('p', { class: 'help' }, [`Requests go to ${litellmBase}/${path}/… with your LiteLLM key; the proxy adds the API credentials and forwards to the API. Nothing else in the browser needs the token, so you can leave step 2 empty.`]), snippet);
+          el('p', { class: 'help' }, [`Requests go to ${litellmBase}/${path}/… with your LiteLLM key; the proxy adds the API credentials and forwards to the API. Fill in step 2 with the API token, then either create the endpoint yourself (works if your key has admin rights) or give the snippet to the LiteLLM admin.`]), el('div', { class: 'row gap', style: 'margin:6px 0' }, [tryBtn]), snippet);
+      } else if (routeSel.value === 'extension') {
+        const target = (() => { try { return new URL(url.value.trim()).origin; } catch { return '(enter the URL above)'; } })();
+        const status = el('div', { class: 'setup-result ' + (H.ext.available() ? 'ok' : 'err') }, [H.ext.available() ? `✓ Extension installed (v${H.ext.version()}). Make sure ${target} is in its allowed sites.` : '✕ Extension not detected on this page.']);
+        H.bus.on('ext', () => { status.className = 'setup-result ok'; status.textContent = `✓ Extension installed (v${H.ext.version()}). Make sure ${target} is in its allowed sites.`; });
+        routeDetail.append(
+          el('p', { class: 'help' }, ['A tiny extension (in the "extension" folder of the harness download) performs the REST calls for allowed sites, with your browser login or the token from step 2. No tab to keep open, no admin, survives sleep and navigation.']),
+          el('ol', { class: 'help-list' }, [
+            el('li', {}, ['Open ', el('code', {}, ['chrome://extensions']), ' (Edge: ', el('code', {}, ['edge://extensions']), '), switch on ', el('b', {}, ['Developer mode']), ' (top right).']),
+            el('li', {}, ['Click ', el('b', {}, ['Load unpacked']), ' and choose the ', el('code', {}, ['extension']), ' folder of the harness.', !/^https?:/.test(location.origin) ? ' Then open the extension\'s Details and enable "Allow access to file URLs" (the harness runs from a file).' : '']),
+            el('li', {}, ['Reload this page. Click the extension icon (puzzle piece) → Web LLM Harness Connector and add ', el('code', {}, [target]), ' to the allowed sites. ', el('button', { class: 'btn sm', onclick: () => { H.ext.openOptions(); } }, ['Open allowed sites'])]),
+          ]),
+          status,
+          el('p', { class: 'help' }, ['If your company blocks Developer mode in the browser, fall back to the bookmark bridge.']),
+        );
       } else if (routeSel.value === 'bridge') {
         const target = (() => { try { return new URL(url.value.trim()).origin; } catch { return '(enter the URL above)'; } })();
         const status = el('div', { class: 'setup-result' });
@@ -498,7 +514,7 @@ H.ui = (() => {
     routeSel.onchange = renderRoute; rPath.oninput = renderRoute; url.addEventListener('input', renderRoute);
     const collect = () => {
       p[urlKey] = url.value.trim().replace(/\/+$/, '');
-      p.route = routeSel.value === 'direct' ? { type: 'direct' } : routeSel.value === 'bridge' ? { type: 'bridge' } : routeSel.value === 'litellm' ? { type: 'litellm', path: rPath.value.trim().replace(/^\/+|\/+$/g, '') || p.id } : { type: 'proxy', proxyUrl: rProxy.value.trim() };
+      p.route = routeSel.value === 'direct' ? { type: 'direct' } : routeSel.value === 'extension' ? { type: 'extension' } : routeSel.value === 'bridge' ? { type: 'bridge' } : routeSel.value === 'litellm' ? { type: 'litellm', path: rPath.value.trim().replace(/^\/+|\/+$/g, '') || p.id } : { type: 'proxy', proxyUrl: rProxy.value.trim() };
       const vals = {}; credBox.querySelectorAll('input[data-key]').forEach(i => vals[i.dataset.key] = i.value.trim());
       if (p.kind === 'mcp') { p.headers = { ...(p.headers || {}) }; if (curAuth.type === 'none') delete p.headers.Authorization; else p.headers.Authorization = vals.value; if (p.useLitellmKey && !p[urlKey]) p[urlKey] = ''; }
       else p.auth = curAuth.type === 'none' ? { type: 'none' } : { type: curAuth.type, ...(curAuth.fixedName ? { name: curAuth.fixedName } : {}), ...vals };

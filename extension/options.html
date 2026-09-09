@@ -1,0 +1,10 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Web LLM Harness Connector</title>
+<style>body{font:14px/1.5 system-ui,sans-serif;max-width:640px;margin:32px auto;padding:0 16px;color:#1a1d24}h1{font-size:18px}input{width:100%;padding:8px;font:inherit;border:1px solid #bbb;border-radius:6px}button{padding:8px 14px;font:inherit;border-radius:6px;border:1px solid #bbb;background:#f4f5f8;cursor:pointer}button.primary{background:#4f6ef7;color:#fff;border-color:#4f6ef7}li{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #eee}li span{flex:1;font-family:monospace}.hint{color:#666;font-size:13px}</style></head>
+<body>
+<h1>Allowed sites</h1>
+<p class="hint">The harness page may call REST APIs on these origins through this extension, using your browser login (cookies) or a token the harness sends. Add only sites you trust the harness with.</p>
+<div style="display:flex;gap:8px"><input id="origin" placeholder="https://jira.your-company.com"><button id="add" class="primary">Add</button></div>
+<ul id="list"></ul>
+<p class="hint">Origins are scheme + host (+ port), e.g. <code>https://jira.orange.sk</code> or <code>https://gitlab.com</code>.</p>
+<script src="options.js"></script>
+</body></html>

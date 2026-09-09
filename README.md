@@ -55,8 +55,8 @@ Don't want the check? Turn it off in Settings → Security & privacy; it only ev
 - **Skills**: reusable playbooks you trigger with `/name` or the model picks up on its own.
 - **Plugins**: Jira Cloud, Jira Server/Data Center, GitHub, GitLab out of the box, any REST API via a JSON manifest,
   and remote **MCP** servers.
-- **Browser session bridge**: APIs that block browsers (Jira Cloud!) still work: a bookmarklet lets your logged-in
-  tab do the calls. No admin, no proxy, no token.
+- **Connector extension**: APIs that block browsers (Jira!) still work through a tiny extension you load from the
+  download folder in two clicks. No admin, no proxy. A bookmarklet bridge exists as a fallback.
 - **Permissions you control**: per-tool allow / ask / deny, session grants, re-runnable tool cards.
 - **Usage & costs**: context meter, per-chat and all-time totals, prices from LiteLLM or your own table.
 - **Security first**: no backend, no telemetry, no third-party fetch services by default, secrets in a separate
@@ -155,30 +155,22 @@ Plugins add tools. Two kinds:
 Plugin tools are namespaced `pluginId__toolName` and obey the same permission system.
 
 ### Reaching APIs that block browsers (CORS)
-A web page can only call APIs that send CORS headers for its origin. GitHub and GitLab do; Jira Server / Data Center
-does once your origin is on its Allowlist; **Jira Cloud never does**, so a direct call fails with "Failed to fetch"
-no matter what token you use. Serve the harness from an http(s) URL for this: a page opened via `file://` has origin
-`null`, which cannot be allowlisted. Step 3 of the plugin setup offers three routes:
+A web page can only call APIs that send CORS headers for its origin. GitHub does; Jira Server / Data Center only
+after an admin allowlists your origin; **Jira Cloud never does**. Step 3 of the plugin setup offers these routes:
 
 | Route | How it works | Needs |
 |---|---|---|
-| Direct | browser → API | the API allows your page origin. Jira Server / Data Center: admin adds the origin under *Administration → System → Allowlist* with "Allow incoming" (Jira 8.9+). GitHub/GitLab: always. |
-| **Browser session bridge** | you click a bookmarklet on a tab where you are logged in to the site (e.g. Jira). That tab relays the harness's requests as same-origin calls with your normal login session and returns the results. | nothing: no admin, no token, no server. Keep the tab open while you use the plugin. |
-| **Through my LiteLLM proxy** | browser → `<LiteLLM>/jira/…` (with your LiteLLM key) → Jira. The proxy adds the Jira credentials. | the LiteLLM admin adds a *pass-through endpoint* (the wizard prints the YAML snippet) |
-| CORS proxy | browser → proxy → API | a proxy you or your company operates |
+| **Browser extension connector** (recommended) | the tiny extension in the `extension/` folder performs the REST calls for sites you allow, with your browser login or the plugin's token. No tab to keep open, survives sleep and navigation. | load it once: `chrome://extensions` → Developer mode → *Load unpacked* → pick the `extension` folder → add the site under its allowed sites. No admin rights, nothing downloaded. Only blocked if company policy disables Developer mode. |
+| Browser session bridge (fallback) | a bookmarklet turns a logged-in tab into a relay | keep a dedicated tab open; excluded from the browser's memory saver |
+| Direct | browser → API | the API allows your page origin (GitHub, GitLab, allowlisted Jira DC) |
+| LiteLLM pass-through / CORS proxy | browser → relay → API | someone who administers the relay |
 
-The bridge is the recommended route when you cannot change server configuration. How it works: the bookmarklet
-(generated in the plugin setup, so it embeds your harness URL) registers a `postMessage` listener in the site's tab
-and connects to the harness without needing popups: it uses the tab link if you opened the site from the harness
-("Open …" button in the wizard), otherwise tries a popup, and if that is blocked it embeds the harness as a side panel
-inside the site's page (panel mode; that instance keeps its own settings because browsers partition storage for
-embedded cross-site pages). The harness only accepts messages from origins that announced themselves, the
-site tab only accepts requests from the harness origin and only for its own origin, and credentials never leave the
-browser. Because the calls run as *you*, everything the plugin does is done with your permissions on that site.
-The bridge also handles the sites' CSRF rules: Jira gets `X-Atlassian-Token: no-check`, and for GitLab (or any Rails
-app) the bridge reads the page's `csrf-token` meta tag and adds `X-CSRF-Token` to write requests. Jira Cloud, Jira
-Server, GitLab, Confluence and most internal tools work this way; the bridge is the default route for the Jira and
-GitLab plugins.
+**Extension details.** `extension/manifest.json` (Manifest V3), a service worker that does the fetch, a content script
+that only activates on pages marked as the harness, and an options page with the allowed-sites list. The harness
+detects it automatically and marks plugins "via extension". Requests go with cookies when the plugin uses "My browser
+login session", or with the plugin's token (and without cookies) otherwise. Jira Server/Cloud work with the login
+session; for GitLab use a personal access token (its cookie sessions need a CSRF token the extension cannot read).
+If the harness is opened from a file, enable "Allow access to file URLs" in the extension's details.
 
 Alternative for Jira/Confluence/GitHub: the **LiteLLM MCP gateway** plugin. The LiteLLM admin registers MCP servers
 (e.g. Atlassian's remote MCP) in LiteLLM; the harness talks to `<LiteLLM>/mcp/` with your LiteLLM key, so no extra
@@ -216,7 +208,9 @@ js/util.js        helpers, templating, HTML→text
 js/db.js          IndexedDB (chats, memory)
 js/settings.js    settings + secret store
 js/usage.js       tokens, context estimate, cost tracking
-js/bridge.js      browser-session bridge (bookmarklet relay for sites without CORS)
+js/bridge.js      browser-session bridge (bookmarklet relay, fallback)
+js/ext.js         connector-extension client
+extension/        the browser extension (Manifest V3): load unpacked in Chrome/Edge
 js/permissions.js policies + permission prompt
 js/llm.js         LiteLLM client (SSE streaming, tool calls)
 js/fs.js          File System Access API workspace
