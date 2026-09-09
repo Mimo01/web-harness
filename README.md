@@ -112,10 +112,10 @@ safe tools" turns on strict mode. When prompted you can *Allow once*, *Allow for
 (optionally with a message the model sees) or *Never allow*.
 
 ### Re-running tools
-Tool cards in the chat have a re-run button when the action is repeatable by you (open a URL again, re-render HTML,
-download again, refresh a listing, re-fetch a page, re-run a script…). Re-run results are shown to you only and are
-not sent to the model. Tools that change state (write, edit, plugin POST/PUT) ask for confirmation first; destructive
-ones (delete, merge) and interactive ones (ask_user, sleep, sub-agent) cannot be re-run.
+Tool cards have a re-run button only where repeating the action is something you experience: open the URL again,
+render the HTML preview again, run an HTML file again, download the file again, copy to the clipboard again, show the
+notification again. Everything else (reads, searches, writes, API calls, computations) cannot be re-run from the card,
+because the result would only be shown to you and never reach the model.
 
 ### Usage & costs
 The message box shows the estimated context in use versus the model's window, and the chat's tokens and cost. Prices and

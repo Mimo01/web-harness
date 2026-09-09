@@ -389,8 +389,8 @@ H.plugins = (() => {
     if (cachedTools.key === key) return cachedTools.list;
     const list = [];
     for (const p of plugins) {
-      if (p.kind === 'rest') for (const t of p.tools || []) list.push({ name: `${p.id}__${t.name}`, group: 'Plugin: ' + p.name, plugin: p.id, risk: t.risk || 'write', rerun: (t.request?.method || 'GET') === 'GET' ? 'Refresh' : 'Send again', rerunConfirm: (t.request?.method || 'GET') !== 'GET', description: `[${p.name}] ${t.description}`, parameters: t.parameters || { type: 'object', properties: {} }, run: (args) => runRest(p, t, args) });
-      if (p.kind === 'mcp') for (const t of mcpCache.get(p.id)?.tools || []) list.push({ name: `${p.id}__${t.name}`, group: 'Plugin: ' + p.name, plugin: p.id, rerun: t.annotations?.readOnlyHint ? 'Refresh' : 'Call again', rerunConfirm: !t.annotations?.readOnlyHint, risk: t.annotations?.readOnlyHint ? 'safe' : (t.annotations?.destructiveHint ? 'danger' : 'write'), description: `[${p.name}] ${t.description || ''}`, parameters: t.inputSchema || { type: 'object', properties: {} }, run: (args) => runMcp(p, t.name, args) });
+      if (p.kind === 'rest') for (const t of p.tools || []) list.push({ name: `${p.id}__${t.name}`, group: 'Plugin: ' + p.name, plugin: p.id, risk: t.risk || 'write', description: `[${p.name}] ${t.description}`, parameters: t.parameters || { type: 'object', properties: {} }, run: (args) => runRest(p, t, args) });
+      if (p.kind === 'mcp') for (const t of mcpCache.get(p.id)?.tools || []) list.push({ name: `${p.id}__${t.name}`, group: 'Plugin: ' + p.name, plugin: p.id, risk: t.annotations?.readOnlyHint ? 'safe' : (t.annotations?.destructiveHint ? 'danger' : 'write'), description: `[${p.name}] ${t.description || ''}`, parameters: t.inputSchema || { type: 'object', properties: {} }, run: (args) => runMcp(p, t.name, args) });
     }
     cachedTools.key = key; cachedTools.list = list;
     return list;

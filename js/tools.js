@@ -24,13 +24,13 @@ H.tools = (() => {
 
   /* ===================== FILE SYSTEM ===================== */
   def({
-    name: 'fs_list', rerun: 'Refresh', group: 'Files', risk: 'safe',
+    name: 'fs_list', group: 'Files', risk: 'safe',
     description: 'List files and directories in the workspace. Returns paths relative to workspace root.',
     parameters: obj({ path: str('Directory path relative to workspace root (empty = root)'), recursive: bool('List recursively (skips node_modules/.git etc.)') }),
     run: async ({ path = '', recursive = false }) => ok({ workspace: H.fs.name(), entries: await H.fs.list(path, { recursive }) }),
   });
   def({
-    name: 'fs_read', rerun: 'Read again', group: 'Files', risk: 'safe',
+    name: 'fs_read', group: 'Files', risk: 'safe',
     description: 'Read a file from the workspace as text. PDF, Word (.docx), PowerPoint (.pptx) and spreadsheets (.xlsx/.xls/.ods/.csv) are converted to text automatically. Optionally a line range.',
     parameters: obj({ path: str('File path'), startLine: num('1-based first line (optional)'), endLine: num('1-based last line inclusive (optional)') }, ['path']),
     run: async ({ path, startLine, endLine }, ctx) => {
@@ -51,13 +51,13 @@ H.tools = (() => {
     },
   });
   def({
-    name: 'fs_write', rerun: 'Write again', rerunConfirm: true, group: 'Files', risk: 'write',
+    name: 'fs_write', group: 'Files', risk: 'write',
     description: 'Create or overwrite a text file in the workspace. Parent directories are created automatically.',
     parameters: obj({ path: str('File path'), content: str('Full file content') }, ['path', 'content']),
     run: async ({ path, content }) => ok({ path, ...(await H.fs.writeFile(path, content)) }),
   });
   def({
-    name: 'fs_edit', rerun: 'Apply edit again', rerunConfirm: true, group: 'Files', risk: 'write',
+    name: 'fs_edit', group: 'Files', risk: 'write',
     description: 'Edit a file by replacing an exact string with another. old_string must occur exactly once unless replace_all is true.',
     parameters: obj({ path: str('File path'), old_string: str('Exact text to replace'), new_string: str('Replacement text'), replace_all: bool('Replace all occurrences') }, ['path', 'old_string', 'new_string']),
     run: async ({ path, old_string, new_string, replace_all }) => {
@@ -68,13 +68,13 @@ H.tools = (() => {
     },
   });
   def({
-    name: 'fs_append', rerun: 'Append again', rerunConfirm: true, group: 'Files', risk: 'write',
+    name: 'fs_append', group: 'Files', risk: 'write',
     description: 'Append text to a file (creates it if missing).',
     parameters: obj({ path: str('File path'), content: str('Text to append') }, ['path', 'content']),
     run: async ({ path, content }) => ok({ path, ...(await H.fs.appendFile(path, content)) }),
   });
   def({
-    name: 'fs_mkdir', rerun: 'Create again', rerunConfirm: true, group: 'Files', risk: 'write',
+    name: 'fs_mkdir', group: 'Files', risk: 'write',
     description: 'Create a directory (recursively).',
     parameters: obj({ path: str('Directory path') }, ['path']),
     run: async ({ path }) => ok(await H.fs.mkdir(path)),
@@ -86,25 +86,25 @@ H.tools = (() => {
     run: async ({ path, recursive }) => ok(await H.fs.remove(path, { recursive })),
   });
   def({
-    name: 'fs_move', rerun: 'Move again', rerunConfirm: true, group: 'Files', risk: 'write',
+    name: 'fs_move', group: 'Files', risk: 'write',
     description: 'Move or rename a file.',
     parameters: obj({ from: str('Source path'), to: str('Destination path') }, ['from', 'to']),
     run: async ({ from, to }) => ok(await H.fs.move(from, to)),
   });
   def({
-    name: 'fs_stat', rerun: 'Refresh', group: 'Files', risk: 'safe',
+    name: 'fs_stat', group: 'Files', risk: 'safe',
     description: 'Get metadata (kind, size, modified) for a path.',
     parameters: obj({ path: str('Path') }, ['path']),
     run: async ({ path }) => ok(await H.fs.stat(path)),
   });
   def({
-    name: 'fs_search', rerun: 'Search again', group: 'Files', risk: 'safe',
+    name: 'fs_search', group: 'Files', risk: 'safe',
     description: 'Search file contents (grep). Returns matching lines with file and line number.',
     parameters: obj({ query: str('Text or regex to search for'), path: str('Directory to search in (default root)'), regex: bool('Treat query as a regular expression'), caseSensitive: bool('Case sensitive'), glob: str('Only files matching glob, e.g. *.js or src/**/*.py'), maxResults: num('Max results (default 200)') }, ['query']),
     run: async (a) => ok({ hits: await H.fs.search(a) }),
   });
   def({
-    name: 'fs_find', rerun: 'Search again', group: 'Files', risk: 'safe',
+    name: 'fs_find', group: 'Files', risk: 'safe',
     description: 'Find files by glob pattern, e.g. "**/*.ts" or "*.md".',
     parameters: obj({ glob: str('Glob pattern'), path: str('Directory to search in') }, ['glob']),
     run: async ({ glob, path = '' }) => ok({ files: await H.fs.find(glob, path) }),
@@ -131,7 +131,7 @@ H.tools = (() => {
   });
 
   def({
-    name: 'view_image', rerun: 'Show again', group: 'Files', risk: 'safe',
+    name: 'view_image', group: 'Files', risk: 'safe',
     description: 'Look at an image file from the workspace (png, jpg, gif, webp, bmp, svg). The image is shown to you in the next turn as vision input (requires a multimodal model).',
     parameters: obj({ path: str('Image file path in the workspace') }, ['path']),
     run: async ({ path }, ctx) => {
@@ -147,19 +147,19 @@ H.tools = (() => {
 
   /* ===================== CODE EXECUTION ===================== */
   def({
-    name: 'run_javascript', rerun: 'Run again', group: 'Code', risk: 'write',
+    name: 'run_javascript', group: 'Code', risk: 'write',
     description: 'Run JavaScript in a sandboxed Web Worker (no DOM, no workspace access, network via fetch allowed). Use console.log for output; the value of a final `return` is captured. Async/await supported.',
     parameters: obj({ code: str('JavaScript code (body of an async function; use return to yield a value)'), input: { description: 'Optional JSON input available as `input`' }, timeoutMs: num('Timeout in ms (default 15000)') }, ['code']),
     run: async ({ code, input, timeoutMs }) => ok(await H.runtime.runJS(code, { timeout: timeoutMs || 15000, input })),
   });
   def({
-    name: 'run_python', rerun: 'Run again', group: 'Code', risk: 'write',
+    name: 'run_python', group: 'Code', risk: 'write',
     description: 'Run Python code in the browser via Pyodide (numpy, pandas, etc. available; pure-python packages installable). Output = stdout + value of last expression. No workspace access; pass files via `files`.',
     parameters: obj({ code: str('Python code'), packages: { type: 'array', items: { type: 'string' }, description: 'Packages to load/install, e.g. ["numpy","requests"]' }, files: { type: 'object', description: 'Map filename -> text content to place in the Python working dir', additionalProperties: { type: 'string' } }, timeoutMs: num('Timeout ms (default 60000)') }, ['code']),
     run: async ({ code, packages, files, timeoutMs }, ctx) => ok(await H.runtime.runPython(code, { packages: packages || [], files: files || {}, timeout: timeoutMs || 60000, onStatus: ctx.onStatus })),
   });
   def({
-    name: 'run_file', rerun: 'Run again', group: 'Code', risk: 'write',
+    name: 'run_file', rerun: 'Run again', rerunConfirm: (a) => !/\.html?$/i.test(String(a.path || '')), group: 'Code', risk: 'write',
     description: 'Run a file from the workspace: .js/.mjs (sandboxed worker), .py (Pyodide), .html (preview panel), .json (parse & return), .md/.txt (return contents). Other .py files in the same directory are made importable.',
     parameters: obj({ path: str('Workspace file path'), args: { type: 'array', items: { type: 'string' }, description: 'Arguments (sys.argv for Python, `input.args` for JS)' } }, ['path']),
     run: async ({ path, args = [] }, ctx) => {
@@ -186,7 +186,7 @@ H.tools = (() => {
     run: async ({ html, title }) => { H.runtime.previewHTML(html, { title: title || 'Preview' }); return ok({ rendered: true }); },
   });
   def({
-    name: 'calculate', rerun: 'Recalculate', group: 'Code', risk: 'safe',
+    name: 'calculate', group: 'Code', risk: 'safe',
     description: 'Evaluate a math/JavaScript expression safely, e.g. "Math.sqrt(2)*10" or "(1234*5)/3".',
     parameters: obj({ expression: str('Expression') }, ['expression']),
     run: async ({ expression }) => { const r = await H.runtime.runJS('return (' + expression + ');', { timeout: 3000 }); if (r.error) throw new Error(r.error); return ok({ result: r.result }); },
@@ -194,7 +194,7 @@ H.tools = (() => {
 
   /* ===================== WEB ===================== */
   def({
-    name: 'web_fetch', rerun: 'Fetch again', group: 'Web', risk: 'safe',
+    name: 'web_fetch', group: 'Web', risk: 'safe',
     description: 'Fetch a URL directly from the browser and return readable text (HTML converted to markdown-ish text) or raw body. Sites that do not allow cross-origin requests cannot be fetched unless the user configured a proxy; in that case suggest open_url so the user can read the page themselves.',
     parameters: obj({ url: str('Absolute URL'), raw: bool('Return raw body instead of extracted text'), maxChars: num('Max characters to return (default 20000)') }, ['url']),
     run: async ({ url, raw = false, maxChars = 20000 }) => {
@@ -222,7 +222,7 @@ H.tools = (() => {
     },
   });
   def({
-    name: 'web_search', rerun: 'Search again', group: 'Web', risk: 'safe',
+    name: 'web_search', group: 'Web', risk: 'safe',
     description: 'Search the web using the search provider configured by the user (disabled until configured). Returns result snippets and URLs.',
     parameters: obj({ query: str('Search query'), maxChars: num('Max characters (default 12000)') }, ['query']),
     run: async ({ query, maxChars = 12000 }) => {
@@ -242,7 +242,7 @@ H.tools = (() => {
     },
   });
   def({
-    name: 'http_request', rerun: 'Send again', rerunConfirm: (a) => (a.method || 'GET') !== 'GET', group: 'Web', risk: 'write',
+    name: 'http_request', group: 'Web', risk: 'write',
     description: 'Make an arbitrary HTTP request (call any REST API). Returns status, headers and body (JSON parsed when possible).',
     parameters: obj({
       url: str('Absolute URL'), method: str('HTTP method', { enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] }),
@@ -279,19 +279,19 @@ H.tools = (() => {
 
   /* ===================== DATA ===================== */
   def({
-    name: 'json_query', rerun: 'Run again', group: 'Data', risk: 'safe',
+    name: 'json_query', group: 'Data', risk: 'safe',
     description: 'Transform JSON data with a JavaScript expression. `data` holds the parsed input, e.g. "data.items.filter(i => i.open).map(i => i.id)".',
     parameters: obj({ data: { description: 'JSON value or JSON string' }, expression: str('JavaScript expression over `data`') }, ['data', 'expression']),
     run: async ({ data, expression }) => { const d = typeof data === 'string' ? H.tryJSON(data, data) : data; const r = await H.runtime.runJS(`const data = input; return (${expression});`, { input: d, timeout: 5000 }); if (r.error) throw new Error(r.error); return ok({ result: r.result }); },
   });
   def({
-    name: 'regex_extract', rerun: 'Run again', group: 'Data', risk: 'safe',
+    name: 'regex_extract', group: 'Data', risk: 'safe',
     description: 'Extract all matches of a regex from text.',
     parameters: obj({ text: str('Input text'), pattern: str('Regular expression'), flags: str('Regex flags (default "g")') }, ['text', 'pattern']),
     run: async ({ text, pattern, flags = 'g' }) => { const re = new RegExp(pattern, flags.includes('g') ? flags : flags + 'g'); const out = []; let m; while ((m = re.exec(text)) && out.length < 1000) { out.push(m.length > 1 ? m.slice(1) : m[0]); if (!m[0]) re.lastIndex++; } return ok({ matches: out }); },
   });
   def({
-    name: 'csv_parse', rerun: 'Parse again', group: 'Data', risk: 'safe',
+    name: 'csv_parse', group: 'Data', risk: 'safe',
     description: 'Parse CSV/TSV text into an array of row objects (first row = header).',
     parameters: obj({ text: str('CSV text'), delimiter: str('Delimiter (default ",")'), limit: num('Max rows (default 500)') }, ['text']),
     run: async ({ text, delimiter = ',', limit = 500 }) => {
@@ -310,19 +310,19 @@ H.tools = (() => {
     },
   });
   def({
-    name: 'text_stats', rerun: 'Run again', group: 'Data', risk: 'safe',
+    name: 'text_stats', group: 'Data', risk: 'safe',
     description: 'Word/line/char counts and approximate token count of a text.',
     parameters: obj({ text: str('Text') }, ['text']),
     run: async ({ text }) => ok({ chars: text.length, words: (text.match(/\S+/g) || []).length, lines: text.split('\n').length, approxTokens: H.estTokens(text) }),
   });
   def({
-    name: 'base64', rerun: 'Run again', group: 'Data', risk: 'safe',
+    name: 'base64', group: 'Data', risk: 'safe',
     description: 'Encode or decode base64 text.',
     parameters: obj({ text: str('Input'), mode: str('encode or decode', { enum: ['encode', 'decode'] }) }, ['text', 'mode']),
     run: async ({ text, mode }) => ok({ result: mode === 'encode' ? btoa(unescape(encodeURIComponent(text))) : decodeURIComponent(escape(atob(text))) }),
   });
   def({
-    name: 'hash_text', rerun: 'Run again', group: 'Data', risk: 'safe',
+    name: 'hash_text', group: 'Data', risk: 'safe',
     description: 'Compute SHA-256 / SHA-1 hex digest of text.',
     parameters: obj({ text: str('Input'), algorithm: str('SHA-256 (default), SHA-1, SHA-384, SHA-512') }, ['text']),
     run: async ({ text, algorithm = 'SHA-256' }) => { const b = await crypto.subtle.digest(algorithm, new TextEncoder().encode(text)); return ok({ algorithm, hex: [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('') }); },
@@ -330,19 +330,19 @@ H.tools = (() => {
 
   /* ===================== MEMORY (persistent notes) ===================== */
   def({
-    name: 'memory_save', rerun: 'Save again', rerunConfirm: true, group: 'Memory', risk: 'safe',
+    name: 'memory_save', group: 'Memory', risk: 'safe',
     description: 'Persist a fact/note under a key so it is available in future chats. Overwrites existing key.',
     parameters: obj({ key: str('Short kebab-case key'), value: str('Content to remember'), tags: { type: 'array', items: { type: 'string' } } }, ['key', 'value']),
     run: async ({ key, value, tags }) => { await H.db.memSet(key, value, tags); return ok({ saved: key }); },
   });
   def({
-    name: 'memory_get', rerun: 'Refresh', group: 'Memory', risk: 'safe',
+    name: 'memory_get', group: 'Memory', risk: 'safe',
     description: 'Retrieve a memory by key.',
     parameters: obj({ key: str('Key') }, ['key']),
     run: async ({ key }) => ok((await H.db.memGet(key)) || { error: 'not found' }),
   });
   def({
-    name: 'memory_list', rerun: 'Refresh', group: 'Memory', risk: 'safe',
+    name: 'memory_list', group: 'Memory', risk: 'safe',
     description: 'List all memories (keys, tags, values), optionally filtered by a substring.',
     parameters: obj({ filter: str('Substring filter on key/value/tags (optional)') }),
     run: async ({ filter }) => { let all = await H.db.memAll(); if (filter) { const f = filter.toLowerCase(); all = all.filter(m => (m.key + ' ' + m.value + ' ' + (m.tags || []).join(' ')).toLowerCase().includes(f)); } return ok({ memories: all }); },
@@ -381,7 +381,7 @@ H.tools = (() => {
     run: async ({ text }) => { if (!navigator.clipboard) throw new Error('Clipboard API unavailable (needs a secure context: https or localhost).'); await navigator.clipboard.writeText(String(text)); return ok({ copied: String(text).length }); },
   });
   def({
-    name: 'get_datetime', rerun: 'Refresh', group: 'Utility', risk: 'safe',
+    name: 'get_datetime', group: 'Utility', risk: 'safe',
     description: 'Get the current date/time, timezone and locale of the user.',
     parameters: obj({}),
     run: async () => { const d = new Date(); return ok({ iso: d.toISOString(), local: d.toString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language, epochMs: d.getTime() }); },
@@ -393,7 +393,7 @@ H.tools = (() => {
     run: async ({ ms }) => { await H.sleep(Math.min(60000, ms)); return ok({ slept: ms }); },
   });
   def({
-    name: 'browser_info', rerun: 'Refresh', group: 'Utility', risk: 'safe',
+    name: 'browser_info', group: 'Utility', risk: 'safe',
     description: 'Return information about the runtime environment (browser, capabilities, workspace, loaded plugins).',
     parameters: obj({}),
     run: async () => ok({ userAgent: navigator.userAgent, fsAccess: H.fs.supported(), workspace: H.fs.name() || null, online: navigator.onLine, pyodideLoaded: H.runtime.pyodideLoaded(), plugins: H.plugins.list().map(p => ({ id: p.id, enabled: p.enabled, kind: p.kind })), skills: H.skills.list().map(s => s.name) }),

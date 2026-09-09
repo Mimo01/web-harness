@@ -1,6 +1,6 @@
 {
-  "version": "1.8.6",
+  "version": "1.8.7",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Deleting the selected chat switches to the previous chat instead of creating a new one."
+  "notes": "Re-run buttons only where repeating the action makes sense."
 }

@@ -21,7 +21,7 @@ H.secrets = (() => {
 
 /* About: edit these two lines to change the credit / beer link shown in Settings → About */
 H.ABOUT = {
-  author: 'Milan Mozolak', version: '1.8.6',
+  author: 'Milan Mozolak', version: '1.8.7',
   repoUrl: 'https://github.com/Mimo01/web-harness',
   versionUrl: 'https://raw.githubusercontent.com/Mimo01/web-harness/main/version.json',
 };
