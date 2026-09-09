@@ -14,7 +14,12 @@ http.createServer((req, res) => {
     const id = 'chatcmpl-' + Date.now();
     const chunk = (delta, finish = null) => send(res, { id, object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: finish }] });
     const toolNames = (j.tools || []).map(t => t.function.name);
-    if (last.role === 'user' && /calc/i.test(last.content) && toolNames.includes('calculate')) {
+    const anyLoop = msgs.some(m => m.role === 'user' && typeof m.content === 'string' && /loop/i.test(m.content));
+    if (anyLoop && toolNames.includes('calculate') && !msgs.some(m => m.role === 'user' && /loop guard/i.test(m.content))) {
+      chunk({ role: 'assistant', content: '' });
+      chunk({ tool_calls: [{ index: 0, id: 'call_' + Date.now(), type: 'function', function: { name: 'calculate', arguments: '{"expression":"1+1"}' } }] });
+      chunk({}, 'tool_calls');
+    } else if (last.role === 'user' && /calc/i.test(last.content) && toolNames.includes('calculate')) {
       chunk({ role: 'assistant', content: 'Let me compute that. ' });
       chunk({ tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'calculate', arguments: '{"expr' } }] });
       chunk({ tool_calls: [{ index: 0, function: { arguments: 'ession":"6*7"}' } }] });

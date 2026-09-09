@@ -30,11 +30,21 @@ H.plugins = (() => {
     id: 'jira', name: 'Jira', kind: 'rest', enabled: false,
     description: 'Atlassian Jira Cloud REST API v3 (search, read, create, update, comment, transition issues).',
     baseUrl: 'https://your-domain.atlassian.net',
-    auth: { type: 'none' }, route: { type: 'extension' },
+    auth: { type: 'none' }, route: { type: 'bridge' },
     headers: { 'Accept': 'application/json' },
+    guide: `Jira workflow (tool names start with {id}__):
+- Issue keys look like PROJ-123 (project key + number). From a URL …/browse/PROJ-123 the key is the last segment.
+- Find issues with search_issues + JQL. Examples: \`assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC\`, \`project = PROJ AND status = "In Progress"\`, \`text ~ "login bug"\`, \`key in (PROJ-1, PROJ-2)\`, \`sprint in openSprints() AND project = PROJ\`. Quote values containing spaces. Start with maxResults 20.
+- Read one issue with get_issue (description, comments, status). Do not use search_issues for details you already have.
+- Change status: get_transitions for the issue → pick the transition whose target matches → transition_issue with that id. Ids differ per project; never guess them.
+- Assign: search_users (name or email) → accountId (Cloud) or username (Server) → assign_issue.
+- Create: create_issue needs project key, summary, issueType (Task, Bug, Story…). Unknown project key → list_projects.
+- Comments: add_comment with plain text. Keep comments concise; confirm wording with the user for anything customer-facing.
+- Boards/sprints: list_boards (filter by project) → list_sprints(boardId) → issues via JQL \`sprint = <id>\` (or sprint_issues where available).
+- Errors: 401/403 = credentials or permissions: stop and tell the user, do not retry. 404 = wrong key/project: verify with search_issues once, do not repeat the same call. Empty JQL result: broaden the query once (drop a filter), then report what you tried.`,
     notes: 'Jira Cloud: create an API token at https://id.atlassian.com/manage-profile/security/api-tokens. Jira Cloud does not send CORS headers, so set a CORS proxy in Settings > Web (or use a browser extension that adds CORS headers) when running from the browser. Jira Data Center: use auth type "bearer" with a PAT.',
     tools: [
-      { name: 'search_issues', risk: 'safe', description: 'Search issues with JQL. Returns key, summary, status, assignee, priority, updated.', parameters: P({ jql: S('JQL query, e.g. project = ABC AND status != Done ORDER BY updated DESC'), maxResults: N('Max results (default 20)'), fields: S('Comma-separated fields (default summary,status,assignee,priority,updated,issuetype)') }, ['jql']),
+      { name: 'search_issues', risk: 'safe', description: 'Search issues with JQL, e.g. `project = PROJ AND status != Done ORDER BY updated DESC`, `assignee = currentUser() AND resolution = Unresolved`, `key = PROJ-123`. Returns key, summary, status, assignee, priority, updated.', parameters: P({ jql: S('JQL query, e.g. project = ABC AND status != Done ORDER BY updated DESC'), maxResults: N('Max results (default 20)'), fields: S('Comma-separated fields (default summary,status,assignee,priority,updated,issuetype)') }, ['jql']),
         request: { method: 'GET', path: '/rest/api/3/search/jql', query: { jql: '{{jql}}', maxResults: '{{maxResults}}', fields: '{{fields}}' } }, defaults: { maxResults: 20, fields: 'summary,status,assignee,priority,updated,issuetype' },
         transform: 'data.issues ? data.issues.map(i => ({ key: i.key, summary: i.fields.summary, status: i.fields.status?.name, assignee: i.fields.assignee?.displayName, priority: i.fields.priority?.name, type: i.fields.issuetype?.name, updated: i.fields.updated })) : data' },
       { name: 'get_issue', risk: 'safe', description: 'Get full details of an issue (description, comments, status, links).', parameters: P({ key: S('Issue key, e.g. ABC-123') }, ['key']),
@@ -48,7 +58,7 @@ H.plugins = (() => {
         request: { method: 'POST', path: '/rest/api/3/issue/{{key}}/comment', body: { body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: '{{body}}' }] }] } } } },
       { name: 'get_transitions', risk: 'safe', description: 'List available workflow transitions for an issue.', parameters: P({ key: S('Issue key') }, ['key']),
         request: { method: 'GET', path: '/rest/api/3/issue/{{key}}/transitions' }, transform: 'data.transitions.map(t => ({ id: t.id, name: t.name, to: t.to?.name }))' },
-      { name: 'transition_issue', risk: 'write', description: 'Move an issue through a workflow transition (use get_transitions to find the id).', parameters: P({ key: S('Issue key'), transitionId: S('Transition id') }, ['key', 'transitionId']),
+      { name: 'transition_issue', risk: 'write', description: 'Move an issue to another status. Call get_transitions first and pick the id whose target status matches; ids differ per project.', parameters: P({ key: S('Issue key'), transitionId: S('Transition id') }, ['key', 'transitionId']),
         request: { method: 'POST', path: '/rest/api/3/issue/{{key}}/transitions', body: { transition: { id: '{{transitionId}}' } } } },
       { name: 'assign_issue', risk: 'write', description: 'Assign an issue to a user by accountId (use search_users to find it). Pass null to unassign.', parameters: P({ key: S('Issue key'), accountId: S('Account id') }, ['key']),
         request: { method: 'PUT', path: '/rest/api/3/issue/{{key}}/assignee', body: { accountId: '{{accountId}}' } } },
@@ -70,6 +80,14 @@ H.plugins = (() => {
     baseUrl: 'https://api.github.com',
     auth: { type: 'bearer', token: '<personal access token>' },
     headers: { 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+    guide: `GitHub workflow (tool names start with git__):
+- Repositories are owner + repo (URL https://github.com/OWNER/REPO/…); PR and issue numbers follow /pull/ or /issues/.
+- Explore: list_repos → get_repo (default branch) → list_dir / get_file (ref = branch). "Where is X" questions: search_code with \`repo:owner/name terms\`.
+- History: list_commits (optionally path) → get_commit (diff); compare(base, head) for what changed between refs.
+- Pull requests: list_pull_requests → get_pull_request → get_pull_request_diff or list_pr_files. Review with create_pr_review or add_pr_comment. merge_pull_request only when the user explicitly asks.
+- Writing files: get_branch_sha(base) → create_branch → get_file (for the file sha when updating) → put_file (plain text content, include sha for updates) → create_pull_request. Never write to the default branch unless asked.
+- Issues: list_issues → create_issue; add_pr_comment also works for issues.
+- Errors: 401/403 = token missing or lacks scope: stop and tell the user. 404 = wrong owner/repo/branch or no access: verify with list_repos once, do not repeat. 422 on put_file usually means a missing or stale sha: get_file again.`,
     notes: 'GitHub API supports CORS, so this works directly from the browser. Create a fine-grained PAT at https://github.com/settings/tokens. For GitLab or Bitbucket, duplicate this plugin and adapt the paths.',
     tools: [
       { name: 'list_repos', risk: 'safe', description: 'List repositories of the authenticated user or an org.', parameters: P({ org: S('Organization (optional; default = your repos)'), perPage: N('Per page (default 30)') }),
@@ -89,7 +107,7 @@ H.plugins = (() => {
         request: { method: 'GET', path: '/repos/{{owner}}/{{repo}}/contents/{{path}}', query: { ref: '{{ref}}' } }, transform: 'Array.isArray(data) ? data.map(e => ({ path: e.path, type: e.type, size: e.size })) : ({ path: data.path, sha: data.sha, size: data.size, content: data.encoding === "base64" ? decodeURIComponent(escape(atob(data.content.replace(/\\n/g, "")))) : data.content })' },
       { name: 'list_dir', risk: 'safe', description: 'List a directory in a repo.', parameters: P({ owner: S('Owner'), repo: S('Repo'), path: S('Directory path (empty = root)'), ref: S('Branch (optional)') }, ['owner', 'repo']),
         request: { method: 'GET', path: '/repos/{{owner}}/{{repo}}/contents/{{path}}', query: { ref: '{{ref}}' } }, transform: '(Array.isArray(data) ? data : [data]).map(e => ({ path: e.path, type: e.type, size: e.size }))' },
-      { name: 'put_file', risk: 'write', description: 'Create or update a file with a commit. For updates, pass the current file sha (from get_file).', parameters: P({ owner: S('Owner'), repo: S('Repo'), path: S('File path'), content: S('New text content'), message: S('Commit message'), branch: S('Branch'), sha: S('Existing file sha (required for update)') }, ['owner', 'repo', 'path', 'content', 'message', 'branch']),
+      { name: 'put_file', risk: 'write', description: 'Create or update a file with a commit on a branch. Updating an existing file requires its current sha (call get_file first). Content is plain text (encoded automatically).', parameters: P({ owner: S('Owner'), repo: S('Repo'), path: S('File path'), content: S('New text content'), message: S('Commit message'), branch: S('Branch'), sha: S('Existing file sha (required for update)') }, ['owner', 'repo', 'path', 'content', 'message', 'branch']),
         request: { method: 'PUT', path: '/repos/{{owner}}/{{repo}}/contents/{{path}}', body: { message: '{{message}}', content: '{{content_b64}}', branch: '{{branch}}', sha: '{{sha}}' } }, prepare: 'a => ({ ...a, content_b64: btoa(unescape(encodeURIComponent(a.content))) })',
         transform: '({ commit: data.commit?.sha, path: data.content?.path, url: data.content?.html_url })' },
       { name: 'delete_file', risk: 'danger', description: 'Delete a file with a commit.', parameters: P({ owner: S('Owner'), repo: S('Repo'), path: S('File path'), message: S('Commit message'), branch: S('Branch'), sha: S('File sha') }, ['owner', 'repo', 'path', 'message', 'branch', 'sha']),
@@ -134,8 +152,18 @@ H.plugins = (() => {
     id: 'jira2', name: 'Jira Server / Data Center (API v2)', kind: 'rest', enabled: false,
     description: 'Jira Server / Data Center REST API v2 (also works with Jira Cloud v2 endpoints). Plain-text descriptions and comments.',
     baseUrl: 'https://jira.your-company.com',
-    auth: { type: 'none' }, route: { type: 'extension' },
+    auth: { type: 'none' }, route: { type: 'bridge' },
     headers: { 'Accept': 'application/json', 'X-Atlassian-Token': 'no-check' },
+    guide: `Jira workflow (tool names start with {id}__):
+- Issue keys look like PROJ-123 (project key + number). From a URL …/browse/PROJ-123 the key is the last segment.
+- Find issues with search_issues + JQL. Examples: \`assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC\`, \`project = PROJ AND status = "In Progress"\`, \`text ~ "login bug"\`, \`key in (PROJ-1, PROJ-2)\`, \`sprint in openSprints() AND project = PROJ\`. Quote values containing spaces. Start with maxResults 20.
+- Read one issue with get_issue (description, comments, status). Do not use search_issues for details you already have.
+- Change status: get_transitions for the issue → pick the transition whose target matches → transition_issue with that id. Ids differ per project; never guess them.
+- Assign: search_users (name or email) → accountId (Cloud) or username (Server) → assign_issue.
+- Create: create_issue needs project key, summary, issueType (Task, Bug, Story…). Unknown project key → list_projects.
+- Comments: add_comment with plain text. Keep comments concise; confirm wording with the user for anything customer-facing.
+- Boards/sprints: list_boards (filter by project) → list_sprints(boardId) → issues via JQL \`sprint = <id>\` (or sprint_issues where available).
+- Errors: 401/403 = credentials or permissions: stop and tell the user, do not retry. 404 = wrong key/project: verify with search_issues once, do not repeat the same call. Empty JQL result: broaden the query once (drop a filter), then report what you tried.`,
     notes: 'Direct REST calls work once a Jira administrator adds this page\'s origin to Jira\'s Allowlist (Administration → System → Allowlist, "Allow incoming"). Requires Jira 8.9+ for preflight support.',
     setup: {
       urlLabel: 'Jira base URL', urlPlaceholder: 'https://jira.your-company.com', urlHelp: 'The address you open Jira at, without a trailing path.',
@@ -148,7 +176,7 @@ H.plugins = (() => {
       testTool: 'myself',
     },
     tools: [
-      { name: 'search_issues', risk: 'safe', description: 'Search issues with JQL.', parameters: P({ jql: S('JQL query'), maxResults: N('Max results (default 20)'), fields: S('Comma-separated fields') }, ['jql']),
+      { name: 'search_issues', risk: 'safe', description: 'Search issues with JQL, e.g. `project = PROJ AND status != Done ORDER BY updated DESC`, `assignee = currentUser() AND resolution = Unresolved`, `key = PROJ-123`.', parameters: P({ jql: S('JQL query'), maxResults: N('Max results (default 20)'), fields: S('Comma-separated fields') }, ['jql']),
         request: { method: 'GET', path: '/rest/api/2/search', query: { jql: '{{jql}}', maxResults: '{{maxResults}}', fields: '{{fields}}' } }, defaults: { maxResults: 20, fields: 'summary,status,assignee,priority,updated,issuetype' },
         transform: '({ total: data.total, issues: (data.issues||[]).map(i => ({ key: i.key, summary: i.fields.summary, status: i.fields.status?.name, assignee: i.fields.assignee?.displayName, priority: i.fields.priority?.name, type: i.fields.issuetype?.name, updated: i.fields.updated })) })' },
       { name: 'get_issue', risk: 'safe', description: 'Get full details of an issue including description and comments.', parameters: P({ key: S('Issue key, e.g. ABC-123') }, ['key']),
@@ -160,7 +188,7 @@ H.plugins = (() => {
         request: { method: 'PUT', path: '/rest/api/2/issue/{{key}}', body: { fields: { summary: '{{summary}}', description: '{{description}}', priority: { name: '{{priority}}' }, labels: '{{json labels}}' } } } },
       { name: 'add_comment', risk: 'write', description: 'Add a comment.', parameters: P({ key: S('Issue key'), body: S('Comment text') }, ['key', 'body']), request: { method: 'POST', path: '/rest/api/2/issue/{{key}}/comment', body: { body: '{{body}}' } }, transform: '({ id: data.id, created: data.created })' },
       { name: 'get_transitions', risk: 'safe', description: 'List available workflow transitions.', parameters: P({ key: S('Issue key') }, ['key']), request: { method: 'GET', path: '/rest/api/2/issue/{{key}}/transitions' }, transform: 'data.transitions.map(t => ({ id: t.id, name: t.name, to: t.to?.name }))' },
-      { name: 'transition_issue', risk: 'write', description: 'Apply a workflow transition.', parameters: P({ key: S('Issue key'), transitionId: S('Transition id'), comment: S('Optional comment') }, ['key', 'transitionId']),
+      { name: 'transition_issue', risk: 'write', description: 'Move an issue to another status. Call get_transitions first and pick the id whose target status matches; ids differ per project.', parameters: P({ key: S('Issue key'), transitionId: S('Transition id'), comment: S('Optional comment') }, ['key', 'transitionId']),
         request: { method: 'POST', path: '/rest/api/2/issue/{{key}}/transitions', body: { transition: { id: '{{transitionId}}' }, update: { comment: [{ add: { body: '{{comment}}' } }] } } } },
       { name: 'assign_issue', risk: 'write', description: 'Assign an issue (username on Server, accountId on Cloud).', parameters: P({ key: S('Issue key'), user: S('Username / accountId') }, ['key', 'user']), request: { method: 'PUT', path: '/rest/api/2/issue/{{key}}/assignee', body: { name: '{{user}}', accountId: '{{user}}' } } },
       { name: 'list_projects', risk: 'safe', description: 'List projects.', parameters: P({}), request: { method: 'GET', path: '/rest/api/2/project' }, transform: 'data.map(p => ({ key: p.key, name: p.name, type: p.projectTypeKey }))' },
@@ -185,7 +213,14 @@ H.plugins = (() => {
   const GITLAB = {
     id: 'gitlab', name: 'Git (GitLab)', kind: 'rest', enabled: false,
     description: 'GitLab REST API v4: projects, branches, files, commits, merge requests, issues, pipelines. Works with gitlab.com and self-hosted GitLab.',
-    baseUrl: 'https://gitlab.com/api/v4', auth: { type: 'none' }, route: { type: 'extension' }, headers: {},
+    baseUrl: 'https://gitlab.com/api/v4', auth: { type: 'none' }, route: { type: 'bridge' }, headers: {},
+    guide: `GitLab workflow (tool names start with gitlab__):
+- projectId is the numeric id or the path "group/subgroup/project" (tools encode it). From https://gitlab.host/group/project/-/merge_requests/12 the project is "group/project" and the MR iid is 12.
+- Explore: list_projects(search) → get_project → list_tree(path, ref) → get_file(path, ref). Global search: search(scope=blobs|issues|merge_requests, search=…).
+- Merge requests: list_merge_requests(state) → get_merge_request(iid) → get_merge_request_changes → add_mr_note. merge_merge_request only when explicitly asked.
+- Writing: create_branch(branch, ref) → put_file(path, branch, content, message, update=true if the file exists) → create_merge_request(source, target, title).
+- Pipelines: list_pipelines(ref).
+- Errors: 401 = token/session problem: stop and tell the user. 404 = wrong project path (check with list_projects once) or no access. Never repeat an identical failing call.`,
     notes: 'Recommended: the browser session bridge (click the bookmarklet on your logged-in GitLab tab). Alternatively a personal access token, if your GitLab allows cross-origin API calls from this page.',
     setup: {
       urlLabel: 'GitLab API base URL', urlPlaceholder: 'https://gitlab.com/api/v4', urlHelp: 'For self-hosted GitLab use https://<host>/api/v4.',
@@ -222,14 +257,14 @@ H.plugins = (() => {
     ],
   };
   const templates = { jira: JIRA, jira2: JIRA2, git: GITHUB, gitlab: GITLAB, mcp: MCP_EXAMPLE, litellmMcp: LITELLM_MCP };
-  setTimeout(() => localStorage.setItem('harness.migrated.ext', '1'), 0);
+  setTimeout(() => localStorage.setItem('harness.migrated.bridge2', '1'), 3000);
   for (const p of plugins) {
     const t = Object.values(templates).find(x => x.id === p.id); if (!t) continue;
-    p.setup = t.setup; p.notes = t.notes; p.headers = { ...(t.headers || {}), ...(p.headers || {}) };
+    p.setup = t.setup; p.notes = t.notes; p.guide = t.guide; p.headers = { ...(t.headers || {}), ...(p.headers || {}) };
     const real = (v) => !!v && !/^<.*>$/.test(v);
     const hasCreds = !!(p.auth && (real(p.auth.token) || real(p.auth.password) || real(p.auth.value)));
     if (!p.route && t.route && !hasCreds) { p.route = H.deepClone(t.route); p.auth = { type: 'none' }; }  // never set up: adopt the recommended route
-    if (p.route?.type === 'bridge' && !hasCreds && t.route?.type === 'extension' && !localStorage.getItem('harness.migrated.ext')) p.route = H.deepClone(t.route);  // 1.6: extension replaces the bridge as default
+    if (p.route?.type === 'extension' && !hasCreds && !H.ext?.available?.() && !localStorage.getItem('harness.migrated.bridge2')) p.route = { type: 'bridge' };  // 1.7: bridge is the default again (extension only if installed)
   }
   if (!plugins.length) { plugins = [H.deepClone(JIRA), H.deepClone(JIRA2), H.deepClone(GITHUB)]; save(); }
   else if (!plugins.find(p => p.id === 'jira2')) { plugins.splice(1, 0, H.deepClone(JIRA2)); save(); }
@@ -268,7 +303,7 @@ H.plugins = (() => {
     const via = p.route?.type === 'litellm' ? ' (routed through your LiteLLM proxy: is the pass-through endpoint configured?)' : p.route?.type === 'proxy' ? ' (via your CORS proxy)' : '';
     return `${p.name}: the browser could not reach ${attempted || (p.kind === 'mcp' ? p.url : p.baseUrl)}${via} (${e.message}). ` +
       `This is almost always CORS: the API does not allow requests from web pages at origin ${origin}. Browsers block this regardless of your token. ` +
-      `Options (plugin setup, step 3): (1) the Web LLM Harness Connector browser extension (reliable, no admin, no tab to keep open); (2) the "Browser session bridge" bookmarklet; (3) ask the API admin to allow origin ${origin}; (4) a LiteLLM pass-through or a CORS proxy you trust.`;
+      `Options (plugin setup, step 3): (1) the "Browser session bridge": log in to the site in a dedicated tab and click the bookmarklet there; (2) the connector browser extension if you are allowed to load extensions; (3) ask the API admin to allow origin ${origin}; (4) a LiteLLM pass-through or a CORS proxy you trust.`;
   }
   async function runRest(p, t, args) {
     let a = { ...(t.defaults || {}), ...args };
@@ -388,8 +423,14 @@ H.plugins = (() => {
     return text;
   }
 
+  /* usage guides of enabled plugins, for the system prompt */
+  function promptSection() {
+    const parts = plugins.filter(p => p.enabled && p.guide).map(p => p.guide.replace(/\{id\}/g, p.id));
+    return parts.length ? '\n\n# Plugin guides\n' + parts.join('\n\n') : '';
+  }
+
   return {
-    createPassThrough,
+    createPassThrough, promptSection,
     list: () => plugins, get: (id) => plugins.find(p => p.id === id), templates,
     upsert: (p) => { const i = plugins.findIndex(x => x.id === p.id); if (i >= 0) plugins[i] = p; else plugins.push(p); mcpCache.delete(p.id); cachedTools.key = ''; save(); },
     remove: (id) => { plugins = plugins.filter(p => p.id !== id); mcpCache.delete(id); cachedTools.key = ''; save(); },

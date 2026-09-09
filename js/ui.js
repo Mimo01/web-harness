@@ -456,9 +456,9 @@ H.ui = (() => {
     const snippet = el('pre', { class: 'perm-args small' });
     const routeDetail = el('div', {});
     const routeSel = el('select', {}, [
-      el('option', { value: 'extension', selected: route.type === 'extension' }, [`Browser extension connector${H.ext.available() ? ' (installed ✓)' : ' (not installed)'} — recommended`]),
-      el('option', { value: 'bridge', selected: route.type === 'bridge' }, ['Browser session bridge (bookmarklet in a logged-in tab) — fallback']),
+      el('option', { value: 'bridge', selected: route.type === 'bridge' }, ['Browser session bridge (bookmarklet in a logged-in tab) — recommended']),
       el('option', { value: 'direct', selected: route.type === 'direct' }, ['Direct from the browser (only if the API allows CORS)']),
+      el('option', { value: 'extension', selected: route.type === 'extension' }, [`Connector extension${H.ext.available() ? ' (installed ✓)' : ' (only if you may load extensions)'}`]),
       el('option', { value: 'litellm', selected: route.type === 'litellm' }, ['Through a LiteLLM pass-through endpoint (needs proxy admin)']),
       el('option', { value: 'proxy', selected: route.type === 'proxy' }, ['Through a CORS proxy URL I trust']),
     ]);
@@ -504,7 +504,7 @@ H.ui = (() => {
             el('li', {}, ['On that new tab, click the bookmark. The blue bar must say "linked to your harness tab ✓". Keep that tab open and ', el('b', {}, ['do not browse in it']), ': every full page load in that tab drops the bookmark script (click it again if the bar disappears). Do your normal Jira work in another tab.']),
           ]),
           el('div', { class: 'row gap', style: 'margin-top:8px' }, [status, pingBtn, diagBtn]), trace,
-          el('p', { class: 'help' }, ['Stays connected while the tab exists, even in the background. It drops when the tab is closed, reloaded, navigated, or put to sleep by the browser\'s memory saver (Chrome: Settings → Performance → add the site to "Always keep these sites active"; Edge: Settings → System and performance → "Never put these sites to sleep"). The pill in the top bar checks the link when clicked.']),
+          el('p', { class: 'help' }, ['Stays connected while the tab exists, even in the background. It drops when the tab is closed, reloaded, navigated, or put to sleep by the browser. Two ways to stop the browser from sleeping it: (a) Chrome: Settings → Performance → "Always keep these sites active" (Edge: Settings → System and performance → "Never put these sites to sleep"); (b) click "keep awake" in the blue bar: the tab then plays an inaudible tone, which browsers treat as active audio and never discard. The pill in the top bar checks the link when clicked.']),
           el('p', { class: 'help' }, ['No popups are needed: the bookmark links back to this tab. If the tabs are not linked (for example you opened the site yourself), it tries a popup, and if that is blocked it opens the harness as a side panel inside the site\'s page instead (that panel has its own settings, so enter your LiteLLM details there once). Requests run with your normal login, so keep "My browser login session" in step 2.' + (!/^https?:/.test(location.origin) ? ' Note: this app is opened via file://, so the bridge cannot verify the harness origin; host it on an http(s) URL for full security.' : '')]),
         );
       } else if (routeSel.value === 'proxy') {

@@ -55,8 +55,8 @@ Don't want the check? Turn it off in Settings → Security & privacy; it only ev
 - **Skills**: reusable playbooks you trigger with `/name` or the model picks up on its own.
 - **Plugins**: Jira Cloud, Jira Server/Data Center, GitHub, GitLab out of the box, any REST API via a JSON manifest,
   and remote **MCP** servers.
-- **Connector extension**: APIs that block browsers (Jira!) still work through a tiny extension you load from the
-  download folder in two clicks. No admin, no proxy. A bookmarklet bridge exists as a fallback.
+- **Browser session bridge**: APIs that block browsers (Jira!) still work: a bookmarklet turns your logged-in tab
+  into a relay. No admin, no proxy, no token. A connector extension is available where extensions are allowed.
 - **Permissions you control**: per-tool allow / ask / deny, session grants, re-runnable tool cards.
 - **Usage & costs**: context meter, per-chat and all-time totals, prices from LiteLLM or your own table.
 - **Security first**: no backend, no telemetry, no third-party fetch services by default, secrets in a separate
@@ -102,6 +102,10 @@ Pick a mode (and the model) in the pills under the message box; both apply to th
 | **Default** | `safe` (read-only) tools run silently; `write` / `danger` tools ask first. |
 | **Allow all** | everything runs without prompts (explicit per-tool denies still apply). |
 | **Plan** | the model may only use read-only tools. It investigates and writes a numbered plan. A **Plan ready** bar lets you execute it with default permissions or with allow-all; the mode returns to Default afterwards. |
+
+The model also receives a short usage guide for each enabled plugin (issue-key formats, which call comes before
+which, how to handle errors), and a loop guard blocks a tool call repeated with identical arguments and outcome
+more than three times in one turn, then asks the model to report instead.
 
 Per tool (Settings → Tools) you can disable it, or force `always allow` / `always ask` / `deny`. "Always ask, even for
 safe tools" turns on strict mode. When prompted you can *Allow once*, *Allow for session*, *Always allow*, *Deny*
@@ -160,8 +164,8 @@ after an admin allowlists your origin; **Jira Cloud never does**. Step 3 of the 
 
 | Route | How it works | Needs |
 |---|---|---|
-| **Browser extension connector** (recommended) | the tiny extension in the `extension/` folder performs the REST calls for sites you allow, with your browser login or the plugin's token. No tab to keep open, survives sleep and navigation. | load it once: `chrome://extensions` → Developer mode → *Load unpacked* → pick the `extension` folder → add the site under its allowed sites. No admin rights, nothing downloaded. Only blocked if company policy disables Developer mode. |
-| Browser session bridge (fallback) | a bookmarklet turns a logged-in tab into a relay | keep a dedicated tab open; excluded from the browser's memory saver |
+| **Browser session bridge** (recommended) | a bookmarklet turns a dedicated logged-in tab into a relay; the harness pings it before each request | keep that tab open and don't browse in it; stop the browser from sleeping it ("keep awake" in the blue bar, or the browser's keep-active list) |
+| Connector extension (if you may load extensions) | the tiny extension in the `extension/` folder performs the REST calls for sites you allow | `chrome://extensions` → Developer mode → *Load unpacked* → `extension` folder → add the site to allowed sites |
 | Direct | browser → API | the API allows your page origin (GitHub, GitLab, allowlisted Jira DC) |
 | LiteLLM pass-through / CORS proxy | browser → relay → API | someone who administers the relay |
 

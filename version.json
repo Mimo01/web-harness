@@ -1,6 +1,6 @@
 {
-  "version": "1.6.0",
+  "version": "1.7.0",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "New browser extension connector: reliable REST access to Jira/GitLab without keeping a tab open. See extension/ folder."
+  "notes": "Plugin usage guides for the model, loop guard against repeated tool calls, bridge keep-awake option."
 }
