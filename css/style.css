@@ -376,3 +376,9 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 .msg.assistant.continuation .role { height: 18px; margin: 0 0 2px; overflow: hidden; }
 .msg.assistant.continuation .role .actions { position: static; }
 .msg.assistant.continuation .role .name { display: none; }
+/* continuation messages: no reserved row; actions float at the top-right of the message text on hover */
+.msg.assistant.continuation { margin-top: 2px; }
+.msg.assistant.continuation .body { position: relative; }
+.msg.assistant.continuation .role { height: 0; margin: 0; overflow: visible; }
+.msg.assistant.continuation .role .ts { display: none; }
+.msg.assistant.continuation .role .actions { position: absolute; top: 0; right: 0; z-index: 2; background: var(--bg); border-radius: var(--r-sm); padding: 0 2px; }
