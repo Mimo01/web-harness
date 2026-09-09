@@ -1,6 +1,6 @@
 {
-  "version": "1.11.0",
+  "version": "1.11.1",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Retries on transient errors, parallel read-only tool calls, sandboxed plugin expressions, integrity-checked CDN scripts, accessibility."
+  "notes": "Opening the app resumes your most recent chat."
 }

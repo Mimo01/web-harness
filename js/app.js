@@ -6,7 +6,7 @@
   await H.fs.restore();
   H.ui.updateWorkspaceBtn(H.fs.hasRoot() ? H.fs.name() : '');
   const recent = (await H.db.listChats())[0];
-  if (recent && !recent.messages.length) await H.agent.load(recent.id); else await H.agent.reset();   // on startup only: reopen the last empty chat rather than adding one per reload
+  if (recent) await H.agent.load(recent.id); else await H.agent.reset();   // reopen the most recent chat; create one only when there is none
   H.ui.renderChatList();
   if (H.settings.apiKey()) { H.ui.refreshModels().catch(() => { }); H.usage.refreshModelInfo(); } else { H.ui.setStatus('', 'not configured'); H.ui.openSettings('connection'); }
   H.plugins.connectEnabledMcp();
