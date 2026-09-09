@@ -239,7 +239,11 @@ When you have enough information, write a concrete, numbered implementation plan
   async function remove(id) {
     deleted.add(id); stop(id); live.delete(id);
     await H.db.delChat(id);
-    if (chat?.id === id) await reset(); else H.bus.emit('chat-updated');
+    if (chat?.id === id) {
+      chat = null;
+      const next = (await H.db.listChats()).find(c => c.id !== id);   // most recent remaining chat
+      if (next) await load(next.id); else await reset();
+    } else H.bus.emit('chat-updated');
   }
   async function rename(title) { if (chat) { chat.title = title; await persist(); } }
   async function deleteMessage(idx) { if (!chat || runs.has(chat.id)) return; chat.messages.splice(idx, 1); H.bus.emit('chat-loaded', chat); await persist(); }

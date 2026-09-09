@@ -1,6 +1,6 @@
 {
-  "version": "1.8.5",
+  "version": "1.8.6",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Deleting the current chat works reliably, also while it is running."
+  "notes": "Deleting the selected chat switches to the previous chat instead of creating a new one."
 }
