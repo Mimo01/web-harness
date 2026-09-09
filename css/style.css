@@ -344,3 +344,6 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 #sidebar footer #settings-btn { flex: 1; justify-content: center; background: var(--surface-2); border-color: var(--border); padding: 8px 12px; font-size: 13px; }
 #sidebar footer #settings-btn:hover { background: var(--surface-3); }
 #sidebar footer #sidebar-bug-btn { color: var(--muted); }
+#sidebar footer #settings-btn { background: transparent; border-color: transparent; color: var(--muted); font-weight: 500; justify-content: flex-start; padding: 7px 10px; }
+#sidebar footer #settings-btn:hover { background: var(--surface-3); color: var(--fg); }
+#sidebar footer #settings-btn .ico { color: var(--muted); }
