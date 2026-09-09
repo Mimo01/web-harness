@@ -61,18 +61,38 @@ H.ui = (() => {
     if (p.useLitellmKey) return H.settings.apiKey() ? { state: 'on', label: 'via LiteLLM' } : { state: 'warn', label: 'no API key' };
     return { state: 'on', label: r === 'direct' ? 'direct' : r === 'litellm' ? 'via LiteLLM' : 'via proxy' };
   }
+  /* one-click reconnect for a bridge plugin: open the site linked to this tab and tell the user what to click */
+  function reconnect(p) {
+    const origin = (() => { try { return new URL(p.baseUrl || p.url).origin; } catch { return null; } })();
+    if (!origin) return openSettings('plugins');
+    const w = H.bridge.openSite(origin);
+    const box = $('#toasts'); box.querySelectorAll('.reconnect-toast').forEach(t => t.remove());
+    const t = el('div', { class: 'toast reconnect-toast' }, [
+      el('div', {}, [el('b', {}, [w ? `${origin.replace(/^https?:\/\//, '')} opened in a new tab` : 'The browser blocked the new tab']), el('div', { class: 'small muted' }, [w ? 'On that tab, click the "LLM Harness bridge" bookmark. This notice closes by itself once connected.' : `Open ${origin} yourself from this button's tooltip and click the bookmark there.`])]),
+      el('div', { class: 'row gap', style: 'margin-top:8px' }, [
+        el('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(H.bridge.bookmarklet()); H.toast('Bookmark address copied: create a bookmark and paste it as the address.', 'success', 6000); } }, ['No bookmark yet? Copy it']),
+        el('button', { class: 'btn sm ghost', onclick: () => t.remove() }, ['Close']),
+      ]),
+    ]);
+    box.append(t);
+    const off = H.bus.on('bridge', () => { if (H.bridge.has(origin)) { t.remove(); off(); H.toast(`${shortName(p)} connected ✓`, 'success', 3000); } });
+    setTimeout(() => { t.remove(); off(); }, 120000);
+  }
   const shortName = (p) => ({ jira: 'Jira Cloud', jira2: 'Jira Server', git: 'GitHub', gitlab: 'GitLab', 'litellm-mcp': 'LiteLLM MCP' })[p.id] || p.name.replace(/ \(.*\)$/, '');
   function connectionsStrip() {
     const box = el('div', { class: 'connections' });
     const paint = () => {
       box.innerHTML = '';
-      const list = H.plugins.list().filter(p => p.id !== 'litellm-mcp' || p.enabled);
+      const list = H.plugins.list().filter(p => p.enabled);
+      if (!list.length) { box.classList.add('hidden'); return; }   // nothing enabled: no strip at all
+      box.classList.remove('hidden');
       box.append(el('span', { class: 'conn-label' }, ['Connections']));
       for (const p of list) {
         const s = pluginStatus(p);
-        box.append(el('button', { class: 'conn ' + s.state, title: `${p.name}: ${s.label}. Click to configure.`, onclick: () => { openSettings('plugins'); } }, [el('span', { class: 'dot' }), shortName(p), el('span', { class: 'conn-state' }, [s.label])]));
+        const canReconnect = s.state === 'warn' && (p.route?.type || 'direct') === 'bridge';
+        box.append(el('button', { class: 'conn ' + s.state + (canReconnect ? ' action' : ''), title: canReconnect ? `${p.name}: bridge not connected. Click to open the site in a linked tab, then click the bookmark there.` : `${p.name}: ${s.label}. Click to configure.`, onclick: () => canReconnect ? reconnect(p) : openSettings('plugins') }, [el('span', { class: 'dot' }), shortName(p), el('span', { class: 'conn-state' }, [canReconnect ? 'reconnect ↗' : s.label])]));
       }
-      box.append(el('button', { class: 'conn add', title: 'Manage plugins', onclick: () => openSettings('plugins') }, [H.icon('plus'), 'plugin']));
+
     };
     paint();
     const off = [H.bus.on('bridge', paint), H.bus.on('plugins', paint), H.bus.on('ext', paint), H.bus.on('settings', paint)];
@@ -820,7 +840,14 @@ H.ui = (() => {
     H.bus.on('bridge', updateConnPill); H.bus.on('plugins', updateConnPill); H.bus.on('ext', updateConnPill); H.bus.on('settings', updateConnPill);
     setInterval(async () => { if (H.plugins.list().some(p => p.enabled && p.route?.type === 'bridge')) { await H.bridge.health(); } updateConnPill(); }, 20000);
     updateConnPill();
-    $('#bridge-pill').onclick = async () => { const h = await H.bridge.health(); for (const b of h) H.toast(`${b.origin}: ${b.ok ? 'bridge responding ✓' : 'bridge NOT responding: click the bookmark on that tab again'}`, b.ok ? 'success' : 'error', 6000); updateConnPill(); openSettings('plugins'); };
+    $('#bridge-pill').onclick = async () => {
+      await H.bridge.health(); updateConnPill();
+      const broken = H.plugins.list().filter(p => p.enabled && pluginStatus(p).state === 'warn');
+      const bridgeBroken = broken.find(p => (p.route?.type || 'direct') === 'bridge');
+      if (bridgeBroken) return reconnect(bridgeBroken);          // one click = reconnect
+      if (broken.length) return openSettings('plugins');
+      H.toast('All plugins connected ✓', 'success', 2500);
+    };
     H.bus.on('workspace', updateWorkspaceBtn);
     H.bus.on('preview', showPreview);
     H.bus.on('settings', (s) => { if ($('#mode-select').value !== s.chatMode) updateModeUI(); if ($('#model-select').value !== s.model) fillModelSelect($('#model-select'), s.models || [], s.model); });

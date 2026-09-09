@@ -1,6 +1,6 @@
 {
-  "version": "1.8.0",
+  "version": "1.8.1",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Connection status of every plugin at a glance on the home screen and in the top bar."
+  "notes": "One-click reconnect for bridge plugins from the home screen and top bar; only enabled plugins are shown."
 }

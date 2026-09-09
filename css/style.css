@@ -360,3 +360,6 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 .conn-pill .dot { width: 7px; height: 7px; border-radius: 50%; }
 .conn-pill.on { color: var(--ok); background: var(--ok-soft); } .conn-pill.on .dot { background: var(--ok); }
 .conn-pill.warn { color: var(--warn); background: var(--warn-soft); } .conn-pill.warn .dot { background: var(--warn); }
+.conn.action { border-color: var(--warn); background: var(--warn-soft); color: var(--fg); } .conn.action .conn-state { color: var(--warn); font-weight: 600; }
+.conn.action:hover { filter: brightness(1.08); }
+.reconnect-toast { border-left-color: var(--warn); max-width: 420px; }
