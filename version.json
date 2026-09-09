@@ -1,6 +1,6 @@
 {
-  "version": "1.8.4",
+  "version": "1.8.5",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "New always creates a new chat."
+  "notes": "Deleting the current chat works reliably, also while it is running."
 }

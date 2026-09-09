@@ -3,6 +3,7 @@
 H.agent = (() => {
   let chat = null;
   const runs = new Map();    // chatId -> { abort }   (a chat keeps running in the background when you switch away)
+  const deleted = new Set(); // chat ids removed by the user: never write them back
   const live = new Map();    // chatId -> chat object currently in memory (so switching back shows live updates)
 
   const newChat = () => ({ id: H.uid(), title: 'New chat', messages: [], created: Date.now(), updated: Date.now(), usage: { prompt: 0, completion: 0, cost: 0, requests: 0 } });
@@ -38,7 +39,7 @@ When you have enough information, write a concrete, numbered implementation plan
     });
   }
 
-  async function persist(c = chat) { if (!c) return; c.updated = Date.now(); await H.db.putChat(c); H.bus.emit('chat-updated', c); }
+  async function persist(c = chat) { if (!c || deleted.has(c.id)) return; c.updated = Date.now(); await H.db.putChat(c); H.bus.emit('chat-updated', c); }
 
   async function executeToolCall(tc, ctx) {
     const name = tc.function.name;
@@ -213,7 +214,7 @@ When you have enough information, write a concrete, numbered implementation plan
       } catch (e) { console.warn('auto-title attempt failed', e); }
     }
     if (!title) title = fallbackTitle(text);
-    if (c.title !== 'New chat') return;   // user renamed it meanwhile
+    if (c.title !== 'New chat' || deleted.has(c.id)) return;   // user renamed or deleted it meanwhile
     c.title = title; c.updated = Date.now(); await H.db.putChat(c); H.bus.emit('chat-updated', c);
   }
 
@@ -226,7 +227,7 @@ When you have enough information, write a concrete, numbered implementation plan
   async function load(id) {
     if (chat?.id === id) return;
     let c = live.get(id);                       // running (or recently run) chats live in memory: reuse the same object
-    if (!c) { c = await H.db.getChat(id); if (!c) return; c.usage ||= { prompt: 0, completion: 0, cost: 0, requests: 0 }; live.set(id, c); }
+    if (!c) { c = await H.db.getChat(id); if (!c || !c.id) { H.bus.emit('chat-updated'); return; } c.usage ||= { prompt: 0, completion: 0, cost: 0, requests: 0 }; live.set(id, c); }
     chat = c; H.bus.emit('chat-loaded', chat);
   }
   async function reset() {
@@ -235,7 +236,11 @@ When you have enough information, write a concrete, numbered implementation plan
     H.bus.emit('chat-loaded', chat); H.bus.emit('chat-updated', chat);
     return chat;
   }
-  async function remove(id) { stop(id); live.delete(id); await H.db.delChat(id); if (chat?.id === id) reset(); H.bus.emit('chat-updated'); }
+  async function remove(id) {
+    deleted.add(id); stop(id); live.delete(id);
+    await H.db.delChat(id);
+    if (chat?.id === id) await reset(); else H.bus.emit('chat-updated');
+  }
   async function rename(title) { if (chat) { chat.title = title; await persist(); } }
   async function deleteMessage(idx) { if (!chat || runs.has(chat.id)) return; chat.messages.splice(idx, 1); H.bus.emit('chat-loaded', chat); await persist(); }
   const isRunning = (id) => runs.has(id || chat?.id);

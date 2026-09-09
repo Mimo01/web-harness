@@ -26,7 +26,7 @@ H.db = (() => {
       const t = db.transaction(store, mode);
       const s = t.objectStore(store);
       const r = fn(s);
-      t.oncomplete = () => res(r && r.result !== undefined ? r.result : r);
+      t.oncomplete = () => res(r instanceof IDBRequest ? r.result : r);   // undefined when a record does not exist
       t.onerror = () => rej(t.error);
       t.onabort = () => rej(t.error);
     });
