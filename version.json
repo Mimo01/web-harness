@@ -1,6 +1,6 @@
 {
-  "version": "1.4.0",
+  "version": "1.4.1",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Images are resized automatically, videos become sampled frames + transcript, audio is transcribed, and the model can view workspace images."
+  "notes": "Chats are always named automatically (retry + fallback)."
 }

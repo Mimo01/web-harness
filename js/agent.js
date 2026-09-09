@@ -164,7 +164,7 @@ When you have enough information, write a concrete, numbered implementation plan
       running = false; abort = null;
       H.bus.emit('run-state', false);
       await persist();
-      if (H.settings.get('autoTitle') && chat.title === 'New chat' && chat.messages.length >= 2) autoTitle();
+      if (H.settings.get('autoTitle') && chat.title === 'New chat' && chat.messages.length >= 2) autoTitle(chat);
     }
   }
 
@@ -176,14 +176,25 @@ When you have enough information, write a concrete, numbered implementation plan
     finally { H.perms.setOverride(null); }
   }
 
-  async function autoTitle() {
-    try {
-      const first = chat.messages.find(m => m.role === 'user');
-      const res = await H.llm.chat({ messages: [{ role: 'system', content: 'Write a 3-6 word title for this conversation. Output only the title.' }, { role: 'user', content: H.clamp(first.display || (typeof first.content === 'string' ? first.content : ''), 1000) }], maxTokens: 20, temperature: 0.2 });
-      const t = (res.content || '').trim().replace(/^["']|["']$/g, '');
-      if (t) { chat.title = t; await persist(); }
-      if (res.usage) { chat.usage.prompt += res.usage.prompt_tokens || 0; chat.usage.completion += res.usage.completion_tokens || 0; H.usage.record(H.settings.get('model'), res.usage); }
-    } catch { }
+  /* Name the chat from its first exchange. Uses the model (2 attempts), falls back to the first words of the message. */
+  const cleanTitle = (t) => String(t || '').split('\n')[0].replace(/^\s*(title\s*:)?\s*/i, '').replace(/^["'“”*#\s]+|["'“”*.\s]+$/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const fallbackTitle = (text) => { const w = String(text || '').replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean); return w.length ? w.slice(0, 6).join(' ') + (w.length > 6 ? '…' : '') : 'Chat'; };
+  async function autoTitle(target) {
+    const c = target || chat; if (!c || c.title !== 'New chat') return;
+    const first = c.messages.find(m => m.role === 'user'); if (!first) return;
+    const text = first.display || (typeof first.content === 'string' ? first.content : (first.apiContent?.find?.(p => p.type === 'text')?.text || ''));
+    const reply = c.messages.find(m => m.role === 'assistant' && m.content);
+    let title = '';
+    for (let attempt = 0; attempt < 2 && !title; attempt++) {
+      try {
+        const res = await H.llm.chat({ messages: [{ role: 'system', content: 'You name chat conversations. Reply with a short title of 3 to 6 words, plain text, no quotes, no punctuation at the end, nothing else.' }, { role: 'user', content: `First message:\n${H.clamp(text, 800)}${reply ? `\n\nAssistant reply (excerpt):\n${H.clamp(reply.content, 400)}` : ''}\n\nTitle:` }], maxTokens: 30, temperature: 0.2 });
+        title = cleanTitle(res.content);
+        if (res.usage) { c.usage.prompt += res.usage.prompt_tokens || 0; c.usage.completion += res.usage.completion_tokens || 0; H.usage.record(H.settings.get('model'), res.usage); }
+      } catch (e) { console.warn('auto-title attempt failed', e); }
+    }
+    if (!title) title = fallbackTitle(text);
+    if (c.title !== 'New chat') return;   // user renamed it meanwhile
+    c.title = title; c.updated = Date.now(); await H.db.putChat(c); H.bus.emit('chat-updated', c);
   }
 
   function stop() { abort?.abort(); }
