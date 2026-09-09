@@ -411,3 +411,72 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 .ask-card textarea { margin-top: 4px; }
 .ask-card.answered { background: var(--surface-2); } .ask-card .ask-a { color: var(--fg-2); font-size: 13px; }
 body.asking .composer-box { border-color: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+
+/* =================== Responsive =================== */
+html, body { height: 100dvh; }
+#backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 19; }
+@media (max-width: 900px) {
+  #sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 20; margin-left: calc(var(--sidebar-w) * -1); box-shadow: none; transition: margin .2s ease; width: min(var(--sidebar-w), 86vw); }
+  #sidebar.open { margin-left: 0; box-shadow: var(--shadow-lg); }
+  #sidebar.collapsed { margin-left: calc(var(--sidebar-w) * -1); }
+  #topbar { padding: 6px 8px; gap: 6px; }
+  #chat-title { max-width: none; flex: 1; font-size: 13px; }
+  #ws-btn .lbl { display: none; }
+  #bridge-pill { font-size: 11px; padding: 3px 7px; }
+  #messages { padding: 12px 0 24px; } .msg-wrap { padding: 0 12px; }
+  .msg { gap: 10px; margin-bottom: 16px; } .msg .avatar { width: 24px; height: 24px; font-size: 10px; }
+  .msg.user .body { max-width: 92%; }
+  .md pre { font-size: 12px; }
+  #composer { padding: 0 8px 8px; }
+  #input { font-size: 16px; padding: 11px 12px 4px; }   /* 16px prevents iOS zoom on focus */
+  .composer-bar { gap: 4px; padding: 2px 6px 6px; }
+  .pill-select { max-width: 46vw; } .pill-select select { max-width: 38vw; }
+  .composer-bar #usage { display: none; }
+  #send-btn span, #send-btn .ico { margin: 0; }
+  #preview { position: fixed; inset: 0; width: auto; min-width: 0; z-index: 25; }
+  #empty { padding: 5vh 8px 24px; } #empty h2 { font-size: 19px; } #empty .tips { grid-template-columns: 1fr; }
+  .connections { margin: -6px auto 16px; }
+  .plan-bar { flex-direction: column; align-items: stretch; } .plan-bar .btn { justify-content: center; }
+  .tool-card summary { flex-wrap: wrap; } .tool-card .targs { flex-basis: 100%; white-space: normal; word-break: break-all; font-size: 11px; }
+  .tool-card .tactions { margin-left: 0; }
+  /* dialogs go full screen */
+  .modal-overlay { padding: 0; align-items: stretch; }
+  .modal, .modal.wide, .modal.setup, .modal.settings { width: 100%; max-width: none; height: 100dvh; max-height: none; border-radius: 0; border: 0; }
+  .modal.settings .settings-layout { flex-direction: column; }
+  .settings-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 6px; gap: 4px; width: auto; }
+  .settings-nav button { white-space: nowrap; padding: 6px 10px; }
+  .settings-body { padding: 8px 14px 24px; }
+  .mode-cards, .stats { grid-template-columns: 1fr; }
+  .tool-row { grid-template-columns: 1fr; gap: 6px; }
+  .row.gap > label.field { flex-basis: 100%; }
+  .perm-modal .row.gap.wrap .btn { flex: 1 1 45%; justify-content: center; }
+  #toasts { left: 8px; right: 8px; bottom: 8px; } .toast { max-width: none; }
+  #scroll-bottom { bottom: 10px; }
+}
+@media (max-width: 480px) {
+  #topbar #bridge-pill { display: none; }
+  .composer-bar #ctx-meter .txt { display: none; }
+  .msg.user .body { max-width: 100%; }
+  .chip { font-size: 10.5px; }
+}
+/* touch devices: no hover, so keep actions reachable */
+@media (hover: none) {
+  .msg .actions, .msg .role .ts, .msg.assistant.turn .role .stats { opacity: .85; }
+  .chat-item .del { opacity: .7; }
+  .copy-code, .codebar .btn { opacity: 1; }
+  .tool-card summary { padding: 10px 12px; }
+  .btn.sm { padding: 6px 10px; }
+}
+/* very short viewports (landscape phones): tighter vertical spacing */
+@media (max-height: 500px) { #empty { padding-top: 12px; } #empty .logo { display: none; } }
+@media (max-width: 900px) {
+  .msg.assistant.turn .role .stats, .msg.assistant.turn .role .ts, .msg.user .role .ts { display: none; }   /* header must fit: name + actions only */
+  .msg .role { height: 20px; }
+}
+@media (max-width: 560px) {
+  #send-btn, #stop-btn { font-size: 0; padding: 6px 9px; border-radius: 50%; width: 32px; height: 32px; justify-content: center; }
+  #send-btn .ico, #stop-btn .ico { width: 15px; height: 15px; margin: 0; }
+  .pill-select { max-width: 40vw; } .pill-select select { max-width: 32vw; }
+  .composer-bar { flex-wrap: nowrap; }
+  .composer-bar #ctx-meter { margin-left: auto; }
+}

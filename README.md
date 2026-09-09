@@ -251,6 +251,8 @@ PDFs; both happen only when you use them.
 
 ## 💻 Platform notes (macOS / Windows / Linux)
 
+- **Screens**: works from phones (sidebar becomes a drawer, dialogs go full screen, touch-friendly actions) to
+  wide desktops.
 - **Browsers**: Chrome and Edge give the full feature set (workspace folders via the File System Access API).
   Firefox and Safari run everything else; file tools then use an in-memory workspace.
 - **Opening from a file**: double-clicking `index.html` works on every OS. Two limitations of `file://` pages:

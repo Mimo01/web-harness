@@ -1,6 +1,6 @@
 {
-  "version": "1.10.0",
+  "version": "1.10.1",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Questions from the model appear inside the chat (answer by clicking or typing); update check is hourly."
+  "notes": "Responsive layout for phones and tablets."
 }

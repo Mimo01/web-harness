@@ -887,7 +887,13 @@ H.ui = (() => {
     $('#settings-btn').onclick = () => openSettings('connection');
     $('#usage').onclick = () => openSettings('usage'); $('#ctx-meter').onclick = () => openSettings('usage');
     $('#sidebar-bug-btn').onclick = bugReport;
-    $('#toggle-sidebar').onclick = () => $('#sidebar').classList.toggle('collapsed');
+    const narrow = () => window.matchMedia('(max-width: 900px)').matches;
+    const openDrawer = (on) => { $('#sidebar').classList.toggle('open', on); $('#backdrop').classList.toggle('hidden', !on); };
+    $('#toggle-sidebar').onclick = () => { if (narrow()) openDrawer(!$('#sidebar').classList.contains('open')); else $('#sidebar').classList.toggle('collapsed'); };
+    $('#backdrop').onclick = () => openDrawer(false);
+    $('#chat-list').addEventListener('click', (e) => { if (narrow() && e.target.closest('.chat-item') && !e.target.closest('button')) openDrawer(false); });
+    $('#new-chat').addEventListener('click', () => { if (narrow()) openDrawer(false); });
+    window.addEventListener('resize', () => { if (!narrow()) openDrawer(false); });
     $('#ws-btn').onclick = async () => { try { await H.fs.pick(); H.toast('Workspace: ' + H.fs.name(), 'success'); } catch (e) { if (e.name !== 'AbortError') H.toast(e.message, 'error', 6000); } };
     $('#model-select').onchange = (e) => { H.settings.set({ model: e.target.value }); updateContextMeter(); };
     $('#mode-select').onchange = (e) => { H.settings.set({ chatMode: e.target.value }); updateModeUI(); };
