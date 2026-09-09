@@ -1,6 +1,6 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Attach PDF, Word, PowerPoint and Excel files: their text is extracted in the browser."
+  "notes": "Images are resized automatically, videos become sampled frames + transcript, audio is transcribed, and the model can view workspace images."
 }

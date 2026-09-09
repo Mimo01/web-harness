@@ -17,6 +17,9 @@ H.extract = (() => {
   const TEXT_EXT = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|rb|java|kt|go|rs|c|h|cpp|hpp|cs|php|sh|bash|zsh|ps1|bat|yaml|yml|toml|ini|cfg|conf|env|sql|graphql|proto|log|rtf|svg|tex|r|m|swift|scala|lua|pl|dart|vue|svelte|properties|gradle|dockerfile|makefile|gitignore|editorconfig)$/i;
   const kindOf = (name, type = '') => {
     const n = name.toLowerCase();
+    if (/\.(heic|heif)$/.test(n) || /heic|heif/.test(type)) return 'heic';
+    if (/\.(mp4|m4v|webm|mov|ogv|mkv|avi)$/.test(n) || type.startsWith('video/')) return 'video';
+    if (/\.(mp3|wav|m4a|aac|ogg|oga|flac|webm|opus|wma)$/.test(n) || type.startsWith('audio/')) return 'audio';
     if (/\.pdf$/.test(n) || type === 'application/pdf') return 'pdf';
     if (/\.docx$/.test(n)) return 'docx';
     if (/\.pptx$/.test(n)) return 'pptx';
@@ -24,7 +27,7 @@ H.extract = (() => {
     if (/\.(csv|tsv)$/.test(n)) return 'text';
     if (/\.(png|jpe?g|gif|webp|bmp)$/.test(n) || type.startsWith('image/')) return 'image';
     if (/\.(doc|ppt)$/.test(n)) return 'legacy';
-    if (/\.(zip|gz|tar|7z|rar|exe|dll|dmg|iso|mp[34]|mov|avi|mkv|wav|flac|woff2?|ttf|otf|bin|class|pyc|wasm|sqlite|db)$/.test(n)) return 'binary';
+    if (/\.(zip|gz|tar|7z|rar|exe|dll|dmg|iso|woff2?|ttf|otf|bin|class|pyc|wasm|sqlite|db)$/.test(n)) return 'binary';
     if (TEXT_EXT.test(n) || type.startsWith('text/') || /json|xml|javascript/.test(type)) return 'text';
     return 'unknown';
   };
@@ -85,10 +88,67 @@ H.extract = (() => {
     return { text: parts.join('\n\n'), pages: wb.SheetNames.length };
   }
 
-  /** Extract from a File/Blob. Returns { kind: 'text'|'image'|'unsupported', content, note, pages } */
+  /* ---- images: decode + downscale to keep requests small (max side 1600px, JPEG unless small PNG) ---- */
+  const MAX_SIDE = 1600, MAX_RAW = 350 * 1024;
+  async function image(file, onStatus) {
+    let bmp; try { bmp = await createImageBitmap(file); } catch { throw new Error('the browser could not decode this image format'); }
+    const scale = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
+    if (scale === 1 && file.size <= MAX_RAW && /png|gif|webp|jpe?g/.test(file.type)) { bmp.close?.(); return { kind: 'image', content: await H.readFileAsDataURL(file), note: '' }; }
+    onStatus?.('Resizing image…');
+    const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+    const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(bmp, 0, 0, w, h); bmp.close?.();
+    const keepPng = file.type === 'image/png' && file.size < 2 * 1024 * 1024 && scale === 1;
+    const url = c.toDataURL(keepPng ? 'image/png' : 'image/jpeg', 0.85);
+    return { kind: 'image', content: url, note: scale < 1 ? `resized to ${w}×${h}` : '' };
+  }
+  /* ---- video: sample evenly spaced frames as images (+ optional transcript) ---- */
+  async function videoFrames(file, onStatus, maxFrames = 6) {
+    const url = URL.createObjectURL(file);
+    try {
+      const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = url;
+      await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(new Error('the browser cannot decode this video format (try MP4/H.264 or WebM)')); });
+      let dur = v.duration;
+      if (!isFinite(dur)) { await new Promise((res) => { v.onseeked = res; v.currentTime = 1e7; }); dur = isFinite(v.duration) ? v.duration : (v.currentTime || 0); }  // WebM from MediaRecorder reports Infinity until seeked
+      const n = dur > 2 ? Math.min(maxFrames, Math.max(3, Math.round(dur / 5))) : 1;
+      const times = Array.from({ length: n }, (_, i) => dur > 0 ? (dur * (i + 0.5)) / n : 0);
+      const scale = Math.min(1, 1024 / Math.max(v.videoWidth, v.videoHeight, 1));
+      const c = document.createElement('canvas'); c.width = Math.round(v.videoWidth * scale); c.height = Math.round(v.videoHeight * scale); const ctx = c.getContext('2d');
+      const frames = [];
+      for (const t of times) {
+        onStatus?.(`Extracting video frame ${frames.length + 1}/${n}`);
+        await new Promise((res, rej) => { v.onseeked = res; v.onerror = () => rej(new Error('seek failed')); v.currentTime = Math.min(t, Math.max(0, dur - 0.1)); });
+        ctx.drawImage(v, 0, 0, c.width, c.height);
+        frames.push({ time: t, content: c.toDataURL('image/jpeg', 0.8) });
+      }
+      return { frames, duration: dur, width: v.videoWidth, height: v.videoHeight };
+    } finally { URL.revokeObjectURL(url); }
+  }
+  async function transcript(file, onStatus) {
+    const model = H.settings.get('transcriptionModel');
+    if (!model) return { text: '', note: 'Audio not transcribed: no transcription model configured (Settings → Model & generation → Transcription model, e.g. whisper-1 on your LiteLLM proxy).' };
+    onStatus?.(`Transcribing with ${model}…`);
+    try { const t = await H.llm.transcribe(file, model); return { text: t, note: '' }; }
+    catch (e) { return { text: '', note: 'Transcription failed: ' + e.message }; }
+  }
+  const fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+  /** Extract from a File/Blob. Returns { kind: 'text'|'image'|'video'|'unsupported', content, note, pages, frames, transcript } */
   async function fromFile(file, { onStatus, maxChars = 300000 } = {}) {
     const kind = kindOf(file.name, file.type);
-    if (kind === 'image') return { kind: 'image', content: await H.readFileAsDataURL(file) };
+    if (kind === 'image') { try { return await image(file, onStatus); } catch (e) { return { kind: 'unsupported', content: '', note: `${file.name}: ${e.message}.` }; } }
+    if (kind === 'heic') return { kind: 'unsupported', content: '', note: `${file.name}: HEIC/HEIF images cannot be decoded by the browser. Ask the user to export it as JPEG or PNG (on iPhone: Settings → Camera → Formats → Most Compatible).` };
+    if (kind === 'video') {
+      try {
+        const v = await videoFrames(file, onStatus);
+        const tr = file.size <= 25 * 1024 * 1024 ? await transcript(file, onStatus) : { text: '', note: 'Audio not transcribed: file larger than 25 MB.' };
+        return { kind: 'video', content: '', frames: v.frames.map(f => ({ name: `${file.name} @ ${fmtT(f.time)}`, content: f.content })), transcript: tr.text, duration: v.duration, note: [`${v.frames.length} frames sampled from ${fmtT(v.duration)} of video (${v.width}×${v.height})`, tr.note].filter(Boolean).join('. ') };
+      } catch (e) { return { kind: 'unsupported', content: '', note: `${file.name}: ${e.message}.` }; }
+    }
+    if (kind === 'audio') {
+      if (file.size > 25 * 1024 * 1024) return { kind: 'unsupported', content: '', note: `${file.name}: audio larger than 25 MB cannot be transcribed.` };
+      const tr = await transcript(file, onStatus);
+      return tr.text ? { kind: 'text', content: tr.text, note: 'transcript' } : { kind: 'unsupported', content: '', note: `${file.name}: ${tr.note}` };
+    }
     const buf = await file.arrayBuffer();
     try {
       let r;
@@ -108,5 +168,5 @@ H.extract = (() => {
     } catch (e) { return { kind: 'unsupported', content: '', note: `${file.name}: could not extract text (${e.message}).` }; }
   }
   const isDocument = (name) => ['pdf', 'docx', 'pptx', 'sheet'].includes(kindOf(name));
-  return { fromFile, kindOf, isDocument, lib };
+  return { fromFile, kindOf, isDocument, lib, image };
 })();

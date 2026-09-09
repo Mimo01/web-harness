@@ -35,6 +35,8 @@ H.tools = (() => {
     parameters: obj({ path: str('File path'), startLine: num('1-based first line (optional)'), endLine: num('1-based last line inclusive (optional)') }, ['path']),
     run: async ({ path, startLine, endLine }, ctx) => {
       let text;
+      if (H.extract.kindOf(path) === 'image') throw new Error(`${path} is an image. Use view_image to look at it.`);
+      if (['video', 'audio', 'binary', 'heic'].includes(H.extract.kindOf(path))) throw new Error(`${path} is a ${H.extract.kindOf(path)} file; it has no text to read. (Videos/audio can be attached by the user in the chat for frame sampling / transcription.)`);
       if (H.extract.isDocument(path)) {
         const file = await H.fs.readFile(path, { binary: true });
         const blob = file instanceof Blob ? file : new Blob([file]);
@@ -126,6 +128,21 @@ H.tools = (() => {
     description: 'Offer a file for download to the user\'s Downloads folder (browser download).',
     parameters: obj({ filename: str('File name'), content: str('Text content'), mimeType: str('MIME type (default text/plain)') }, ['filename', 'content']),
     run: async ({ filename, content, mimeType }) => { H.download(filename, content, mimeType || 'text/plain'); return ok({ downloaded: filename }); },
+  });
+
+  def({
+    name: 'view_image', rerun: 'Show again', group: 'Files', risk: 'safe',
+    description: 'Look at an image file from the workspace (png, jpg, gif, webp, bmp, svg). The image is shown to you in the next turn as vision input (requires a multimodal model).',
+    parameters: obj({ path: str('Image file path in the workspace') }, ['path']),
+    run: async ({ path }, ctx) => {
+      const file = await H.fs.readFile(path, { binary: true });
+      const blob = file instanceof Blob ? file : new Blob([file]);
+      const named = Object.assign(blob, { name: path.split('/').pop() });
+      const r = /\.svg$/i.test(path) ? { kind: 'image', content: 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(await blob.text()))) } : await H.extract.fromFile(named, { onStatus: ctx?.onStatus });
+      if (r.kind !== 'image') throw new Error(r.note || 'Not a decodable image');
+      (ctx.images ||= []).push({ name: path, content: r.content });
+      return ok({ queued: path, note: 'The image will be shown to you as vision input in the next turn.' + (r.note ? ' ' + r.note : '') });
+    },
   });
 
   /* ===================== CODE EXECUTION ===================== */

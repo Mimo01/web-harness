@@ -208,7 +208,12 @@ H.ui = (() => {
       const status = H.toast(`Reading ${f.name}…`, 'info', 60000);
       const r = await H.extract.fromFile(f, { onStatus: (s) => { status.textContent = `${f.name}: ${s}`; }, maxChars: 200000 });
       status.remove();
-      if (r.kind === 'image') attachments.push({ name: f.name, size: f.size, kind: 'image', content: r.content });
+      if (r.kind === 'image') { attachments.push({ name: f.name, size: f.size, kind: 'image', content: r.content }); if (r.note) H.toast(`${f.name}: ${r.note}`, 'info', 4000); }
+      else if (r.kind === 'video') {
+        for (const fr of r.frames) attachments.push({ name: fr.name, size: 0, kind: 'image', content: fr.content });
+        attachments.push({ name: f.name, size: f.size, kind: 'text', content: r.transcript ? `Transcript:\n${r.transcript}` : '', note: r.note });
+        H.toast(`${f.name}: ${r.note}`, 'info', 7000);
+      }
       else if (r.kind === 'text') { attachments.push({ name: f.name, size: f.size, kind: 'text', content: r.content, pages: r.pages, note: r.note }); if (r.note) H.toast(`${f.name}: ${r.note}`, 'warn', 7000); }
       else { attachments.push({ name: f.name, size: f.size, kind: 'text', content: '', note: r.note }); H.toast(r.note, 'warn', 8000); }
     }
@@ -316,6 +321,10 @@ H.ui = (() => {
       sec('Generation', null, [
         el('div', { class: 'row gap' }, [field('Temperature', 'temperature', 'number', { step: 0.1, min: 0, max: 2 }), field('Max output tokens', 'maxTokens', 'number', { step: 1 }), field('Max tool calls per turn', 'maxToolIterations', 'number', { step: 1 })]),
         el('label', { class: 'field' }, [el('span', {}, ['Custom system prompt (prepended to the built-in one)']), el('textarea', { rows: 5, onchange: (e) => H.settings.set({ systemPrompt: e.target.value }) }, [s.systemPrompt])]),
+      ]),
+      sec('Media', 'Images are resized in the browser before sending. Videos are turned into a few sampled frames plus a transcript; audio into a transcript. Transcription needs a speech-to-text model on your proxy.', [
+        el('div', { class: 'row gap' }, [field('Transcription model (empty = off)', 'transcriptionModel', 'text', { placeholder: 'whisper-1' }), el('button', { class: 'btn', style: 'margin-top:9px', onclick: () => { const w = (H.settings.get('models') || []).filter(m => /whisper|transcri|speech|stt/i.test(m)); H.toast(w.length ? 'Speech models on your proxy: ' + w.join(', ') : 'No obvious speech-to-text model in the model list; ask your LiteLLM admin.', w.length ? 'success' : 'warn', 8000); } }, ['Find'])]),
+        el('p', { class: 'help' }, ['Vision (images, video frames) requires a multimodal chat model; otherwise the proxy rejects the request with an error you will see in the chat.']),
       ]),
     ]);
   }

@@ -103,12 +103,13 @@ When you have enough information, write a concrete, numbered implementation plan
       finalText = assistant.content;
       if (!assistant.tool_calls.length) break;
 
+      const images = [];
       for (const tc of assistant.tool_calls) {
         if (signal?.aborted) break;
         const toolMsg = { role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: '', ts: Date.now(), meta: { running: true, args: H.parseArgs(tc.function.arguments).value ?? tc.function.arguments } };
         messages.push(toolMsg);
         onEvent?.('tool-start', toolMsg, tc);
-        const ctx = { signal, finishReason: res.finish_reason, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
+        const ctx = { signal, finishReason: res.finish_reason, images, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
         const out = await executeToolCall(tc, ctx);
         toolMsg.meta.running = false; toolMsg.meta.ms = out.ms; toolMsg.meta.error = out.error; toolMsg.meta.denied = out.denied;
         const payload = out.error ? { error: out.error } : out.result;
@@ -116,6 +117,10 @@ When you have enough information, write a concrete, numbered implementation plan
         if (str.length > 100000) str = H.clamp(str, 100000);
         toolMsg.content = str;
         onEvent?.('tool-end', toolMsg);
+      }
+      if (images.length) {   // images requested by tools are delivered as a user message with vision content
+        const um = { role: 'user', content: `[Images requested via view_image: ${images.map(i => i.name).join(', ')}]`, display: `🖼 ${images.map(i => i.name).join(', ')} shown to the model`, ts: Date.now(), meta: { system: true }, apiContent: [{ type: 'text', text: `Here are the images you asked for: ${images.map(i => i.name).join(', ')}` }, ...images.map(i => ({ type: 'image_url', image_url: { url: i.content } }))] };
+        messages.push(um); onEvent?.('user-added', um);
       }
       if (signal?.aborted) break;
       if (iter === maxIterations - 1) messages.push({ role: 'user', content: `[system] Tool iteration limit (${maxIterations}) reached. Summarize progress and stop.`, ts: Date.now(), meta: { system: true } });
@@ -151,7 +156,7 @@ When you have enough information, write a concrete, numbered implementation plan
     try {
       await loop(chat.messages, {
         signal: abort.signal, maxIterations: H.settings.get('maxToolIterations'), mode,
-        onEvent: (ev, msg) => { if (ev === 'assistant-start' || ev === 'tool-start') H.bus.emit('message-added', msg); else H.bus.emit('message-updated', msg); if (ev === 'assistant-end' || ev === 'tool-end') persist(); },
+        onEvent: (ev, msg) => { if (ev === 'assistant-start' || ev === 'tool-start' || ev === 'user-added') H.bus.emit('message-added', msg); else H.bus.emit('message-updated', msg); if (ev === 'assistant-end' || ev === 'tool-end') persist(); },
         onUsage: (u, c) => { chat.usage.prompt += u.prompt_tokens || 0; chat.usage.completion += u.completion_tokens || 0; chat.usage.cost = (chat.usage.cost || 0) + (c || 0); chat.usage.requests = (chat.usage.requests || 0) + 1; H.usage.record(H.settings.get('model'), u); H.bus.emit('usage', chat); },
       });
     } catch (e) { H.toast(e.message, 'error', 8000); }

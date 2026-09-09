@@ -79,5 +79,12 @@ H.llm = (() => {
     return { content, reasoning, tool_calls: toolCalls.filter(Boolean), usage, finish_reason: finish };
   }
 
-  return { listModels, chat };
+  /* Whisper-style transcription through the proxy (/v1/audio/transcriptions) */
+  async function transcribe(file, model) {
+    const fd = new FormData(); fd.append('file', file, file.name || 'audio.webm'); fd.append('model', model); fd.append('response_format', 'json');
+    const r = await fetch(url('/v1/audio/transcriptions'), { method: 'POST', headers: { 'Authorization': 'Bearer ' + H.settings.apiKey() }, body: fd });
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${H.clamp(await r.text(), 300)}`);
+    const j = await r.json(); return j.text || '';
+  }
+  return { listModels, chat, transcribe };
 })();

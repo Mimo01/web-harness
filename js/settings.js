@@ -21,7 +21,7 @@ H.secrets = (() => {
 
 /* About: edit these two lines to change the credit / beer link shown in Settings → About */
 H.ABOUT = {
-  author: 'Milan Mozolak', version: '1.3.0',
+  author: 'Milan Mozolak', version: '1.4.0',
   repoUrl: 'https://github.com/Mimo01/web-harness',
   versionUrl: 'https://raw.githubusercontent.com/Mimo01/web-harness/main/version.json',
 };
@@ -55,7 +55,8 @@ H.settings = (() => {
     sendKey: 'enter',
     autoTitle: true,
     showCost: true,
-    checkUpdates: true,            // GET version.json from GitHub on startup / every 6 h
+    checkUpdates: true,
+    transcriptionModel: '',        // e.g. whisper-1 on the LiteLLM proxy; empty = audio/video transcription off            // GET version.json from GitHub on startup / every 6 h
     settingsVersion: 2,
   };
   const stored = H.tryJSON(localStorage.getItem(KEY), {});

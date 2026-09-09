@@ -46,8 +46,9 @@ Don't want the check? Turn it off in Settings → Security & privacy; it only ev
 ## ✨ What you get
 
 - **Chats** that stream, render markdown and code, remember everything locally, show tokens and cost per message.
-- **Attach anything**: PDF, Word, PowerPoint, Excel/CSV, images, code and text files are converted to text (or
-  vision input) right in the browser; nothing is uploaded anywhere.
+- **Attach anything**: PDF, Word, PowerPoint, Excel/CSV, code and text files become text; images are resized and
+  sent as vision input; videos become sampled frames plus a transcript; audio becomes a transcript (transcription
+  uses a speech model on your proxy, e.g. whisper). All of it happens in the browser; nothing is uploaded elsewhere.
 - **40+ built-in tools**: files, code execution (Python via Pyodide, JavaScript in a sandbox), web, data, memory.
 - **Three chat modes**: *Default* asks before writes, *Allow all* just goes, *Plan* investigates read-only and
   hands you a plan with an **Execute** button.
@@ -79,7 +80,7 @@ Multiple persisted conversations, streaming responses, markdown + syntax highlig
 ### Tools (built in)
 | Group | Tools |
 |---|---|
-| Documents | chat attachments, `fs_upload_from_user` and `fs_read` convert PDF (pdf.js), .docx / .pptx (JSZip + XML), .xlsx / .xls / .ods / .csv (SheetJS) to text, client-side; images go to the model as vision input |
+| Documents & media | chat attachments, `fs_upload_from_user` and `fs_read` convert PDF (pdf.js), .docx / .pptx (JSZip + XML), .xlsx / .xls / .ods / .csv (SheetJS) to text, client-side. Images are downscaled (max 1600 px) and sent as vision input; `view_image` lets the model look at an image in the workspace. Videos: up to 6 sampled frames + transcript; audio: transcript (needs a transcription model set in Settings → Model). HEIC and legacy .doc/.ppt are reported as unsupported. |
 | Files (workspace folder you pick) | `fs_list`, `fs_read`, `fs_write`, `fs_edit`, `fs_append`, `fs_mkdir`, `fs_delete`, `fs_move`, `fs_stat`, `fs_search` (grep), `fs_find` (glob), `fs_upload_from_user`, `download_file` |
 | Code | `run_javascript` (sandboxed Web Worker), `run_python` (Pyodide, numpy/pandas etc.), `run_file` (.js/.py/.html/.json), `render_html` (preview panel), `calculate` |
 | Web | `web_fetch` (direct, HTML → text), `web_search` (needs a configured provider), `http_request` (call any API), `open_url` |
