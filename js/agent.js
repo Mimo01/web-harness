@@ -230,7 +230,6 @@ When you have enough information, write a concrete, numbered implementation plan
     chat = c; H.bus.emit('chat-loaded', chat);
   }
   async function reset() {
-    if (chat && !chat.messages.length && !runs.has(chat.id)) { H.bus.emit('chat-loaded', chat); return chat; }   // already on an empty chat
     chat = newChat(); live.set(chat.id, chat); H.perms.clearSession();
     await H.db.putChat(chat);                      // exists right away: visible in the sidebar, switchable, keeps its draft
     H.bus.emit('chat-loaded', chat); H.bus.emit('chat-updated', chat);
