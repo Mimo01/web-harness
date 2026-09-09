@@ -133,7 +133,7 @@ When you have enough information, write a concrete, numbered implementation plan
       const texts = attachments.filter(a => a.kind === 'text');
       const images = attachments.filter(a => a.kind === 'image');
       let content = userMsg.content;
-      if (texts.length) content += '\n\n' + texts.map(a => `<attached_file name="${a.name}">\n${a.content}\n</attached_file>`).join('\n');
+      if (texts.length) content += '\n\n' + texts.map(a => `<attached_file name="${a.name}"${a.pages ? ` pages="${a.pages}"` : ''}${a.note ? ` note="${a.note.replace(/"/g, "'")}"` : ''}>\n${a.content || '(no text extracted)'}\n</attached_file>`).join('\n');
       if (images.length) userMsg.apiContent = [{ type: 'text', text: content }, ...images.map(a => ({ type: 'image_url', image_url: { url: a.content } }))];
       else userMsg.apiContent = content;
     }

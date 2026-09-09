@@ -205,8 +205,12 @@ H.ui = (() => {
   }
   async function addFiles(files) {
     for (const f of files) {
-      if (f.type.startsWith('image/')) attachments.push({ name: f.name, size: f.size, kind: 'image', content: await H.readFileAsDataURL(f) });
-      else attachments.push({ name: f.name, size: f.size, kind: 'text', content: H.clamp(await H.readFileAsText(f), 200000) });
+      const status = H.toast(`Reading ${f.name}…`, 'info', 60000);
+      const r = await H.extract.fromFile(f, { onStatus: (s) => { status.textContent = `${f.name}: ${s}`; }, maxChars: 200000 });
+      status.remove();
+      if (r.kind === 'image') attachments.push({ name: f.name, size: f.size, kind: 'image', content: r.content });
+      else if (r.kind === 'text') { attachments.push({ name: f.name, size: f.size, kind: 'text', content: r.content, pages: r.pages, note: r.note }); if (r.note) H.toast(`${f.name}: ${r.note}`, 'warn', 7000); }
+      else { attachments.push({ name: f.name, size: f.size, kind: 'text', content: '', note: r.note }); H.toast(r.note, 'warn', 8000); }
     }
     renderAttachments();
   }
@@ -585,7 +589,7 @@ H.ui = (() => {
       ...(s.jinaFallback ? [['r.jina.ai', 'https://r.jina.ai', 'third-party reader: receives the URLs the model fetches']] : []),
       ...(s.searchTemplate ? [['Search provider', s.searchTemplate, 'receives search queries']] : []),
       ...(s.checkUpdates ? [['GitHub (update check)', H.ABOUT.versionUrl, 'a small version file fetched on startup and every 6 h; no data is sent']] : []),
-      ['cdnjs.cloudflare.com', 'https://cdnjs.cloudflare.com', 'UI libraries (marked, DOMPurify, highlight.js) loaded at startup; no data is sent'],
+      ['cdnjs.cloudflare.com', 'https://cdnjs.cloudflare.com', 'UI libraries (marked, DOMPurify, highlight.js) at startup, and pdf.js / JSZip / SheetJS only when you attach a PDF, Office or spreadsheet file; files are parsed locally, nothing is uploaded'],
       ['fonts.googleapis.com', 'https://fonts.googleapis.com', 'Inter / JetBrains Mono fonts loaded at startup; no data is sent'],
       ...(s.allowPyodideCdn ? [['Pyodide (jsDelivr)', s.pyodideUrl, 'downloaded only when Python is first used (code and data stay in the browser)']] : []),
     ];

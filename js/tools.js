@@ -31,10 +31,17 @@ H.tools = (() => {
   });
   def({
     name: 'fs_read', rerun: 'Read again', group: 'Files', risk: 'safe',
-    description: 'Read a text file from the workspace. Optionally a line range.',
+    description: 'Read a file from the workspace as text. PDF, Word (.docx), PowerPoint (.pptx) and spreadsheets (.xlsx/.xls/.ods/.csv) are converted to text automatically. Optionally a line range.',
     parameters: obj({ path: str('File path'), startLine: num('1-based first line (optional)'), endLine: num('1-based last line inclusive (optional)') }, ['path']),
-    run: async ({ path, startLine, endLine }) => {
-      const text = (await H.fs.readFile(path)).replace(/\r\n/g, '\n');
+    run: async ({ path, startLine, endLine }, ctx) => {
+      let text;
+      if (H.extract.isDocument(path)) {
+        const file = await H.fs.readFile(path, { binary: true });
+        const blob = file instanceof Blob ? file : new Blob([file]);
+        const r = await H.extract.fromFile(Object.assign(blob, { name: path.split('/').pop() }), { onStatus: ctx?.onStatus });
+        if (r.kind !== 'text') throw new Error(r.note || 'No text could be extracted');
+        text = r.text ?? r.content; if (r.note) text = `[${r.note}]\n` + text;
+      } else text = (await H.fs.readFile(path)).replace(/\r\n/g, '\n');
       const lines = text.split('\n');
       const s = Math.max(1, startLine || 1), e = Math.min(lines.length, endLine || lines.length);
       const slice = lines.slice(s - 1, e).map((l, i) => `${String(s + i).padStart(5)}| ${l}`).join('\n');
@@ -102,12 +109,12 @@ H.tools = (() => {
   });
   def({
     name: 'fs_upload_from_user', group: 'Files', risk: 'safe',
-    description: 'Ask the user to pick one or more files from their computer (outside the workspace). Returns their text contents.',
+    description: 'Ask the user to pick one or more files from their computer (outside the workspace). Returns their text contents; PDF, Word, PowerPoint and spreadsheets are converted to text.',
     parameters: obj({ accept: str('Accept filter, e.g. ".csv,.txt" (optional)') }),
     run: ({ accept }) => new Promise((res) => {
       const inp = H.el('input', { type: 'file', multiple: true, accept: accept || '' });
       let done = false; const finish = (v) => { if (!done) { done = true; res(v); } };
-      inp.onchange = async () => { const out = []; for (const f of inp.files) out.push({ name: f.name, size: f.size, content: H.clamp(await H.readFileAsText(f), 100000) }); finish({ files: out }); };
+      inp.onchange = async () => { const out = []; for (const f of inp.files) { const r = await H.extract.fromFile(f, { maxChars: 100000 }); out.push({ name: f.name, size: f.size, kind: r.kind, content: r.kind === 'text' ? r.content : (r.kind === 'image' ? '(image; attach it in the chat to view it)' : ''), note: r.note }); } finish({ files: out }); };
       inp.oncancel = () => finish({ files: [], cancelled: true, note: 'The user cancelled the file dialog.' });
       // browsers without the cancel event: resolve when focus returns and nothing was chosen
       window.addEventListener('focus', () => setTimeout(() => { if (!inp.files.length) finish({ files: [], cancelled: true, note: 'The user closed the file dialog without choosing a file.' }); }, 800), { once: true });

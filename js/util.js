@@ -100,6 +100,7 @@ H.toast = (msg, kind = 'info', ms = 3500) => {
   const t = H.el('div', { class: 'toast ' + kind, text: msg });
   box.append(t);
   setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 300); }, ms);
+  return t;
 };
 
 H.download = (name, content, type = 'text/plain') => {
