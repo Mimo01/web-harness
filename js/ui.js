@@ -146,7 +146,9 @@ H.ui = (() => {
     c.innerHTML = md(m.content);
     c.classList.toggle('cursor', !!m.meta?.streaming && !!m.content && !m.tool_calls?.length);
     node.querySelector('.thinking').classList.toggle('hidden', !(m.meta?.streaming && !m.content && !m.reasoning && !m.tool_calls?.length));
-    node.classList.toggle('empty', !m.content && !m.meta?.streaming && !m.meta?.error && !m.reasoning);
+    const hasTools = !!m.tool_calls?.length;
+    node.classList.toggle('empty', !m.content && !m.meta?.streaming && !m.meta?.error && !m.reasoning && !hasTools);
+    node.classList.toggle('tools-only', !m.content && !m.meta?.streaming && !m.meta?.error && !m.reasoning && hasTools);
     enhanceCode(c);
     const rs = node.querySelector('.reasoning-slot'); rs.innerHTML = '';
     if (m.reasoning) rs.append(el('details', { class: 'reasoning' }, [el('summary', {}, ['Reasoning']), el('div', { class: 'md', html: md(m.reasoning) })]));

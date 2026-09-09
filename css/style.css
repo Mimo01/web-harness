@@ -382,3 +382,7 @@ body[data-mode="auto"] #mode-wrap { border-color: var(--ok); background: var(--o
 .msg.assistant.continuation .role { height: 0; margin: 0; overflow: visible; }
 .msg.assistant.continuation .role .ts { display: none; }
 .msg.assistant.continuation .role .actions { position: absolute; top: 0; right: 0; z-index: 2; background: var(--bg); border-radius: var(--r-sm); padding: 0 2px; }
+/* assistant turn that starts with a tool call: keep the header, drop the empty body space */
+.msg.assistant.tools-only { margin-bottom: 4px; }
+.msg.assistant.tools-only .content { display: none; }
+.msg.assistant.tools-only .role { margin-bottom: 0; }
