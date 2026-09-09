@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Harness</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%236d8cff'/><path d='M7 8l5-3 5 3v8l-5 3-5-3z' fill='none' stroke='white' stroke-width='1.8'/></svg>">
+<meta name="referrer" content="no-referrer">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="css/style.css?v=20260909i">
+<link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-cube" viewBox="0 0 24 24"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9zM4 7.5 12 12l8-4.5M12 12v9"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0 5 5L13 18l-3-3 6.7-6.7a4 4 0 0 0-1-2zM3 21l6-6"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12m0 0 4-4m-4 4-4-4M4 20h16"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.3 3.3 0 0 1 4.7 4.7L10 17.5a1.7 1.7 0 0 1-2.4-2.4L15.5 7"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 4l-4 16"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14m0 0 6-6m-6 6-6-6"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 5.6 6.4L4 8M4 13a8 8 0 0 0 14.4 4.6L20 16M4 4v4h4M20 20v-4h-4"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.5 1.5M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
+    <symbol id="i-beer" viewBox="0 0 24 24"><path d="M6 8h9v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1zM15 10h2.5a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H15M6 8a2 2 0 0 1 0-4 3 3 0 0 1 5-1 3 3 0 0 1 4 1 2 2 0 0 1 0 4M9 12v6M12 12v6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+  </svg>
+
+  <aside id="sidebar">
+    <header>
+      <h1><span class="logo"><svg class="ico"><use href="#i-cube"/></svg></span>LLM Harness</h1>
+      <button id="new-chat" class="btn sm" title="New chat (Ctrl/Cmd+K)"><svg class="ico"><use href="#i-plus"/></svg>New</button>
+    </header>
+    <div class="side-search"><svg class="ico"><use href="#i-search"/></svg><input id="chat-search" type="text" placeholder="Search chats"></div>
+    <div id="chat-list"></div>
+    <footer>
+      <button id="skills-btn" class="btn sm"><svg class="ico"><use href="#i-bolt"/></svg>Skills</button>
+      <button id="plugins-btn" class="btn sm"><svg class="ico"><use href="#i-plug"/></svg>Plugins</button>
+      <button id="tools-btn" class="btn sm"><svg class="ico"><use href="#i-tool"/></svg>Tools</button>
+      <button id="settings-btn" class="btn sm" title="Settings (Ctrl/Cmd+/)"><svg class="ico"><use href="#i-settings"/></svg>Settings</button>
+    </footer>
+  </aside>
+
+  <div id="main">
+    <div id="topbar">
+      <button id="toggle-sidebar" class="btn icon ghost" title="Toggle sidebar"><svg class="ico"><use href="#i-menu"/></svg></button>
+      <select id="model-select" title="Model"></select>
+      <select id="mode-select" title="Chat mode">
+        <option value="default">Default mode</option>
+        <option value="auto">Allow all</option>
+        <option value="plan">Plan mode</option>
+      </select>
+      <button id="ws-btn" class="btn sm" title="Open a local folder as the workspace for file tools"><svg class="ico"><use href="#i-folder"/></svg><span class="lbl">Workspace</span></button>
+      <span class="spacer"></span>
+      <span id="bridge-pill" class="hidden" title="Browser session bridges connected"></span>
+      <div id="ctx-meter" title="Context usage"><span class="track"><span class="fill"></span></span><span class="txt"></span></div>
+      <span id="usage" class="small muted" title="Chat tokens and cost (click for details)"></span>
+      <button id="export-chat" class="btn sm ghost" title="Export chat as markdown"><svg class="ico"><use href="#i-download"/></svg>Export</button>
+      <span id="status"><span class="dot"></span><span class="txt">…</span></span>
+    </div>
+
+    <div id="mode-banner" class="hidden"><svg class="ico"><use href="#i-bolt"/></svg><b>Plan mode</b><span>The model can only read and investigate. It will propose a plan for you to approve.</span><span class="spacer"></span><button class="btn sm exit">Exit plan mode</button></div>
+    <div id="content">
+      <div id="messages"><div class="msg-wrap"></div></div>
+      <button id="scroll-bottom" class="btn icon hidden" title="Scroll to bottom"><svg class="ico"><use href="#i-down"/></svg></button>
+      <div id="preview" class="hidden">
+        <header><b class="ptitle">Preview</b><span class="spacer"></span><button id="preview-open" class="btn sm ghost"><svg class="ico"><use href="#i-external"/></svg>Open in tab</button><button id="preview-close" class="btn icon ghost"><svg class="ico"><use href="#i-x"/></svg></button></header>
+        <iframe sandbox="allow-scripts allow-forms allow-modals allow-popups" title="preview"></iframe>
+      </div>
+    </div>
+
+    <div id="composer">
+      <div class="inner">
+        <div id="slash-menu" class="hidden"></div>
+        <div class="composer-box">
+          <div id="attach-list"></div>
+          <textarea id="input" rows="1" placeholder="Message… type / for skills, drop files to attach"></textarea>
+          <div class="composer-bar">
+            <button id="attach-btn" class="btn icon ghost" title="Attach files"><svg class="ico"><use href="#i-clip"/></svg></button>
+            <span class="hint"><span><kbd>Enter</kbd> send</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span><span><kbd>/</kbd> skills</span></span>
+            <span class="spacer"></span>
+            <button id="send-btn" class="btn primary" title="Send">Send<svg class="ico"><use href="#i-send"/></svg></button>
+            <button id="stop-btn" class="btn danger hidden" title="Stop"><svg class="ico"><use href="#i-stop"/></svg>Stop</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script src="js/util.js?v=20260909i"></script>
+  <script src="js/db.js?v=20260909i"></script>
+  <script src="js/settings.js?v=20260909i"></script>
+  <script src="js/usage.js?v=20260909i"></script>
+  <script src="js/bridge.js?v=20260909i"></script>
+  <script src="js/update.js?v=20260909i"></script>
+  <script src="js/permissions.js?v=20260909i"></script>
+  <script src="js/llm.js?v=20260909i"></script>
+  <script src="js/fs.js?v=20260909i"></script>
+  <script src="js/runtime.js?v=20260909i"></script>
+  <script src="js/skills.js?v=20260909i"></script>
+  <script src="js/plugins.js?v=20260909i"></script>
+  <script src="js/tools.js?v=20260909i"></script>
+  <script src="js/agent.js?v=20260909i"></script>
+  <script src="js/ui.js?v=20260909i"></script>
+  <script src="js/app.js?v=20260909i"></script>
+</body>
+</html>
