@@ -309,8 +309,11 @@ H.plugins = (() => {
     let a = { ...(t.defaults || {}), ...args };
     if (t.prepare) a = await H.runtime.evalExpr('prepare', t.prepare, { args: a });          // sandboxed: manifests never run in the page
     const req = t.request;
-    let path = t.pathFn ? await H.runtime.evalExpr('pathFn', t.pathFn, { args: a }) : H.template(req.path, a);
-    path = path.split('/').map((seg, i) => i === 0 ? seg : seg).join('/');
+    // values substituted into the path are percent-encoded (spaces, ?, #, &, %) but keep '/' so multi-segment values
+    // such as file paths or branch names still address nested resources; values that are already encoded are left alone
+    const encSeg = (v) => /%[0-9A-Fa-f]{2}/.test(v) ? v : encodeURIComponent(v).replace(/%2F/gi, '/');
+    const pathArgs = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, typeof v === 'string' ? encSeg(v) : v]));
+    let path = t.pathFn ? await H.runtime.evalExpr('pathFn', t.pathFn, { args: pathArgs }) : H.template(req.path, pathArgs);
     const url = new URL(p.baseUrl.replace(/\/+$/, '') + (path.startsWith('/') ? path : '/' + path));
     for (const [k, v] of Object.entries(req.query || {})) { const val = H.template(String(v), a); if (val !== '') url.searchParams.set(k, val); }
     if (p.auth?.type === 'query' && p.auth.name) url.searchParams.set(p.auth.name, p.auth.value || '');
@@ -338,16 +341,17 @@ H.plugins = (() => {
   }
 
   /* ----------------------------- MCP CLIENT (Streamable HTTP) ----------------------------- */
-  async function mcpRpc(p, method, params, sessionId) {
+  async function mcpRpc(p, method, params, sessionId, { notify = false } = {}) {
     const route = resolveRoute(p, p.url);
     const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream', ...(p.headers || {}), ...route.headers };
     if (p.useLitellmKey) { headers['x-litellm-api-key'] = H.settings.apiKey(); headers['Authorization'] = 'Bearer ' + H.settings.apiKey(); }
     if (sessionId) headers['Mcp-Session-Id'] = sessionId;
-    const body = JSON.stringify({ jsonrpc: '2.0', id: H.uid(), method, params: params || {} });
+    const body = JSON.stringify(notify ? { jsonrpc: '2.0', method, params: params || {} } : { jsonrpc: '2.0', id: H.uid(), method, params: params || {} });
     let r;
     if (route.bridge) { const br = await H.bridge.fetch(route.url, { method: 'POST', headers, body }); r = { ok: br.ok, status: br.status, headers: { get: (k) => br.headers?.[k.toLowerCase()] || null }, text: async () => br.body || '' }; }
     else if (route.ext) { const er = await H.ext.fetch(route.url, { method: 'POST', headers, body }); r = { ok: er.ok, status: er.status, headers: { get: (k) => er.headers?.[k.toLowerCase()] || null }, text: async () => er.body || '' }; }
     else { try { r = await H.tools.fetchWithProxy(route.url, { method: 'POST', headers, body }, { allowProxy: false }); } catch (e) { throw new Error(corsHelp(p, e, route.url)); } }
+    if (notify) { await r.text().catch(() => ''); return { result: null, sessionId: r.headers.get('Mcp-Session-Id') || sessionId }; }   // notifications expect no JSON-RPC response
     if (!r.ok) throw new Error(`MCP ${p.name}: HTTP ${r.status} ${H.clamp(await r.text(), 800)}`);
     const sid = r.headers.get('Mcp-Session-Id') || sessionId;
     const ct = r.headers.get('content-type') || '';
@@ -365,7 +369,7 @@ H.plugins = (() => {
     if (p.useLitellmKey && !p.url) p = { ...p, url: H.settings.get('baseUrl').replace(/\/+$/, '') + '/mcp/' };
     const init = await mcpRpc(p, 'initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'web-llm-harness', version: '1.0' } });
     const sid = init.sessionId;
-    try { await fetch(p.url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(p.headers || {}), ...(sid ? { 'Mcp-Session-Id': sid } : {}) }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) }); } catch { }
+    try { await mcpRpc(p, 'notifications/initialized', {}, sid, { notify: true }); } catch { }   // same route (LiteLLM key / bridge / extension) as every other call
     const tl = await mcpRpc(p, 'tools/list', {}, sid);
     const conn = { sessionId: sid, tools: tl.result?.tools || [], serverInfo: init.result?.serverInfo };
     mcpCache.set(p.id, conn);

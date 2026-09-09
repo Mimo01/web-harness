@@ -1,6 +1,6 @@
 {
-  "version": "1.12.1",
+  "version": "1.12.2",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Security: sandboxed preview tab, scoped extension, Content Security Policy, no proxy replays, hardened bridge."
+  "notes": "Fixes: MCP notifications use the plugin route, path values are encoded, multi-character CSV delimiters, lighter sidebar updates, cached prompt tokens priced correctly."
 }

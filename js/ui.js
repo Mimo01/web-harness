@@ -147,8 +147,9 @@ H.ui = (() => {
   }
   function updateTurnStats(turn) {
     let p = 0, c = 0, cost = 0, known = false;
-    for (const m of turn.msgs) { const u = m.meta?.usage; if (!u) continue; p += u.prompt_tokens || 0; c += u.completion_tokens || 0; const k = H.usage.cost(m.meta.model || H.settings.get('model'), u.prompt_tokens, u.completion_tokens); if (k != null) { cost += k; known = true; } }
-    turn.stats.textContent = (p || c) ? `· ${H.usage.fmtTok(p)} in / ${H.usage.fmtTok(c)} out` + (known && H.settings.get('showCost') ? ` · ${H.usage.fmtCost(cost)}` : '') : '';
+    let cached = 0;
+    for (const m of turn.msgs) { const u = m.meta?.usage; if (!u) continue; p += u.prompt_tokens || 0; c += u.completion_tokens || 0; cached += H.usage.cachedOf(u); const k = H.usage.costOfUsage(m.meta.model || H.settings.get('model'), u); if (k != null) { cost += k; known = true; } }
+    turn.stats.textContent = (p || c) ? `· ${H.usage.fmtTok(p)} in${cached ? ` (${H.usage.fmtTok(cached)} cached)` : ''} / ${H.usage.fmtTok(c)} out` + (known && H.settings.get('showCost') ? ` · ${H.usage.fmtCost(cost)}` : '') : '';
   }
   function assistantPart(m) {
     return el('div', { class: 'part text' }, [
@@ -299,12 +300,17 @@ H.ui = (() => {
   /* ---------------- sidebar ---------------- */
   /* the sidebar works from a small index (id, title, dates, counts, searchable text), rebuilt from storage only when needed */
   let chatIndex = null; let indexVersion = 1; let indexLoaded = 0; let listTimer = 0;
-  H.bus.on('chat-updated', () => { indexVersion++; });
+  const indexEntry = (c) => ({ id: c.id, title: c.title, updated: c.updated, count: c.messages.length, text: (c.title + ' ' + c.messages.filter(m => m.role === 'user').slice(0, 20).map(m => String(m.display || m.content || '').slice(0, 300)).join(' ')).toLowerCase() });
+  // one changed chat updates only its own entry; a full reload from storage happens only for deletions or an unloaded index
+  H.bus.on('chat-updated', (c) => {
+    if (chatIndex && indexLoaded === indexVersion && c && c.id) { const i = chatIndex.findIndex(x => x.id === c.id); const e = indexEntry(c); if (i >= 0) chatIndex[i] = e; else chatIndex.push(e); chatIndex.sort((a, b) => b.updated - a.updated); }
+    else indexVersion++;
+  });
   async function getIndex() {
     if (chatIndex && indexLoaded === indexVersion) return chatIndex;
     const v = indexVersion;
     const chats = await H.db.listChats();
-    const idx = chats.map(c => ({ id: c.id, title: c.title, updated: c.updated, count: c.messages.length, text: (c.title + ' ' + c.messages.filter(m => m.role === 'user').slice(0, 20).map(m => String(m.display || m.content || '').slice(0, 300)).join(' ')).toLowerCase() }));
+    const idx = chats.map(indexEntry);
     if (v === indexVersion) { chatIndex = idx; indexLoaded = v; return idx; }   // a write happened meanwhile: reload
     return getIndex();
   }
@@ -460,7 +466,7 @@ H.ui = (() => {
     const infoBox = el('div', { class: 'kv-card' });
     const info = () => { const m = H.settings.get('model'); const p = H.usage.priceFor(m); const mi = H.settings.get('modelInfo')?.[m]; infoBox.innerHTML = ''; infoBox.append(el('div', { class: 'kv' }, [
       el('span', {}, ['Context window']), el('b', {}, [p.context ? p.context.toLocaleString() + ' tokens' : 'unknown']),
-      el('span', {}, ['Input price']), el('b', {}, [p.inPerTok != null ? '$' + (p.inPerTok * 1e6).toFixed(2) + ' / 1M' : 'unknown']),
+      el('span', {}, ['Input price']), el('b', {}, [p.inPerTok != null ? '$' + (p.inPerTok * 1e6).toFixed(2) + ' / 1M' + (p.cachedPerTok != null ? ` (cached: $${(p.cachedPerTok * 1e6).toFixed(2)})` : '') : 'unknown']),
       el('span', {}, ['Output price']), el('b', {}, [p.outPerTok != null ? '$' + (p.outPerTok * 1e6).toFixed(2) + ' / 1M' : 'unknown']),
       el('span', {}, ['Source']), el('b', {}, [p.source === 'litellm' ? 'LiteLLM /model/info' : p.source === 'manual' ? 'manual override' : 'not available' + (mi?.provider ? ' · ' + mi.provider : '')]),
     ])); };
@@ -751,16 +757,16 @@ H.ui = (() => {
       const t = await H.usage.loadTotal(); const agg = await H.usage.aggregateChats();
       totalBox.innerHTML = '';
       const models = Object.entries(t.byModel).sort((a, b) => b[1].prompt + b[1].completion - a[1].prompt - a[1].completion);
-      const totalCost = models.reduce((acc, [m, v]) => acc + (H.usage.cost(m, v.prompt, v.completion) || 0), 0);
+      const totalCost = models.reduce((acc, [m, v]) => acc + (H.usage.cost(m, v.prompt, v.completion, v.cached || 0) || 0), 0);
       totalBox.append(el('div', { class: 'stats' }, [stat('Requests', String(t.requests)), stat('Input tokens', H.usage.fmtTok(t.prompt)), stat('Output tokens', H.usage.fmtTok(t.completion)), stat('Cost', H.usage.fmtCost(totalCost), `${agg.chats} chats stored · at current prices`)]));
-      if (models.length) totalBox.append(el('table', { class: 'table' }, [el('thead', {}, [el('tr', {}, ['Model', 'Requests', 'Input', 'Output', 'Cost'].map(h => el('th', {}, [h])))]), el('tbody', {}, models.map(([m, v]) => { const c = H.usage.cost(m, v.prompt, v.completion); return el('tr', {}, [el('td', { class: 'mono' }, [m]), el('td', {}, [String(v.requests)]), el('td', {}, [H.usage.fmtTok(v.prompt)]), el('td', {}, [H.usage.fmtTok(v.completion)]), el('td', {}, [c == null ? 'set pricing' : H.usage.fmtCost(c)])]); }))]));
+      if (models.length) totalBox.append(el('table', { class: 'table' }, [el('thead', {}, [el('tr', {}, ['Model', 'Requests', 'Input', 'Output', 'Cost'].map(h => el('th', {}, [h])))]), el('tbody', {}, models.map(([m, v]) => { const c = H.usage.cost(m, v.prompt, v.completion, v.cached || 0); return el('tr', {}, [el('td', { class: 'mono' }, [m]), el('td', {}, [String(v.requests)]), el('td', {}, [H.usage.fmtTok(v.prompt) + (v.cached ? ` (${H.usage.fmtTok(v.cached)} cached)` : '')]), el('td', {}, [H.usage.fmtTok(v.completion)]), el('td', {}, [c == null ? 'set pricing' : H.usage.fmtCost(c)])]); }))]));
       const days = Object.entries(t.byDay).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 14);
       if (days.length) { const max = Math.max(...days.map(([, v]) => v.prompt + v.completion)); totalBox.append(el('div', { class: 'bars' }, days.reverse().map(([d, v]) => el('div', { class: 'bar', title: `${d}: ${(v.prompt + v.completion).toLocaleString()} tokens · ${H.usage.fmtCost(v.cost)}` }, [el('div', { class: 'bar-fill', style: `height:${Math.max(3, (v.prompt + v.completion) / max * 60)}px` }), el('span', {}, [d.slice(5)])])))); }
       if (agg.top.length) totalBox.append(el('table', { class: 'table' }, [el('thead', {}, [el('tr', {}, ['Most expensive chats', 'Tokens', 'Cost'].map(h => el('th', {}, [h])))]), el('tbody', {}, agg.top.map(c => el('tr', {}, [el('td', {}, [el('a', { href: '#', onclick: (e) => { e.preventDefault(); settingsModal?.remove(); settingsModal = null; H.agent.load(c.id); } }, [c.title])]), el('td', {}, [H.usage.fmtTok(c.tokens)]), el('td', {}, [H.usage.fmtCost(c.cost)])])))]));
       totalBox.append(el('div', { class: 'row gap', style: 'margin-top:10px' }, [el('button', { class: 'btn sm danger-outline', onclick: async () => { if (confirm('Reset all-time usage counters?')) { await H.usage.resetTotal(); openSettings('usage'); } } }, ['Reset counters'])]));
     })();
     const pricing = H.settings.get('pricing') || {};
-    const pr = el('textarea', { rows: 5, class: 'mono', placeholder: '{ "gpt-4o": { "in": 2.5, "out": 10, "context": 128000 } }', onchange: (e) => { try { H.settings.set({ pricing: e.target.value.trim() ? JSON.parse(e.target.value) : {} }); H.toast('Pricing saved', 'success'); updateContextMeter(); } catch (err) { H.toast('Invalid JSON: ' + err.message, 'error'); } } }, [Object.keys(pricing).length ? JSON.stringify(pricing, null, 2) : '']);
+    const pr = el('textarea', { rows: 5, class: 'mono', placeholder: '{ "gpt-4o": { "in": 2.5, "out": 10, "cached": 1.25, "context": 128000 } }', onchange: (e) => { try { H.settings.set({ pricing: e.target.value.trim() ? JSON.parse(e.target.value) : {} }); H.toast('Pricing saved', 'success'); updateContextMeter(); } catch (err) { H.toast('Invalid JSON: ' + err.message, 'error'); } } }, [Object.keys(pricing).length ? JSON.stringify(pricing, null, 2) : '']);
     wrap.append(sec('Pricing & context windows', `Prices are read from LiteLLM's /model/info when available (current model: ${p.source === 'litellm' ? 'found' : p.source === 'manual' ? 'manual' : 'not found'}). Override or add models here as USD per 1M tokens.`, [pr, el('div', { class: 'row gap' }, [field('Fallback context window (tokens)', 'defaultContext', 'number', { step: 1000 }), el('button', { class: 'btn', style: 'margin-top:9px', onclick: async () => { const i = await H.usage.refreshModelInfo(); H.toast(i ? `Model info loaded for ${Object.keys(i).length} models` : 'No /model/info endpoint available', i ? 'success' : 'warn'); openSettings('usage'); } }, ['Refresh from LiteLLM'])]), check('Show cost in the top bar and messages', 'showCost')]));
     return wrap;
   }

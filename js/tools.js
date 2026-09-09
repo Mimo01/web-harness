@@ -301,12 +301,13 @@ H.tools = (() => {
     description: 'Parse CSV/TSV text into an array of row objects (first row = header).',
     parameters: obj({ text: str('CSV text'), delimiter: str('Delimiter (default ",")'), limit: num('Max rows (default 500)') }, ['text']),
     run: async ({ text, delimiter = ',', limit = 500 }) => {
+      delimiter = delimiter === '\\t' || delimiter === 'tab' ? '\t' : (delimiter || ',');
       const rows = []; let row = [], cell = '', q = false;
       for (let i = 0; i < text.length; i++) {
         const c = text[i];
         if (q) { if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c; }
         else if (c === '"') q = true;
-        else if (c === delimiter) { row.push(cell); cell = ''; }
+        else if (text.startsWith(delimiter, i)) { row.push(cell); cell = ''; i += delimiter.length - 1; }
         else if (c === '\n') { row.push(cell.replace(/\r$/, '')); rows.push(row); row = []; cell = ''; }
         else cell += c;
       }

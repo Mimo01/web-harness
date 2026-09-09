@@ -142,7 +142,7 @@ When you have enough information, write a concrete, numbered implementation plan
       assistant.content = res.content; assistant.reasoning = res.reasoning || assistant.reasoning;
       assistant.tool_calls = (res.tool_calls || []).map(t => ({ id: t.id || H.uid(), type: 'function', function: { name: t.function.name, arguments: t.function.arguments || '{}' } }));
       assistant.meta.streaming = false;
-      if (res.usage) { assistant.meta.usage = res.usage; assistant.meta.cost = H.usage.cost(model, res.usage.prompt_tokens, res.usage.completion_tokens); onUsage?.(res.usage, assistant.meta.cost); }
+      if (res.usage) { assistant.meta.usage = res.usage; assistant.meta.cost = H.usage.costOfUsage(model, res.usage); onUsage?.(res.usage, assistant.meta.cost); }
       if (!assistant.tool_calls.length && mode === 'plan' && assistant.content) assistant.meta.plan = true;
       onEvent?.('assistant-end', assistant);
       finalText = assistant.content;

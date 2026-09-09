@@ -6,22 +6,28 @@ H.usage = (() => {
   async function loadTotal() { if (!total) total = (await H.db.kvGet(TOTAL_KEY)) || { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; return total; }
 
   /* pricing: manual override > LiteLLM model info */
+  /* cached prompt tokens as reported by the API (OpenAI: prompt_tokens_details.cached_tokens; Anthropic via LiteLLM: cache_read_input_tokens) */
+  const cachedOf = (u) => (u?.prompt_tokens_details?.cached_tokens ?? u?.cache_read_input_tokens ?? 0) || 0;
   function priceFor(model) {
     const s = H.settings.get();
     const man = s.pricing?.[model];
     const info = s.modelInfo?.[model];
+    const inPerTok = man?.in != null ? man.in / 1e6 : (info?.inCost ?? null);
     return {
-      inPerTok: man?.in != null ? man.in / 1e6 : (info?.inCost ?? null),
+      inPerTok,
+      cachedPerTok: man?.cached != null ? man.cached / 1e6 : (info?.cacheReadCost ?? (inPerTok != null ? inPerTok * 0.5 : null)),   // default: half price when the provider does not say
       outPerTok: man?.out != null ? man.out / 1e6 : (info?.outCost ?? null),
       context: man?.context || info?.maxInput || s.defaultContext,
       source: man?.in != null ? 'manual' : info?.inCost != null ? 'litellm' : 'unknown',
     };
   }
-  function cost(model, promptTok, completionTok) {
+  function cost(model, promptTok, completionTok, cachedTok = 0) {
     const p = priceFor(model);
     if (p.inPerTok == null && p.outPerTok == null) return null;
-    return (promptTok || 0) * (p.inPerTok || 0) + (completionTok || 0) * (p.outPerTok || 0);
+    const cached = Math.min(cachedTok || 0, promptTok || 0);
+    return ((promptTok || 0) - cached) * (p.inPerTok || 0) + cached * (p.cachedPerTok || 0) + (completionTok || 0) * (p.outPerTok || 0);
   }
+  const costOfUsage = (model, u) => cost(model, u?.prompt_tokens, u?.completion_tokens, cachedOf(u));
   const fmtCost = (c) => c == null ? '—' : c < 0.01 ? '$' + c.toFixed(4) : '$' + c.toFixed(c < 1 ? 3 : 2);
   const fmtTok = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n || 0);
 
@@ -29,8 +35,8 @@ H.usage = (() => {
   async function record(model, u) {
     if (!u) return;
     const t = await loadTotal();
-    const c = cost(model, u.prompt_tokens, u.completion_tokens) || 0;
-    const add = (o) => { o.prompt += u.prompt_tokens || 0; o.completion += u.completion_tokens || 0; o.cost += c; o.requests += 1; };
+    const c = costOfUsage(model, u) || 0; const cached = cachedOf(u);
+    const add = (o) => { o.prompt += u.prompt_tokens || 0; o.completion += u.completion_tokens || 0; o.cached = (o.cached || 0) + cached; o.cost += c; o.requests += 1; };
     add(t);
     add(t.byModel[model] ||= { prompt: 0, completion: 0, cost: 0, requests: 0 });
     const day = new Date().toISOString().slice(0, 10);
@@ -45,7 +51,7 @@ H.usage = (() => {
     let cost = 0, known = false, partial = false;
     for (const m of chat?.messages || []) {
       const u = m.meta?.usage; if (!u) continue;
-      const c = cost_(m.meta.model || H.settings.get('model'), u.prompt_tokens, u.completion_tokens);
+      const c = costOfUsage(m.meta.model || H.settings.get('model'), u);
       if (c == null) partial = true; else { cost += c; known = true; }
     }
     return { cost, known, partial };
@@ -82,7 +88,7 @@ H.usage = (() => {
         const info = {};
         for (const m of j.data || []) {
           const mi = m.model_info || {};
-          info[m.model_name] = { maxInput: mi.max_input_tokens || mi.max_tokens || null, maxOutput: mi.max_output_tokens || null, inCost: mi.input_cost_per_token ?? null, outCost: mi.output_cost_per_token ?? null, provider: mi.litellm_provider || null };
+          info[m.model_name] = { maxInput: mi.max_input_tokens || mi.max_tokens || null, maxOutput: mi.max_output_tokens || null, inCost: mi.input_cost_per_token ?? null, outCost: mi.output_cost_per_token ?? null, cacheReadCost: mi.cache_read_input_token_cost ?? null, provider: mi.litellm_provider || null };
         }
         H.settings.set({ modelInfo: info });
         H.bus.emit('usage');
@@ -100,5 +106,5 @@ H.usage = (() => {
     return out;
   }
 
-  return { priceFor, cost, chatCost, fmtCost, fmtTok, record, contextEstimate, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
+  return { priceFor, cost, costOfUsage, cachedOf, chatCost, fmtCost, fmtTok, record, contextEstimate, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
 })();
