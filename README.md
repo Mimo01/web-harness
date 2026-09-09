@@ -121,6 +121,17 @@ render the HTML preview again, run an HTML file again, download the file again, 
 notification again. Everything else (reads, searches, writes, API calls, computations) cannot be re-run from the card,
 because the result would only be shown to you and never reach the model.
 
+### Context management
+Long chats stay within the model's window and costs stay roughly linear:
+- **Tool result stubs**: tool outputs older than the last 2 user turns are sent as a short stub ("…truncated, re-run
+  the tool for the full result"); the model is told it can re-fetch them.
+- **Compaction**: when the context passes 70% of the window (both configurable in Settings → Model & generation), the
+  older part of the conversation is summarised by the model and replaced, for the model, by that summary; the last 3
+  turns stay verbatim. The chat itself keeps every message: compacted ones are greyed and a "compacted" card shows the
+  summary. Run it by hand from the ⋯ menu ("Compact this chat").
+- **Stable system prompt**: static rules, plugin guides and skills come first in a deterministic order; the workspace
+  line and the date sit at the end, so proxies with prompt caching can reuse the long prefix between turns.
+
 ### Usage & costs
 The message box shows the estimated context in use versus the model's window, and the chat's tokens and cost. Prices and
 context sizes are read from LiteLLM's `/model/info` when the proxy exposes it; otherwise set them in

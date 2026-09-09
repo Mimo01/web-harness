@@ -56,6 +56,11 @@ H.settings = (() => {
     autoTitle: true,
     showCost: true,
     checkUpdates: true,
+    keepToolTurns: 2,              // tool results older than this many user turns are sent as short stubs
+    toolStubChars: 240,
+    autoCompact: true,             // summarise the older part of a chat when the context passes compactAt
+    compactAt: 0.7,                // fraction of the model's context window
+    compactKeepTurns: 3,           // most recent user turns are never summarised
     transcriptionModel: '',        // e.g. whisper-1 on the LiteLLM proxy; empty = audio/video transcription off            // GET version.json from GitHub on startup / every 6 h
     settingsVersion: 2,
   };

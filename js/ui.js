@@ -119,7 +119,11 @@ H.ui = (() => {
   function closeTurn() { openTurn = null; }
 
   function userNode(m, idx) {
-    const node = el('div', { class: 'msg user' + (m.meta?.planExec ? ' plan-exec' : '') + (m.meta?.system ? ' system' : '') }, [el('div', { class: 'body' }, [
+    if (m.meta?.summary) {
+      const det = el('details', { class: 'summary-card' }, [el('summary', {}, [H.icon('bolt'), el('b', {}, ['Earlier conversation compacted']), el('span', { class: 'muted small' }, [` · ${m.meta.replaces} messages summarised; the model sees this summary instead`])]), el('div', { class: 'md', html: md(m.content.replace(/^\[[^\]]*\]\n/, '')) })]);
+      return det;
+    }
+    const node = el('div', { class: 'msg user' + (m.meta?.planExec ? ' plan-exec' : '') + (m.meta?.system ? ' system' : '') + (m.meta?.compacted ? ' compacted' : '') }, [el('div', { class: 'body' }, [
       el('div', { class: 'role' }, [el('span', { class: 'actions' }, [
         el('button', { class: 'btn sm ghost', title: 'Copy', onclick: () => { navigator.clipboard.writeText(m.display || (typeof m.content === 'string' ? m.content : '')); H.toast('Copied', 'success', 1200); } }, ['Copy']),
         el('button', { class: 'btn sm ghost icon', title: 'Delete', onclick: () => H.agent.deleteMessage(idx) }, [H.icon('x')])]), el('span', { class: 'muted small ts', title: H.fmtTime(m.ts) }, [H.fmtClock(m.ts)])]),
@@ -160,6 +164,7 @@ H.ui = (() => {
     if (m.role !== 'assistant' && m.role !== 'tool') return;
     if (!openTurn) { openTurn = newTurn(m); wrap.append(openTurn.node); }
     const turn = openTurn;
+    if (m.meta?.compacted) turn.node.classList.add('compacted');
     const part = m.role === 'assistant' ? assistantPart(m) : toolPart(m);
     const prevPart = turn.body.lastElementChild;
     if (m.role === 'tool') part.classList.toggle('first', !prevPart || !prevPart.classList.contains('tool-card'));
@@ -288,7 +293,7 @@ H.ui = (() => {
     const cc = H.usage.chatCost(chat);
     const costTxt = H.settings.get('showCost') ? ' · ' + (cc.known ? H.usage.fmtCost(cc.cost) : 'set pricing') : '';
     $('#usage').textContent = `${H.usage.fmtTok((u.prompt || 0) + (u.completion || 0))} tok${costTxt}`;
-    bar.title = `Context window: ~${est.toLocaleString()} of ${ctx.toLocaleString()} tokens used (${pct}%)${pct >= 70 ? '\nTip: start a new chat for unrelated work; long chats cost more per message.' : ''}\nChat total: ${(u.prompt || 0).toLocaleString()} in / ${(u.completion || 0).toLocaleString()} out` + (cc.known ? `\nCost: ${H.usage.fmtCost(cc.cost)}${cc.partial ? ' (some messages have no pricing)' : ''}` : '\nCost unknown: set pricing in Settings > Usage & costs');
+    bar.title = `Context window: ~${est.toLocaleString()} of ${ctx.toLocaleString()} tokens used (${pct}%)${pct >= 70 ? '\nThe older part will be compacted automatically before the next message (⋯ menu → Compact this chat to do it now).' : ''}\nChat total: ${(u.prompt || 0).toLocaleString()} in / ${(u.completion || 0).toLocaleString()} out` + (cc.known ? `\nCost: ${H.usage.fmtCost(cc.cost)}${cc.partial ? ' (some messages have no pricing)' : ''}` : '\nCost unknown: set pricing in Settings > Usage & costs');
   }
 
   /* ---------------- sidebar ---------------- */
@@ -469,6 +474,12 @@ H.ui = (() => {
       sec('Generation', null, [
         el('div', { class: 'row gap' }, [field('Temperature', 'temperature', 'number', { step: 0.1, min: 0, max: 2 }), field('Max output tokens', 'maxTokens', 'number', { step: 1 }), field('Max tool calls per turn', 'maxToolIterations', 'number', { step: 1 })]),
         el('label', { class: 'field' }, [el('span', {}, ['Custom system prompt (prepended to the built-in one)']), el('textarea', { rows: 5, onchange: (e) => H.settings.set({ systemPrompt: e.target.value }) }, [s.systemPrompt])]),
+      ]),
+      sec('Context management', 'Keeps long chats within the model\'s window and keeps costs linear.', [
+        el('div', { class: 'check-list' }, [check('Compact automatically', 'autoCompact', 'when the context passes the threshold, the older part of the chat is summarised by the model and replaced by that summary; the last turns stay verbatim')]),
+        el('div', { class: 'row gap' }, [field('Compact when context is above (0.5–0.95)', 'compactAt', 'number', { step: 0.05, min: 0.3, max: 0.95 }), field('Keep the last N user turns verbatim', 'compactKeepTurns', 'number', { step: 1, min: 1 })]),
+        el('div', { class: 'row gap' }, [field('Send full tool results for the last N turns', 'keepToolTurns', 'number', { step: 1, min: 0 }), field('Older tool results are cut to (chars)', 'toolStubChars', 'number', { step: 40, min: 80 })]),
+        el('p', { class: 'help' }, ['Older tool outputs become short stubs the model can re-fetch by calling the tool again. Compaction can also be run by hand from the ⋯ menu.']),
       ]),
       sec('Media', 'Images are resized in the browser before sending. Videos are turned into a few sampled frames plus a transcript; audio into a transcript. Transcription needs a speech-to-text model on your proxy.', [
         el('div', { class: 'row gap' }, [field('Transcription model (empty = off)', 'transcriptionModel', 'text', { placeholder: 'whisper-1' }), el('button', { class: 'btn', style: 'margin-top:9px', onclick: () => { const w = (H.settings.get('models') || []).filter(m => /whisper|transcri|speech|stt/i.test(m)); H.toast(w.length ? 'Speech models on your proxy: ' + w.join(', ') : 'No obvious speech-to-text model in the model list; ask your LiteLLM admin.', w.length ? 'success' : 'warn', 8000); } }, ['Find'])]),
@@ -933,6 +944,8 @@ H.ui = (() => {
     $('#more-btn').onclick = (e) => { e.stopPropagation(); $('#more-menu').classList.toggle('hidden'); };
     document.addEventListener('click', () => $('#more-menu').classList.add('hidden'));
     $('#usage-btn').onclick = () => openSettings('usage');
+    $('#compact-btn').onclick = () => H.agent.compact(H.agent.current(), { manual: true });
+    H.bus.on('compacting', (id, on) => { if (id === H.agent.current()?.id) { $('#compact-btn').disabled = on; if (on) H.toast('Compacting the conversation…', 'info', 3000); } });
     $('#bug-btn').onclick = bugReport;
     $('#chat-title').onclick = () => { const c = H.agent.current(); if (!c) return; const t = prompt('Chat title', c.title); if (t && t.trim()) { H.agent.rename(t.trim()).then(() => { updateTitle(); renderChatList(); }); } };
     $('#preview-close').onclick = () => $('#preview').classList.add('hidden');

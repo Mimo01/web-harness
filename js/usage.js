@@ -55,11 +55,18 @@ H.usage = (() => {
   /* estimate the current context size of a chat (tokens that would be sent on the next request) */
   function contextEstimate(chat) {
     if (!chat) return 0;
+    const msgs = chat.messages;
     let lastPromptIdx = -1, lastPrompt = 0;
-    chat.messages.forEach((m, i) => { if (m.role === 'assistant' && m.meta?.usage?.prompt_tokens) { lastPromptIdx = i; lastPrompt = m.meta.usage.prompt_tokens + (m.meta.usage.completion_tokens || 0); } });
-    let est = lastPrompt;
-    if (lastPromptIdx < 0) est = H.estTokens(H.agent.systemPrompt()) + H.estTokens(JSON.stringify(H.tools.openaiSpecs()));
-    for (let i = lastPromptIdx + 1; i < chat.messages.length; i++) { const m = chat.messages[i]; est += H.estTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + (m.tool_calls ? H.estTokens(JSON.stringify(m.tool_calls)) : 0) + 4; }
+    msgs.forEach((m, i) => { if (m.role === 'assistant' && !m.meta?.compacted && m.meta?.usage?.prompt_tokens) { lastPromptIdx = i; lastPrompt = m.meta.usage.prompt_tokens + (m.meta.usage.completion_tokens || 0); } });
+    const summaryAfter = msgs.some((m, i) => m.meta?.summary && i > lastPromptIdx);
+    if (lastPromptIdx >= 0 && !summaryAfter) {
+      let est = lastPrompt;
+      for (let i = lastPromptIdx + 1; i < msgs.length; i++) { const m = msgs[i]; if (m.meta?.compacted) continue; est += H.estTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + (m.tool_calls ? H.estTokens(JSON.stringify(m.tool_calls)) : 0) + 4; }
+      return est;
+    }
+    // no usage figure to anchor on (fresh chat or just compacted): estimate what would be sent now
+    let est = H.estTokens(H.agent.systemPrompt()) + H.estTokens(JSON.stringify(H.tools.openaiSpecs()));
+    for (const m of H.agent.apiMessages(msgs)) est += H.estTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + (m.tool_calls ? H.estTokens(JSON.stringify(m.tool_calls)) : 0) + 4;
     return est;
   }
 

@@ -1,6 +1,6 @@
 {
-  "version": "1.11.3",
+  "version": "1.12.0",
   "date": "2026-09-09",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Python now runs in a worker: timeouts terminate runaway code instead of freezing the tab."
+  "notes": "Context management: old tool results become stubs, long chats are compacted into a summary, stable system prompt for caching."
 }

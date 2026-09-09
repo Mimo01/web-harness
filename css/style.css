@@ -534,3 +534,9 @@ label.check input[type=checkbox] { margin-top: 3px; flex-shrink: 0; width: 16px;
 label.check > span { display: flex; flex-direction: column; gap: 1px; }
 label.check .help { margin: 0; font-size: 12px; }
 .row.gap.wrap > label.check, .row.gap > label.check { margin-right: 0; }
+/* compacted history */
+.summary-card { border: 1px dashed var(--border-strong); border-radius: var(--r); background: var(--surface-2); margin: 14px 0; }
+.summary-card summary { list-style: none; cursor: pointer; padding: 8px 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; } .summary-card summary::-webkit-details-marker { display: none; } .summary-card summary .ico { color: var(--warn); }
+.summary-card .md { padding: 0 14px 12px; font-size: 13px; color: var(--fg-2); }
+.msg.compacted, .tool-card.compacted { opacity: .55; }
+.msg.compacted:hover, .msg.assistant.turn.compacted:hover { opacity: .9; }
