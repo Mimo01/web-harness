@@ -7,6 +7,7 @@
   <img alt="No install" src="https://img.shields.io/badge/install-none-3f9d6a?style=for-the-badge">
   <img alt="Runs on" src="https://img.shields.io/badge/runs%20on-Chrome%20%7C%20Edge%20%7C%20Firefox%20%7C%20Safari-555?style=for-the-badge">
   <img alt="Backend" src="https://img.shields.io/badge/backend-your%20LiteLLM%20proxy-555?style=for-the-badge">
+  <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/license-MIT-3f9d6a?style=for-the-badge"></a>
 </p>
 
 Point it at your **LiteLLM proxy** (or any OpenAI-compatible endpoint) and the model gets hands: it reads and edits
@@ -265,3 +266,8 @@ arising from its use. You are the operator: review permission prompts, use Plan 
 your credentials to yourself. Use at your own risk.
 
 Found it useful? Buy Milan a beer 🍺, in person. No links, no donations.
+
+## 📄 License
+
+[MIT](LICENSE). Use it, change it, ship it, commercially or not; keep the copyright notice. The bundled third-party
+libraries (marked, DOMPurify, highlight.js, Pyodide) are loaded from CDNs under their own permissive licenses.

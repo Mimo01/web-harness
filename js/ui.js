@@ -642,6 +642,7 @@ H.ui = (() => {
       sec('What it is', null, [el('p', { class: 'sec-desc', style: 'margin:0' }, ['A browser-only harness for LLMs: chats, tools, skills, plugins, plan mode and a browser-session bridge, talking straight to your LiteLLM proxy. No installation, no backend, nothing leaves your browser except the requests you configure.'])]),
       sec('Disclaimer', null, [el('div', { class: 'note' }, [`This software is provided "as is", without warranty of any kind. ${a.author} is not responsible for anything the assistant does with your accounts, files, tickets, repositories or systems, nor for any data loss, costs, or damage arising from its use. You are the operator: review permission prompts, use Plan mode for anything sensitive, and keep your credentials to yourself. Use at your own risk.`])]),
       sec('Found it useful?', null, [beer]),
+      sec('License', null, [el('p', { class: 'sec-desc', style: 'margin:0' }, ['Open source under the MIT License: use, modify and redistribute freely, keep the copyright notice. ', el('a', { href: a.repoUrl + '/blob/main/LICENSE', target: '_blank', rel: 'noopener' }, ['Read the license'])])]),
     ]);
   }
 
