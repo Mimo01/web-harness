@@ -6,14 +6,45 @@ H.ui = (() => {
   const drafts = new Map();   // chatId -> unsent text
 
   /* ---------------- markdown ---------------- */
+  /* Images are never fetched on render: a remote <img> in a reply would be a silent GET carrying whatever the model put
+     in the URL. Markdown images become click-to-load placeholders (inline data:/blob: images load immediately); raw
+     <img> tags are stripped by the sanitizer. */
+  let mdReady = false;
+  function mdInit() {
+    if (mdReady || !window.marked) return; mdReady = true;
+    const image = (href, title, text) => {
+      if (href && typeof href === 'object') ({ href, title, text } = href);
+      return `<span class="md-img" data-src="${H.esc(href || '')}" data-alt="${H.esc(text || '')}" title="${H.esc(title || '')}"></span>`;
+    };
+    try { marked.use({ renderer: { image } }); } catch { }
+  }
+  const IMG_OK = /^(https?:\/\/|data:image\/|blob:)/i;
+  function loadImage(ph, { auto } = {}) {
+    const src = ph.dataset.src || '', alt = ph.dataset.alt || '';
+    if (!IMG_OK.test(src)) { ph.textContent = `[image: ${alt || 'invalid URL'}]`; ph.classList.add('dead'); return; }
+    const inline = /^(data:|blob:)/i.test(src);
+    if (auto && !inline) {
+      let host = ''; try { host = new URL(src).host; } catch { }
+      ph.replaceChildren(H.icon('download'), el('span', {}, [alt ? `${alt} · ` : '', `load image from ${host}`]));
+      ph.setAttribute('role', 'button'); ph.tabIndex = 0;
+      const go = () => loadImage(ph, {});
+      ph.onclick = go; ph.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+      return;
+    }
+    const img = el('img', { src, alt, title: ph.title || null });
+    img.onerror = () => { ph.textContent = `[image failed to load: ${alt || src}]`; ph.classList.add('dead'); img.replaceWith(ph); };
+    ph.replaceWith(img);
+  }
   function md(text) {
     if (!text) return '';
     let html;
     // fail closed: without the sanitizer, never insert model-authored HTML; show escaped text instead
     if (!window.DOMPurify || !window.marked) return '<p>' + H.esc(text).replace(/\n/g, '<br>') + '</p>';
+    mdInit();
     try { html = marked.parse(text, { breaks: true, gfm: true }); } catch { return '<p>' + H.esc(text).replace(/\n/g, '<br>') + '</p>'; }
-    return DOMPurify.sanitize(html, { ADD_ATTR: ['target'], FORBID_TAGS: ['style', 'form', 'input', 'button'], FORBID_ATTR: ['style', 'onerror', 'onload'] });
+    return DOMPurify.sanitize(html, { ADD_ATTR: ['target'], FORBID_TAGS: ['style', 'form', 'input', 'button', 'img', 'picture', 'source', 'video', 'audio', 'iframe', 'object', 'embed', 'link', 'meta'], FORBID_ATTR: ['style', 'onerror', 'onload', 'srcset', 'poster', 'background'] });
   }
+  const mdBlock = (text) => { const d = el('div', { class: 'md', html: md(text) }); enhanceCode(d, { highlight: false }); return d; };
   function enhanceCode(root, { highlight = true } = {}) {
     root.querySelectorAll('pre').forEach(pre => {
       if (pre.parentElement?.classList.contains('codeblock')) return;
@@ -26,6 +57,7 @@ H.ui = (() => {
       wrap.append(el('div', { class: 'codebar' }, [el('span', { class: 'lang' }, [lang || 'text']), el('span', { class: 'spacer' }), copy]), pre);
     });
     root.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
+    root.querySelectorAll('.md-img:not([data-ready])').forEach(ph => { ph.dataset.ready = '1'; loadImage(ph, { auto: true }); });
   }
 
   /* ---------------- messages ---------------- */
@@ -128,7 +160,7 @@ H.ui = (() => {
 
   function userNode(m, idx) {
     if (m.meta?.summary) {
-      const det = el('details', { class: 'summary-card' }, [el('summary', {}, [H.icon('bolt'), el('b', {}, ['Earlier conversation compacted']), el('span', { class: 'muted small' }, [` · ${m.meta.replaces} messages summarised; the model sees this summary instead`])]), el('div', { class: 'md', html: md(m.content.replace(/^\[[^\]]*\]\n/, '')) })]);
+      const det = el('details', { class: 'summary-card' }, [el('summary', {}, [H.icon('bolt'), el('b', {}, ['Earlier conversation compacted']), el('span', { class: 'muted small' }, [` · ${m.meta.replaces} messages summarised; the model sees this summary instead`])]), mdBlock(m.content.replace(/^\[[^\]]*\]\n/, ''))]);
       return det;
     }
     const node = el('div', { class: 'msg user' + (m.meta?.planExec ? ' plan-exec' : '') + (m.meta?.system ? ' system' : '') + (m.meta?.compacted ? ' compacted' : '') }, [el('div', { class: 'body' }, [
@@ -195,7 +227,7 @@ H.ui = (() => {
     node.classList.toggle('blank', !m.content && !streaming && !m.meta?.error && !m.reasoning);   // e.g. a turn that goes straight to a tool call
     const rs = node.querySelector('.reasoning-slot');
     const rkey = m.reasoning || '';
-    if (rs._key !== rkey) { rs._key = rkey; rs.innerHTML = ''; if (m.reasoning) rs.append(el('details', { class: 'reasoning' }, [el('summary', {}, ['Reasoning']), el('div', { class: 'md', html: md(m.reasoning) })])); }
+    if (rs._key !== rkey) { rs._key = rkey; rs.innerHTML = ''; if (m.reasoning) rs.append(el('details', { class: 'reasoning' }, [el('summary', {}, ['Reasoning']), mdBlock(m.reasoning)])); }
     const tcs = node.querySelector('.tc-slot'); tcs.innerHTML = '';
     if (m.meta?.streaming && m.tool_calls?.length) tcs.append(el('div', { class: 'muted small' }, [el('span', { class: 'spinner' }), ' Calling ', el('code', {}, [m.tool_calls.map(t => t.function.name).join(', ')])]));
     const es = node.querySelector('.err-slot'); es.innerHTML = '';
@@ -535,10 +567,15 @@ H.ui = (() => {
     const bulk = (fn) => { for (const t of Object.values(groups).flat()) fn(t); openSettings('tools'); };
     wrap.append(sec('Tools', 'Enabled controls whether the model can see a tool. Policy overrides the chat mode for that tool: allow (silent), ask, deny.', [
       el('div', { class: 'row gap wrap toolbar' }, [filter,
-        el('button', { class: 'btn sm', onclick: () => bulk(t => { if (t.risk === 'safe') H.perms.setRule(t.name, 'allow'); }) }, ['Allow all safe']),
+        el('button', { class: 'btn sm', onclick: () => bulk(t => { if (t.risk === 'safe' && !t.scope) H.perms.setRule(t.name, 'allow'); }) }, ['Allow all safe']),
         el('button', { class: 'btn sm', onclick: () => bulk(t => H.perms.setRule(t.name, 'default')) }, ['Reset policies']),
         el('button', { class: 'btn sm', onclick: () => { H.settings.set({ disabledTools: [] }); openSettings('tools'); } }, ['Enable all']),
         el('button', { class: 'btn sm', onclick: () => { H.perms.clearSession(); H.toast('Session grants cleared'); } }, ['Clear session grants'])]),
+    ]));
+    const siteRules = Object.entries(H.perms.rules()).filter(([k]) => k.includes('@'));
+    wrap.append(sec('Site rules', 'web_fetch and http_request ask once per site. Answers you chose to keep ("Always" / "Never allow this site") are listed here.', [
+      siteRules.length ? el('table', { class: 'table' }, [el('tbody', {}, siteRules.map(([k, v]) => { const [tool, origin] = [k.slice(0, k.indexOf('@')), k.slice(k.indexOf('@') + 1)]; return el('tr', {}, [el('td', { class: 'mono small' }, [tool]), el('td', { class: 'mono small' }, [origin]), el('td', {}, [el('span', { class: 'chip ' + (v === 'allow' ? 'ok' : 'danger') }, [v])]), el('td', {}, [el('button', { class: 'btn sm ghost', onclick: () => { H.perms.setRule(k, 'default'); openSettings('tools'); } }, ['Remove'])])]); }))])
+        : el('p', { class: 'help' }, ['No site rules yet. Session-only grants are cleared when you start a new chat or reload.']),
     ]));
     for (const [g, tools] of Object.entries(groups)) {
       wrap.append(el('div', { class: 'group-title' }, [g, el('span', { class: 'count' }, [String(tools.length)])]));
@@ -817,9 +854,10 @@ H.ui = (() => {
         el('p', { class: 'help', style: 'margin-top:4px' }, ['Self-hosted options that keep queries in-house: a SearXNG instance, or an internal proxy. Keyed commercial APIs (Brave, Bing) also work but are third parties.']),
       ]),
       sec('Code execution & rendering', null, [el('ul', { class: 'help-list' }, [
-        el('li', {}, ['JavaScript runs in a Web Worker with no DOM or workspace access; Python runs in Pyodide (WebAssembly) inside the page. Both can make network requests, so run_* tools ask for permission by default.']),
-        el('li', {}, ['HTML previews render in a sandboxed iframe (scripts allowed, same-origin access denied).']),
-        el('li', {}, ['Markdown from the model is sanitized with DOMPurify before rendering.']),
+        el('li', {}, ['JavaScript runs in a Web Worker with no DOM or workspace access; Python runs in Pyodide (WebAssembly) in a Worker. Both can make network requests, so run_* tools ask for permission by default. calculate, json_query and plugin expressions run in a Worker with all network APIs removed.']),
+        el('li', {}, ['HTML previews render in a sandboxed iframe (unique origin) with an injected Content Security Policy: no fetch/XHR/WebSocket, no form posts, no remote images; scripts only inline or from the two CDNs the app itself uses.']),
+        el('li', {}, ['Markdown from the model is sanitized with DOMPurify; images are shown as click-to-load placeholders so a reply can never trigger a request on its own.']),
+        el('li', {}, ['web_fetch and http_request ask once per site (origin) in Default and Plan mode; "Allow this site for session" / "Always allow this site" remember the answer. A request routed through a connected browser tab (your login session) always asks, in every mode.']),
         el('li', {}, ['Tool output is treated as untrusted; the system prompt tells the model not to follow instructions embedded in fetched content. Review permission prompts for http_request and plugin write calls, which could exfiltrate data if the model is manipulated.']),
       ])]),
       sec('Update checks', null, [check('Check GitHub for a newer version (startup and every hour)', 'checkUpdates', 'only a public version file is fetched; no data about you is sent')]),
@@ -876,9 +914,27 @@ H.ui = (() => {
   }
 
   /* ---------------- preview panel ---------------- */
-  function showPreview({ url, title, html }) {
+  /* Model HTML is shown inside preview.html (a same-origin host page with its own strict CSP) in a sandboxed frame.
+     The host page announces itself with 'preview-ready'; the HTML is then handed over by postMessage. */
+  const previewURL = () => 'preview.html?v=' + encodeURIComponent(window.APP_VERSION || '');
+  const previewTarget = () => location.origin !== 'null' ? location.origin : '*';
+  const previewReady = new Map();   // Window -> Promise<void>
+  function waitPreview(win) {
+    if (previewReady.has(win)) return previewReady.get(win);
+    const pr = new Promise((resolve) => {
+      const on = (e) => { if (e.source === win && e.data && e.data.type === 'preview-ready') { removeEventListener('message', on); resolve(); } };
+      addEventListener('message', on);
+      setTimeout(() => { removeEventListener('message', on); resolve(); }, 8000);
+    });
+    previewReady.set(win, pr); return pr;
+  }
+  async function showPreview({ url, title, html }) {
     const p = $('#preview'); p.classList.remove('hidden');
-    p.querySelector('.ptitle').textContent = title; p.querySelector('iframe').srcdoc = html; p.dataset.html = html;
+    p.querySelector('.ptitle').textContent = title; p.dataset.html = html;
+    const fr = p.querySelector('iframe');
+    if (!fr.getAttribute('src')) { fr.src = previewURL(); }
+    await waitPreview(fr.contentWindow);
+    fr.contentWindow.postMessage({ type: 'preview', title, html }, previewTarget());
   }
   function effectiveTheme() { const t = H.settings.get('theme'); return t === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : t; }
   function applyTheme() {
@@ -967,11 +1023,11 @@ H.ui = (() => {
     $('#bug-btn').onclick = bugReport;
     $('#chat-title').onclick = () => { const c = H.agent.current(); if (!c) return; const t = prompt('Chat title', c.title); if (t && t.trim()) { H.agent.rename(t.trim()).then(() => { updateTitle(); renderChatList(); }); } };
     $('#preview-close').onclick = () => $('#preview').classList.add('hidden');
-    $('#preview-open').onclick = () => {   // never open the blob URL itself: it would run model HTML on this origin with access to storage
+    $('#preview-open').onclick = async () => {   // never open model HTML on this origin: preview.html hosts it in a sandboxed frame with a strict CSP
       const html = $('#preview').dataset.html || ''; const title = $('#preview .ptitle').textContent || 'Preview';
-      const w = window.open('', '_blank'); if (!w) return H.toast('Popup blocked by the browser.', 'warn');
-      w.document.write(`<!doctype html><meta charset="utf-8"><title>${H.esc(title)}</title><style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%}</style><iframe sandbox="allow-scripts allow-forms allow-modals allow-popups" srcdoc="${html.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></iframe>`);
-      w.document.close();
+      const w = window.open(previewURL(), '_blank'); if (!w) return H.toast('Popup blocked by the browser.', 'warn');
+      await waitPreview(w);
+      w.postMessage({ type: 'preview', title, html }, previewTarget());
     };
     $('#export-chat').onclick = () => { const c = H.agent.current(); if (!c) return; const text = c.messages.map(m => m.role === 'tool' ? `### tool:${m.name}\n\`\`\`\n${H.clamp(m.content, 4000)}\n\`\`\`` : `### ${m.role}\n${m.display || (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))}${m.tool_calls?.length ? '\n\n' + m.tool_calls.map(t => `→ ${t.function.name}(${t.function.arguments})`).join('\n') : ''}`).join('\n\n'); H.download((c.title || 'chat').replace(/[^\w-]+/g, '_') + '.md', `# ${c.title}\n\n${text}`, 'text/markdown'); };
     $('#messages').addEventListener('scroll', () => { const b = $('#messages'); stick = b.scrollHeight - b.scrollTop - b.clientHeight < 80; updateScrollBtn(); });

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Host page for HTML previews. The app cannot render model HTML in a srcdoc/blob frame directly: such frames inherit the
+     app's own CSP (which forbids inline scripts). This page is a real same-origin document, so it carries its own policy,
+     and the sandboxed frame below inherits THIS one: inline scripts allowed, but no fetch/XHR/WebSocket, no form posts,
+     no remote images or media, scripts only inline or from the two CDNs the app itself uses. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src data: https://fonts.gstatic.com; img-src data: blob:; media-src data: blob:; connect-src 'none'; form-action 'none'; frame-src 'self' about:; object-src 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview</title>
+<style>html,body{margin:0;height:100%;background:#fff}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head>
+<body>
+<iframe id="f" sandbox="allow-scripts allow-forms allow-modals allow-popups" title="preview"></iframe>
+<script>
+(() => {
+  const f = document.getElementById('f');
+  const app = window.opener || (window.parent !== window ? window.parent : null);   // the harness: as opener (tab) or embedder (panel)
+  if (!app) { document.body.textContent = 'This page is opened by the LLM Harness to show previews.'; return; }
+  const origin = location.origin !== 'null' ? location.origin : '*';   // file:// has no origin to check against
+  addEventListener('message', (e) => {
+    if (e.source !== app) return;
+    if (origin !== '*' && e.origin !== origin) return;
+    const m = e.data || {};
+    if (m.type !== 'preview' || typeof m.html !== 'string') return;
+    if (m.title) document.title = String(m.title);
+    f.srcdoc = m.html;
+  });
+  app.postMessage({ type: 'preview-ready' }, origin);
+})();
+</script>
+</body>
+</html>

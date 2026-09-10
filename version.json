@@ -1,6 +1,6 @@
 {
-  "version": "1.12.3",
-  "date": "2026-09-09",
+  "version": "1.13.0",
+  "date": "2026-09-10",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Performance: windowed rendering of long chats, cheaper tool-card updates, faster tool lookups and context estimates."
+  "notes": "close silent outbound channels: network-less worker for calculate/json_query/plugin expressions, preview host page with strict CSP (also restores inline scripts in previews), click-to-load markdown images, per-origin permission for web_fetch/http_request, forced prompt for bridge-routed requests"
 }

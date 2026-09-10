@@ -1,9 +1,18 @@
 /* Code execution: sandboxed JavaScript (Web Worker) and Python (Pyodide via CDN) */
 H.runtime = (() => {
   /* ---- JavaScript in a Worker ---- */
-  function runJS(code, { timeout = 15000, input } = {}) {
+  /* network:false removes every outbound channel a Worker has (fetch, XHR, WebSocket, EventSource, importScripts, nested
+     workers, WebTransport, sendBeacon) before the user code runs, so an expression evaluated as a "safe" tool cannot exfiltrate. */
+  const NO_NETWORK = `
+        (() => {
+          const dead = (n) => function () { throw new Error(n + ' is not available: this sandbox has no network access'); };
+          const kill = (o, n) => { try { Object.defineProperty(o, n, { value: dead(n), writable: false, configurable: false }); } catch { try { o[n] = dead(n); } catch { } } };
+          for (const n of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'Worker', 'SharedWorker', 'WebTransport', 'RTCPeerConnection']) kill(self, n);
+          if (self.navigator) kill(self.navigator, 'sendBeacon');
+        })();`;
+  function runJS(code, { timeout = 15000, input, network = true } = {}) {
     return new Promise((resolve) => {
-      const src = `
+      const src = `${network ? '' : NO_NETWORK}
         const __logs = [];
         const __fmt = (a) => a.map(x => { try { return typeof x === 'string' ? x : JSON.stringify(x, null, 1); } catch { return String(x); } }).join(' ');
         for (const k of ['log','info','warn','error','debug']) console[k] = (...a) => __logs.push((k==='log'?'':'['+k+'] ') + __fmt(a));
@@ -103,17 +112,32 @@ H.runtime = (() => {
   const getPyodide = () => { throw new Error('Pyodide runs in a worker; use runPython'); };
 
   /* ---- HTML preview in a sandboxed iframe / new tab ---- */
+  /* A srcdoc iframe inherits the page CSP (connect-src *), so model-authored HTML gets its own, stricter policy injected:
+     no fetch/XHR/WebSocket, no form posts, no frames, images/media only inline; scripts and styles inline or from the
+     two CDNs the app already trusts. */
+  const PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src data: https://fonts.gstatic.com; img-src data: blob:; media-src data: blob:; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'";
+  function hardenHTML(html) {
+    const meta = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`;
+    const src = String(html || '');
+    let m = src.match(/<head[^>]*>/i);
+    if (m) return src.slice(0, m.index + m[0].length) + meta + src.slice(m.index + m[0].length);
+    m = src.match(/<html[^>]*>/i);
+    if (m) return src.slice(0, m.index + m[0].length) + '<head>' + meta + '</head>' + src.slice(m.index + m[0].length);
+    m = src.match(/^\s*<!doctype[^>]*>/i);
+    if (m) return m[0] + meta + src.slice(m[0].length);
+    return meta + src;
+  }
   function previewHTML(html, { title = 'Preview' } = {}) {
-    H.bus.emit('preview', { title, html });   // rendered via a sandboxed srcdoc iframe (unique origin), never a same-origin blob URL
+    H.bus.emit('preview', { title, html: hardenHTML(html) });   // sandboxed srcdoc iframe (unique origin) with an injected CSP; never a same-origin blob URL
     return 'preview';
   }
 
   /* evaluate a plugin-manifest expression in the Worker sandbox (no access to the page, storage or secrets) */
   async function evalExpr(kind, code, { data, args } = {}) {
     const body = kind === 'transform' ? `const data = input.data, args = input.args; return (${code});` : `return (${code})(input.args);`;
-    const r = await runJS(body, { input: { data, args }, timeout: 5000 });
+    const r = await runJS(body, { input: { data, args }, timeout: 5000, network: false });
     if (r.error) throw new Error(`${kind} expression failed: ${String(r.error).split('\n')[0]}`);
     return r.result;
   }
-  return { runJS, runPython, previewHTML, getPyodide, evalExpr, pyodideLoaded: () => pyReady };
+  return { runJS, runPython, previewHTML, hardenHTML, PREVIEW_CSP, getPyodide, evalExpr, pyodideLoaded: () => pyReady };
 })();

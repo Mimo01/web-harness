@@ -541,3 +541,10 @@ label.check .help { margin: 0; font-size: 12px; }
 .msg.compacted, .tool-card.compacted { opacity: .55; }
 .msg.compacted:hover, .msg.assistant.turn.compacted:hover { opacity: .9; }
 .load-earlier { text-align: center; padding: 6px 0 14px; }
+
+/* click-to-load images in markdown (never fetched on render) and permission prompt notes */
+.md-img { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; margin: 2px 0; border: 1px dashed var(--border); border-radius: var(--r-sm); background: var(--code-bg); color: var(--muted); font-size: 12px; cursor: pointer; max-width: 100%; word-break: break-all; }
+.md-img:hover, .md-img:focus-visible { color: var(--fg); border-color: var(--accent); outline: none; }
+.md-img.dead { cursor: default; border-style: solid; }
+.md-img .ico { width: 14px; height: 14px; flex: none; }
+.perm-note { margin: 0 0 10px; padding: 8px 10px; border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); border-radius: 0 var(--r-sm) var(--r-sm) 0; }

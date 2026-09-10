@@ -176,7 +176,7 @@ When you have enough information, write a concrete, numbered implementation plan
         onEvent?.('tool-end', toolMsg);
       };
       // 2) run them: consecutive read-only calls that need no permission prompt run in parallel; everything else one at a time, in order
-      const parallelOk = (it) => { const t = H.tools.get(it.tc.function.name); return !!t && t.risk === 'safe' && H.perms.policyFor(t) === 'allow' && !['ask_user', 'run_subagent', 'sleep'].includes(t.name); };
+      const parallelOk = (it) => { const t = H.tools.get(it.tc.function.name); return !!t && t.risk === 'safe' && H.perms.policyFor(t) === 'allow' && !['ask_user', 'run_subagent', 'sleep'].includes(t.name) && !H.perms.willPrompt(t, H.tryJSON(it.tc.function.arguments, null) || {}); };
       for (let i = 0; i < items.length;) {
         if (parallelOk(items[i])) { let j = i; while (j < items.length && parallelOk(items[j])) j++; await Promise.all(items.slice(i, j).map(execOne)); i = j; }
         else { await execOne(items[i]); i++; }

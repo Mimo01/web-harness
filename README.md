@@ -213,9 +213,9 @@ credentials live in the browser and there is no CORS issue.
   hashes), the two inline bootstrap scripts allowed by hash (kept current by the release script), no plugins/objects,
   no form submission. Model markdown is rendered only when the sanitizer is present; otherwise it is shown as text.
 - **Sandboxing.** JavaScript runs in a Web Worker (no DOM, no workspace); Python in Pyodide/WebAssembly inside its
-  own Worker, so a timeout terminates runaway code instead of freezing the page; HTML previews render in a sandboxed
-  `srcdoc` iframe with a unique origin, and "Open in tab" opens a sandboxed wrapper, never a same-origin blob URL; HTML previews
-  in a sandboxed iframe; plugin manifest expressions (`transform`, `prepare`, `pathFn`) run in the same Worker sandbox
+  own Worker, so a timeout terminates runaway code instead of freezing the page; HTML previews render inside
+  `preview.html`, a same-origin host page with its own strict CSP, in a sandboxed `srcdoc` frame with a unique origin
+  ("Open in tab" opens the same host page, never a same-origin blob URL); plugin manifest expressions (`transform`, `prepare`, `pathFn`) run in the same Worker sandbox
   with no access to the page, storage or secrets, and importing a manifest that contains them shows a warning;
   CDN scripts and stylesheets carry Subresource Integrity hashes; model markdown is sanitized with DOMPurify; `<meta name="referrer" content="no-referrer">`
   keeps your page URL out of outbound requests. Workspace access requires you to pick the folder and stays inside it
@@ -225,15 +225,21 @@ credentials live in the browser and there is no CORS issue.
 - **Bridge and extension scoping.** The bookmarklet bridge only works when the harness has a real http(s) origin
   (responses are posted to that origin only; request ids are cryptographic). The connector extension only talks to
   pages served from harness origins you list in its options, and only calls APIs you list there.
-- **Prompt injection.** Tool output is untrusted; the system prompt says so. Tools that could exfiltrate data
-  (`http_request`, plugin writes, code execution) ask for permission in Default mode. Use Plan mode when exploring
-  untrusted content, and review the arguments in every permission prompt.
+- **Prompt injection.** Tool output is untrusted; the system prompt says so. Every outbound channel either asks or is
+  closed: `web_fetch` and `http_request` prompt once per site (origin) in Default and Plan mode, with "allow this site
+  for session / always"; a request routed through a connected browser tab (your login session) prompts in every mode,
+  including Allow all; `run_*` tools and plugin writes ask in Default mode; `calculate`, `json_query` and plugin
+  manifest expressions run in a Worker with fetch, XHR, WebSocket, EventSource, importScripts and nested workers
+  removed; HTML previews get an injected CSP (`connect-src 'none'`, no remote images or form posts); markdown images
+  are click-to-load placeholders, never fetched on render. Use Plan mode when exploring untrusted content, and review
+  the arguments in every permission prompt.
 - **Residual risks.** Anything stored in the browser profile is readable by other extensions or someone with access
   to your machine. Serve the app from a trusted origin; if you open it via `file://` the origin is `null`.
 
 ## 🗂 Files
 ```
 index.html        shell
+preview.html      host page for HTML previews (own CSP, sandboxed frame)
 css/style.css
 js/util.js        helpers, templating, HTML→text
 js/db.js          IndexedDB (chats, memory)

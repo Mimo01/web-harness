@@ -193,14 +193,15 @@ H.tools = (() => {
   });
   def({
     name: 'calculate', group: 'Code', risk: 'safe',
-    description: 'Evaluate a math/JavaScript expression safely, e.g. "Math.sqrt(2)*10" or "(1234*5)/3".',
+    description: 'Evaluate a math/JavaScript expression safely (no network access), e.g. "Math.sqrt(2)*10" or "(1234*5)/3".',
     parameters: obj({ expression: str('Expression') }, ['expression']),
-    run: async ({ expression }) => { const r = await H.runtime.runJS('return (' + expression + ');', { timeout: 3000 }); if (r.error) throw new Error(r.error); return ok({ result: r.result }); },
+    run: async ({ expression }) => { const r = await H.runtime.runJS('return (' + expression + ');', { timeout: 3000, network: false }); if (r.error) throw new Error(r.error); return ok({ result: r.result }); },
   });
 
   /* ===================== WEB ===================== */
+  const originOf = (a) => { try { return new URL(String(a?.url || '')).origin; } catch { return null; } };
   def({
-    name: 'web_fetch', group: 'Web', risk: 'safe',
+    name: 'web_fetch', group: 'Web', risk: 'safe', scope: originOf,
     description: 'Fetch a URL directly from the browser and return readable text (HTML converted to markdown-ish text) or raw body. Sites that do not allow cross-origin requests cannot be fetched unless the user configured a proxy; in that case suggest open_url so the user can read the page themselves.',
     parameters: obj({ url: str('Absolute URL'), raw: bool('Return raw body instead of extracted text'), maxChars: num('Max characters to return (default 20000)') }, ['url']),
     run: async ({ url, raw = false, maxChars = 20000 }) => {
@@ -248,7 +249,9 @@ H.tools = (() => {
     },
   });
   def({
-    name: 'http_request', group: 'Web', risk: 'write',
+    name: 'http_request', group: 'Web', risk: 'write', scope: originOf,
+    // A connected bridge tab would send the request with the user's login cookies: always confirm, whatever the mode.
+    mustAsk: (a) => { const o = originOf(a); return o && H.bridge.has(a.url) ? { key: 'http_request@bridge:' + o, note: `This request would be sent through your connected browser tab for ${o}, using your login session there. Approve only if you expect the assistant to act on that site as you.` } : null; },
     description: 'Make an arbitrary HTTP request (call any REST API). Returns status, headers and body (JSON parsed when possible).',
     parameters: obj({
       url: str('Absolute URL'), method: str('HTTP method', { enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] }),
@@ -286,9 +289,9 @@ H.tools = (() => {
   /* ===================== DATA ===================== */
   def({
     name: 'json_query', group: 'Data', risk: 'safe',
-    description: 'Transform JSON data with a JavaScript expression. `data` holds the parsed input, e.g. "data.items.filter(i => i.open).map(i => i.id)".',
+    description: 'Transform JSON data with a JavaScript expression (no network access). `data` holds the parsed input, e.g. "data.items.filter(i => i.open).map(i => i.id)".',
     parameters: obj({ data: { description: 'JSON value or JSON string' }, expression: str('JavaScript expression over `data`') }, ['data', 'expression']),
-    run: async ({ data, expression }) => { const d = typeof data === 'string' ? H.tryJSON(data, data) : data; const r = await H.runtime.runJS(`const data = input; return (${expression});`, { input: d, timeout: 5000 }); if (r.error) throw new Error(r.error); return ok({ result: r.result }); },
+    run: async ({ data, expression }) => { const d = typeof data === 'string' ? H.tryJSON(data, data) : data; const r = await H.runtime.runJS(`const data = input; return (${expression});`, { input: d, timeout: 5000, network: false }); if (r.error) throw new Error(r.error); return ok({ result: r.result }); },
   });
   def({
     name: 'regex_extract', group: 'Data', risk: 'safe',
