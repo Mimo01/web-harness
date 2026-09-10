@@ -921,7 +921,7 @@ H.ui = (() => {
   /* Model HTML is shown inside preview.html (a same-origin host page with its own strict CSP) in a sandboxed frame.
      The host page announces itself with 'preview-ready'; the HTML is then handed over by postMessage. */
   const previewURL = () => 'preview.html?v=' + encodeURIComponent(window.APP_VERSION || '');
-  const previewTarget = () => location.origin !== 'null' ? location.origin : '*';
+  const previewTarget = () => /^https?:\/\//.test(location.origin) ? location.origin : '*';   // file:// pages report "null" or "file://"
   const previewReady = new Map();   // Window -> Promise<void>
   function waitPreview(win) {
     if (previewReady.has(win)) return previewReady.get(win);

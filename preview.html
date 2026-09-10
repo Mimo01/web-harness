@@ -18,7 +18,7 @@
   const f = document.getElementById('f');
   const app = window.opener || (window.parent !== window ? window.parent : null);   // the harness: as opener (tab) or embedder (panel)
   if (!app) { document.body.textContent = 'This page is opened by the LLM Harness to show previews.'; return; }
-  const origin = location.origin !== 'null' ? location.origin : '*';   // file:// has no origin to check against
+  const origin = /^https?:\/\//.test(location.origin) ? location.origin : '*';   // file:// pages report "null" or "file://": nothing to check against
   addEventListener('message', (e) => {
     if (e.source !== app) return;
     if (origin !== '*' && e.origin !== origin) return;

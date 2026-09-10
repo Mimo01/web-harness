@@ -1,6 +1,6 @@
 {
-  "version": "1.14.3",
+  "version": "1.14.4",
   "date": "2026-09-10",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "fix first-run crash: plugins.js referenced invalidateTools before its declaration when creating the default templates (every fresh install since 1.12.3 lost H.plugins and everything after it); startup error banner in the loader so a failed module is reported instead of silently breaking the page"
+  "notes": "fix blank render_html preview when the harness is opened from a file: Chrome reports location.origin as 'file://' there, which was passed as a postMessage target and dropped; the preview host and the panel now use a target only for http(s) origins"
 }
