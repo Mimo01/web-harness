@@ -3,7 +3,7 @@
 <p align="center"><b>A full AI agent workbench that runs in a browser tab. Nothing to install. Nothing to host. Nothing leaves your machine except the requests you configure.</b></p>
 
 <p align="center">
-  <a href="https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip"><img alt="Download" src="https://img.shields.io/badge/download-zip-6d8cff?style=for-the-badge"></a>
+  <a href="https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip"><img alt="Download" src="https://img.shields.io/badge/download-zip-0f7a72?style=for-the-badge"></a>
   <img alt="No install" src="https://img.shields.io/badge/install-none-3f9d6a?style=for-the-badge">
   <img alt="Runs on" src="https://img.shields.io/badge/runs%20on-Chrome%20%7C%20Edge%20%7C%20Firefox%20%7C%20Safari-555?style=for-the-badge">
   <img alt="Backend" src="https://img.shields.io/badge/backend-your%20LiteLLM%20proxy-555?style=for-the-badge">

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LLM Harness</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%236d8cff'/><path d='M7 8l5-3 5 3v8l-5 3-5-3z' fill='none' stroke='white' stroke-width='1.8'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%231b1a17'/><path d='M7 8l5-3 5 3v8l-5 3-5-3z' fill='none' stroke='white' stroke-width='1.8'/></svg>">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file: blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval'       'sha256-HSB1HGYvxpsEyAJgKWTHwZE6yxilHENNvzv48c0QlBY=' 'sha256-8dY7a7hEnPl/30lMwnn0dD+n4ts0oBjAedXaZ5YtbAw=' 'sha256-LGkdN2oJqeqkh6UsdioaKPaxekX4grvAqAWIqAEaBJk='; style-src 'self' file: 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' file: data: https://fonts.gstatic.com; img-src * data: blob:; media-src blob: data:; connect-src *; worker-src 'self' blob: https://cdnjs.cloudflare.com; frame-src 'self' blob: about:; object-src 'none'; base-uri 'self'; form-action 'none'">
-<script>window.APP_VERSION = '1.13.2';</script>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file: blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval'         'sha256-gSVaeL49kQEE1SYNUDBCuqXnxJS79QVdbsrulQqIF5w=' 'sha256-8dY7a7hEnPl/30lMwnn0dD+n4ts0oBjAedXaZ5YtbAw=' 'sha256-LGkdN2oJqeqkh6UsdioaKPaxekX4grvAqAWIqAEaBJk='; style-src 'self' file: 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' file: data: https://fonts.gstatic.com; img-src * data: blob:; media-src blob: data:; connect-src *; worker-src 'self' blob: https://cdnjs.cloudflare.com; frame-src 'self' blob: about:; object-src 'none'; base-uri 'self'; form-action 'none'">
+<script>window.APP_VERSION = '1.14.0';</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap">
 <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous">
 <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" integrity="sha384-eFTL69TLRZTkNfYZOLM+G04821K1qZao/4QLJbet1pP4tcF+fdXq/9CdqAbWRl/L" crossorigin="anonymous">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
@@ -31,6 +31,7 @@
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12m0 0 4-4m-4 4-4-4M4 20h16"/></symbol>
     <symbol id="i-clip" viewBox="0 0 24 24"><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.3 3.3 0 0 1 4.7 4.7L10 17.5a1.7 1.7 0 0 1-2.4-2.4L15.5 7"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></symbol>
     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
     <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 4l-4 16"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
@@ -53,7 +54,7 @@
   <div id="backdrop" class="hidden"></div>
   <aside id="sidebar">
     <header>
-      <h1><span class="logo"><svg class="ico"><use href="#i-cube"/></svg></span>LLM Harness</h1>
+      <h1>LLM Harness</h1>
       <button id="new-chat" class="btn sm" title="New chat (Ctrl/Cmd+K)"><svg class="ico"><use href="#i-plus"/></svg>New</button>
     </header>
     <div class="side-search"><svg class="ico"><use href="#i-search"/></svg><input id="chat-search" type="text" placeholder="Search chats" aria-label="Search chats"></div>
@@ -110,8 +111,8 @@
             <div id="ctx-meter" title="Context usage (click for details)"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.5"/><circle class="fg" cx="18" cy="18" r="15.5"/></svg><span class="txt"></span></div>
             <span id="usage" class="small muted" title="Chat tokens and cost (click for details)"></span>
             </div>
-            <button id="send-btn" class="btn primary" title="Send (Enter)">Send<svg class="ico"><use href="#i-send"/></svg></button>
-            <button id="stop-btn" class="btn danger hidden" title="Stop"><svg class="ico"><use href="#i-stop"/></svg>Stop</button>
+            <button id="send-btn" class="btn primary icon" title="Send (Enter)"><svg class="ico"><use href="#i-arrow-up"/></svg></button>
+            <button id="stop-btn" class="btn danger icon hidden" title="Stop"><svg class="ico"><use href="#i-stop"/></svg></button>
           </div>
         </div>
       </div>

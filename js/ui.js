@@ -85,9 +85,8 @@ H.ui = (() => {
       ['plug', 'Use plugins', 'Set up Jira or GitHub in Plugins, then ask about issues and pull requests.', 'What are my open Jira issues? Group them by status.'],
     ];
     return el('div', { id: 'empty' }, [
-      el('div', { class: 'logo' }, [H.icon('cube')]),
-      el('h2', {}, ['What can I help with?']),
-      el('p', {}, ['Chat, tools, skills and plugins — running entirely in your browser against your LiteLLM proxy.']),
+      el('h2', {}, ['What are we working on?']),
+      el('p', {}, ['Chat, tools, skills and plugins. Everything runs in your browser, straight against your LiteLLM proxy.']),
       connectionsStrip(),
       el('div', { class: 'tips' }, tips.map(([ic, t, d, prompt]) => el('div', { class: 'tip', onclick: () => { $('#input').value = prompt; autoresize(); $('#input').focus(); } }, [el('div', { class: 'ti' }, [H.icon(ic)]), el('div', {}, [el('b', {}, [t]), el('div', { class: 'small muted' }, [d])])]))),
     ]);
@@ -152,8 +151,8 @@ H.ui = (() => {
   }
   /* ===== Rendering model =====
      A user message is one element. An assistant *turn* (everything the assistant does until the next user message:
-     text, tool calls, more text, a plan) is ONE element: a header (avatar, name, time, tokens/cost, Copy, Retry)
-     and a body made of parts. Hover, copy and retry therefore apply to the whole response. */
+     text, tool calls, more text, a plan) is ONE element: a body made of parts, then a footer (time, tokens/cost, Copy, Retry).
+     Hover, copy and retry therefore apply to the whole response. */
   let openTurn = null;                       // the turn currently receiving parts (closed by any user message)
   const turnOf = new Map();                  // part node -> turn
   function closeTurn() { openTurn = null; }
@@ -175,7 +174,7 @@ H.ui = (() => {
   function newTurn(firstMsg) {
     const body = el('div', { class: 'body' });
     const stats = el('span', { class: 'muted small stats' });
-    const node = el('div', { class: 'msg assistant turn' }, [el('div', { class: 'avatar' }, [H.icon('cube')]), el('div', { class: 'tbody-wrap' }, [
+    const node = el('div', { class: 'msg assistant turn' }, [el('div', { class: 'tbody-wrap' }, [
       el('div', { class: 'role' }, [el('span', { class: 'name' }, ['Assistant']), el('span', { class: 'muted small ts', title: H.fmtTime(firstMsg.ts) }, [H.fmtClock(firstMsg.ts)]), stats, el('span', { class: 'spacer' }), el('span', { class: 'actions' }, [
         el('button', { class: 'btn sm ghost', title: 'Copy the whole response (markdown)', onclick: () => { navigator.clipboard.writeText(turn.msgs.filter(x => x.role === 'assistant' && x.content).map(x => x.content).join('\n\n')); H.toast('Response copied', 'success', 1200); } }, ['Copy']),
         el('button', { class: 'btn sm ghost', title: 'Regenerate this response', onclick: () => H.agent.regenerate() }, ['Retry']),
@@ -452,7 +451,7 @@ H.ui = (() => {
     if (H.agent.pendingQuestion()) { $('#input').placeholder = 'Answer the assistant\'s question…'; $('#send-btn').classList.remove('hidden'); $('#stop-btn').classList.add('hidden'); document.body.classList.add('asking'); return; }
     document.body.classList.remove('asking');
     $('#mode-wrap').title = { default: 'Default: read-only tools run, writes ask you first', auto: 'Allow all: every tool runs without asking', plan: 'Plan: read-only investigation, then a plan you can execute' }[mode] || 'Chat mode';
-    $('#input').placeholder = mode === 'plan' ? 'Plan mode: describe what you want planned…' : 'Message… type / for skills, drop files to attach';
+    $('#input').placeholder = mode === 'plan' ? 'Plan mode: describe what you want planned…' : window.matchMedia('(max-width: 560px)').matches ? 'Message…' : 'Message… type / for skills, drop files to attach';
   }
   function updateTitle() { const c = H.agent.current(); $('#chat-title').textContent = c?.title || 'New chat'; }
   function bugReport() {
@@ -831,7 +830,7 @@ H.ui = (() => {
       ...(s.searchTemplate ? [['Search provider', s.searchTemplate, 'receives search queries']] : []),
       ...(s.checkUpdates ? [['GitHub (update check)', H.ABOUT.versionUrl, 'a small version file fetched on startup and every hour; no data is sent']] : []),
       ['cdnjs.cloudflare.com', 'https://cdnjs.cloudflare.com', 'UI libraries (marked, DOMPurify, highlight.js) at startup, and pdf.js / JSZip / SheetJS only when you attach a PDF, Office or spreadsheet file; files are parsed locally, nothing is uploaded'],
-      ['fonts.googleapis.com', 'https://fonts.googleapis.com', 'Inter / JetBrains Mono fonts loaded at startup; no data is sent'],
+      ['fonts.googleapis.com', 'https://fonts.googleapis.com', 'Instrument Sans, Instrument Serif and JetBrains Mono fonts loaded at startup; no data is sent'],
       ...(s.allowPyodideCdn ? [['Pyodide (jsDelivr)', s.pyodideUrl, 'downloaded only when Python is first used (code and data stay in the browser)']] : []),
     ];
     const persistToggle = el('input', { type: 'checkbox', checked: H.secrets.persist(), onchange: (e) => { H.secrets.setPersist(e.target.checked); H.toast(e.target.checked ? 'Secrets are remembered on this device' : 'Secrets now live in this tab session only', 'success'); } });
@@ -880,7 +879,7 @@ H.ui = (() => {
     const a = H.ABOUT;
     const beer = el('div', { class: 'note', style: 'color:var(--fg-2);background:var(--accent-soft)' }, [H.icon('beer'), ` No links, no donations: if this saved you time, buy ${a.author} a beer in person. 🍻`]);
     return el('div', {}, [
-      el('div', { class: 'about-hero' }, [el('div', { class: 'logo' }, [H.icon('cube')]), el('div', {}, [el('h3', {}, ['LLM Harness']), el('div', { class: 'muted small' }, [`Version ${a.version} · made by ${a.author}`])])]),
+      el('div', { class: 'about-hero' }, [el('div', {}, [el('h3', {}, ['LLM Harness']), el('div', { class: 'muted small' }, [`Version ${a.version} · made by ${a.author}`])])]),
       sec('Updates', null, [el('div', { class: 'row gap wrap' }, [
         el('button', { class: 'btn', onclick: () => H.update.check({ manual: true }) }, [H.icon('refresh'), 'Check for updates']),
         el('a', { class: 'btn ghost', href: a.repoUrl, target: '_blank', rel: 'noopener' }, [H.icon('external'), 'GitHub repository']),
