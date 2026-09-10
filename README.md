@@ -230,9 +230,15 @@ credentials live in the browser and there is no CORS issue.
   (path traversal is rejected).
 - **No silent replays.** The optional CORS proxy is only used for plain GET requests without credentials or body,
   and never after a timeout; plugin calls and `http_request` are never routed through it implicitly.
-- **Bridge and extension scoping.** The bookmarklet bridge only works when the harness has a real http(s) origin
-  (responses are posted to that origin only; request ids are cryptographic). The connector extension only talks to
-  pages served from harness origins you list in its options, and only calls APIs you list there.
+- **Bridge and extension scoping.** The bookmarklet bridge is an authenticated, encrypted channel: the harness owns
+  a persistent signing key (kept non-extractable in IndexedDB), the bookmark carries its public key, each session
+  starts with a handshake in which the harness signs a fresh AES-GCM key, and every request and response is
+  encrypted with it. The site tab refuses a harness with another identity, and a page that later takes over the
+  harness window can neither read responses nor forge requests. Messages to the site tab are additionally targeted
+  at its origin. This is what makes the bridge safe from a `file://` harness, whose origin is `null`. Where Web
+  Crypto is missing (plain http harness) the origin-checked plaintext protocol is used. Request ids are
+  cryptographic. The connector extension only talks to pages served from harness origins you list in its options,
+  and only calls APIs you list there.
 - **Prompt injection.** Tool output is untrusted; the system prompt says so. Every outbound channel either asks or is
   closed: `web_fetch` and `http_request` prompt once per site (origin) in Default and Plan mode, with "allow this site
   for session / always"; a request routed through a connected browser tab (your login session) prompts in every mode,
@@ -307,8 +313,9 @@ PDFs; both happen only when you use them.
   Firefox and Safari run everything else; file tools then use an in-memory workspace.
 - **Opening from a file**: double-clicking `index.html` works on every OS. Two limitations of `file://` pages:
   some browsers refuse the folder picker there, and the bridge bookmark cannot embed a file path (it links to
-  the open harness tab instead, so always open the site from the wizard's Open button). Hosting the folder on any
-  internal web server or static host removes both.
+  the open harness tab instead, so always open the site from the wizard's Open button). The bridge itself works:
+  its encrypted, signed protocol does not depend on the page having an origin. Clearing the browser's site data
+  creates a new signing identity, so re-create the bookmark afterwards.
 - **Line endings**: files with Windows `\r\n` endings are edited in place and keep their style; the model may use
   `\n` in `fs_edit` and it still matches.
 - **Paths**: the model may use `\` or `/`; both work. Absolute paths (`C:\…`, `/Users/…`) are rejected with an

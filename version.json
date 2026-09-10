@@ -1,6 +1,6 @@
 {
-  "version": "1.14.0",
+  "version": "1.14.1",
   "date": "2026-09-10",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "design: paper & ink design system (neutral greys, solid-ink actions and user bubbles, teal accent, Instrument Sans / Instrument Serif / JetBrains Mono), stylesheet rewritten from scratch, no role labels or logos, icon-only send/stop, grouped tool timeline, shorter phone placeholder"
+  "notes": "bridge: authenticated encrypted channel (persistent ECDSA identity in the bookmark, signed AES-GCM session keys, all requests/responses encrypted) so the browser-session bridge works safely from a file:// harness; identity mismatch refused and reported; plaintext protocol kept only for http harnesses without Web Crypto"
 }

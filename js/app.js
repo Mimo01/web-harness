@@ -2,6 +2,7 @@
 (async function () {
   try { window.name = 'llm-harness'; } catch { }
   H.ui.init();
+  await H.bridge.init();   // signing identity for the browser-session bridge (needed before the bookmarklet is shown)
   if (H.bridge.embedded()) { document.body.classList.add('embedded'); H.$('#sidebar').classList.add('collapsed'); }
   await H.fs.restore();
   H.ui.updateWorkspaceBtn(H.fs.hasRoot() ? H.fs.name() : '');
