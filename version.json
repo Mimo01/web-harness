@@ -1,6 +1,6 @@
 {
-  "version": "1.13.1",
+  "version": "1.13.2",
   "date": "2026-09-10",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "surface mid-stream LiteLLM errors and plain JSON completions, ask_user refused in sub-agents, Stop cancels running tools (workers, HTTP, bridge), Continue button for truncated replies, attachments delivered with question answers, second-tab warning and settings storage sync"
+  "notes": "storage: chat index store and image blob store (startup and sidebar never read message bodies, images written once, v1 data migrated in place); fs_append seeks to the end instead of rewriting the file"
 }

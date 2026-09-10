@@ -5,7 +5,7 @@
   if (H.bridge.embedded()) { document.body.classList.add('embedded'); H.$('#sidebar').classList.add('collapsed'); }
   await H.fs.restore();
   H.ui.updateWorkspaceBtn(H.fs.hasRoot() ? H.fs.name() : '');
-  const recent = (await H.db.listChats())[0];
+  const recent = await H.db.recentChat();   // one index record via cursor: never reads message bodies at startup
   if (recent) await H.agent.load(recent.id); else await H.agent.reset();   // reopen the most recent chat; create one only when there is none
   H.ui.renderChatList();
   if (H.settings.apiKey()) { H.ui.refreshModels().catch(() => { }); H.usage.refreshModelInfo(); } else { H.ui.setStatus('', 'not configured'); H.ui.openSettings('connection'); }

@@ -81,10 +81,17 @@ H.fs = (() => {
     await w.close();
     return { bytes: typeof content === 'string' ? new Blob([content]).size : content.size ?? content.byteLength };
   }
+  /* append without reading or rewriting the existing content: keep the file, seek to its end, write the new part */
   async function appendFile(path, content) {
-    let prev = '';
-    try { prev = await readFile(path); } catch { }
-    return writeFile(path, prev + content);
+    if (!root) { const k = norm(path).join('/'); virtual.set(k, (virtual.get(k) || '') + String(content)); return { virtual: true }; }
+    await ensure();
+    const fh = await fileHandle(path, true);
+    const size = (await fh.getFile()).size;
+    const w = await fh.createWritable({ keepExistingData: true });
+    await w.seek(size);
+    await w.write(content);
+    await w.close();
+    return { bytes: new Blob([content]).size, size: size + new Blob([content]).size };
   }
   async function exists(path) { try { await stat(path); return true; } catch { return false; } }
   async function stat(path) {

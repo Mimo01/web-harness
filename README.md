@@ -111,6 +111,10 @@ read-only tool calls at once they run in parallel; anything that writes, asks, o
 a time, in order. Keep one harness tab open per browser profile: a second tab gets a warning, because settings and
 usage totals are shared.
 
+Chats are stored in IndexedDB in three parts: a small index record per chat (title, time, search text, usage) that the
+sidebar and startup read, the chat itself, and attached images in their own store, written once. Saving a tool result
+rewrites the chat text but never its images; opening the app reads one index record to pick the newest chat.
+
 The model also receives a short usage guide for each enabled plugin (issue-key formats, which call comes before
 which, how to handle errors), and a loop guard blocks a tool call repeated with identical arguments and outcome
 more than three times in one turn, then asks the model to report instead.
@@ -246,7 +250,7 @@ index.html        shell
 preview.html      host page for HTML previews (own CSP, sandboxed frame)
 css/style.css
 js/util.js        helpers, templating, HTML→text
-js/db.js          IndexedDB (chats, memory)
+js/db.js          IndexedDB (chats, chat index, image blobs, memory, kv)
 js/settings.js    settings + secret store
 js/usage.js       tokens, context estimate, cost tracking
 js/bridge.js      browser-session bridge (bookmarklet relay, fallback)

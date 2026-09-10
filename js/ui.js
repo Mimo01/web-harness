@@ -344,7 +344,7 @@ H.ui = (() => {
   /* ---------------- sidebar ---------------- */
   /* the sidebar works from a small index (id, title, dates, counts, searchable text), rebuilt from storage only when needed */
   let chatIndex = null; let indexVersion = 1; let indexLoaded = 0; let listTimer = 0;
-  const indexEntry = (c) => ({ id: c.id, title: c.title, updated: c.updated, count: c.messages.length, text: (c.title + ' ' + c.messages.filter(m => m.role === 'user').slice(0, 20).map(m => String(m.display || m.content || '').slice(0, 300)).join(' ')).toLowerCase() });
+  const indexEntry = (c) => c.messages ? H.db.summary(c) : c;   // live chats are summarised here; listChats() already returns index records
   // one changed chat updates only its own entry; a full reload from storage happens only for deletions or an unloaded index
   H.bus.on('chat-updated', (c) => {
     if (chatIndex && indexLoaded === indexVersion && c && c.id) { const i = chatIndex.findIndex(x => x.id === c.id); const e = indexEntry(c); if (i >= 0) chatIndex[i] = e; else chatIndex.push(e); chatIndex.sort((a, b) => b.updated - a.updated); }
@@ -894,7 +894,7 @@ H.ui = (() => {
 
   /* ---------------- import / export ---------------- */
   async function exportAll() {
-    const data = { version: 2, exported: new Date().toISOString(), settings: { ...H.settings.get(), searchKeyValue: undefined }, perms: H.perms.rules(), plugins: JSON.parse(H.plugins.exportAll()), skills: H.skills.list(), chats: await H.db.listChats(), memory: await H.db.memAll() };
+    const data = { version: 2, exported: new Date().toISOString(), settings: { ...H.settings.get(), searchKeyValue: undefined }, perms: H.perms.rules(), plugins: JSON.parse(H.plugins.exportAll()), skills: H.skills.list(), chats: await H.db.allChats(), memory: await H.db.memAll() };
     H.download('harness-export.json', JSON.stringify(data, null, 2), 'application/json');
   }
   function importAll() {
