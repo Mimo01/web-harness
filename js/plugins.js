@@ -16,6 +16,8 @@ H.plugins = (() => {
   };
   const mergeSecrets = (pub) => { const sec = H.tryJSON(H.secrets.get('plugin:' + pub.id), {}); const p = H.deepClone(pub); if (sec.auth) p.auth = sec.auth; if (sec.headers) p.headers = { ...(p.headers || {}), ...sec.headers }; return p; };
   let plugins = (H.tryJSON(localStorage.getItem(KEY), null) || []).map(mergeSecrets);
+  let toolsVersion = 1;                                     // bumped whenever plugins or MCP tool lists change; declared before save() because first-run template setup calls save() during module init
+  const invalidateTools = () => { toolsVersion++; };
   const save = () => {
     invalidateTools();
     const pubs = plugins.map(p => { const { pub, sec } = splitSecrets(p); H.secrets.set('plugin:' + p.id, Object.keys(sec).length ? JSON.stringify(sec) : ''); return pub; });
@@ -389,8 +391,6 @@ H.plugins = (() => {
 
   /* ----------------------------- TOOL PROJECTION ----------------------------- */
   const cachedTools = { key: '', list: [] };
-  let toolsVersion = 1;                      // bumped whenever plugins or MCP tool lists change
-  const invalidateTools = () => { toolsVersion++; };
   function tools() {
     const key = toolsVersion;
     if (cachedTools.key === key) return cachedTools.list;

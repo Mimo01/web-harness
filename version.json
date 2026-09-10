@@ -1,6 +1,6 @@
 {
-  "version": "1.14.2",
+  "version": "1.14.3",
   "date": "2026-09-10",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "bridge: detect old (pre-encryption) bookmarks when clicked and tell the user to re-create them (toast, connection strip, plugin wizard); refused on file:// harnesses, accepted unencrypted on http"
+  "notes": "fix first-run crash: plugins.js referenced invalidateTools before its declaration when creating the default templates (every fresh install since 1.12.3 lost H.plugins and everything after it); startup error banner in the loader so a failed module is reported instead of silently breaking the page"
 }
