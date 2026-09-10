@@ -315,7 +315,9 @@ PDFs; both happen only when you use them.
   some browsers refuse the folder picker there, and the bridge bookmark cannot embed a file path (it links to
   the open harness tab instead, so always open the site from the wizard's Open button). The bridge itself works:
   its encrypted, signed protocol does not depend on the page having an origin. Clearing the browser's site data
-  creates a new signing identity, so re-create the bookmark afterwards.
+  creates a new signing identity, so re-create the bookmark afterwards. Bookmarks made before 1.14.1 are detected
+  when clicked: the harness shows a warning toast, the connection strip and the plugin wizard say "old bookmark",
+  and you drag the new bookmark to your bar to replace it.
 - **Line endings**: files with Windows `\r\n` endings are edited in place and keep their style; the model may use
   `\n` in `fs_edit` and it still matches.
 - **Paths**: the model may use `\` or `/`; both work. Absolute paths (`C:\…`, `/Users/…`) are rejected with an

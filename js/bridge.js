@@ -14,6 +14,8 @@ H.bridge = (() => {
   const bridges = new Map();   // origin -> { sources: Map<WindowProxy, {ts, mode, key?, nonce?}>, origin }
   const log = [];              // recent events for diagnostics
   const pending = new Map();   // id -> { resolve, reject, timer, source, origin }
+  const stale = new Map();     // origin -> { ts, mode, refused } : a tab clicked an old (pre-encryption) bookmark
+  const warnedLegacy = new Set();
   const myOrigin = /^https?:\/\//.test(location.origin) ? location.origin : 'null';   // file:// pages have no usable origin
   const subtle = (crypto && crypto.subtle) || null;
   const secure = !!subtle;     // can sign / encrypt (file://, https, localhost)
@@ -67,7 +69,20 @@ H.bridge = (() => {
         const sig = b64(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, ident.priv, te.encode([m.nonce, e.origin, info.keyB64, ts].join('|'))));
         Object.assign(ack, { key: info.keyB64, nonce: m.nonce, ts, sig, pub: ident.pub });
       } else return;   // periodic hello on an established session: nothing to send
-    } else if (myOrigin === 'null') { note('plaintext hello from ' + e.origin + ' refused: this harness has no origin; re-create the bookmark'); return; }
+    } else if (secure && ident) {   // an old bookmark (no nonce): it cannot do the encrypted handshake
+      const refused = myOrigin === 'null';
+      stale.set(e.origin, { ts: Date.now(), mode: m.mode || '', refused });
+      if (refused) { b.sources.delete(e.source); if (!b.sources.size) bridges.delete(e.origin); }
+      else info.legacy = true;
+      if (!warnedLegacy.has(e.origin)) {
+        warnedLegacy.add(e.origin); note('old bookmark on ' + e.origin + (refused ? ' refused' : ' accepted in plaintext'));
+        H.toast(refused
+          ? `Old bridge bookmark detected on ${e.origin}: it cannot connect to a harness opened from a file. Re-create the bookmark (Settings › Plugins › Set up › step 3), replace the old one, and click the new one on that tab.`
+          : `${e.origin} connected with an old bridge bookmark (unencrypted). Re-create the bookmark (Settings › Plugins › Set up › step 3) and click the new one on that tab to upgrade.`, 'warn', 20000);
+      }
+      H.bus.emit('bridge', list());
+      if (refused) return;
+    }
     try { e.source.postMessage(ack, e.origin); } catch { }   // targeted at the site origin: only the genuine tab can receive the key
     if (!known || ack.key) { note('hello from ' + e.origin + ' (' + (m.mode || '?') + (ack.key ? ', encrypted session' : ', plaintext') + ', tabs: ' + b.sources.size + ')'); H.bus.emit('bridge', list()); if (fresh) H.toast('Bridge connected: ' + e.origin, 'success'); }
   }
@@ -125,7 +140,12 @@ H.bridge = (() => {
   function note(t) { log.push(new Date().toLocaleTimeString() + ' ' + t); if (log.length > 40) log.shift(); }
   function best(b) { let s = null, bi = null; for (const [src, info] of b.sources) if (!isClosed(src) && (!bi || info.ts > bi.ts)) { s = src; bi = info; } return s ? { source: s, info: bi } : null; }
 
-  function list() { return [...bridges.values()].map(b => { const x = best(b); return { origin: b.origin, tabs: b.sources.size, age: x ? Date.now() - x.info.ts : 0, mode: x ? x.info.mode : '', encrypted: !!x?.info.key }; }); }
+  function list() { return [...bridges.values()].map(b => { const x = best(b); return { origin: b.origin, tabs: b.sources.size, age: x ? Date.now() - x.info.ts : 0, mode: x ? x.info.mode : '', encrypted: !!x?.info.key, legacy: !!x?.info.legacy }; }); }
+  /** an old bookmark was used for this origin recently: 'refused' (file:// harness) | 'plaintext' (still working) | null */
+  function legacy(origin) {
+    const st = stale.get(origin); if (st && Date.now() - st.ts < 60000) return st.refused ? 'refused' : 'plaintext';
+    const b = bridges.get(origin); const x = b && best(b); return x?.info.legacy ? 'plaintext' : null;
+  }
   /** UI helper: probe every bridge, returns list with `ok` flags */
   async function health() { const out = []; for (const b of [...bridges.values()]) { const x = await alive(b.origin); out.push({ origin: b.origin, ok: !!x, tabs: b.sources.size, mode: x?.info.mode || '', encrypted: !!x?.info.key }); } return out; }
   /** open the target site from the harness so the new tab keeps window.opener (lets the bookmarklet link back without a popup) */
@@ -228,5 +248,5 @@ if(!b.querySelector('[data-x]')){const x=document.createElement('span');x.datase
   /** minimal end-to-end check: GET the site root through the bridge */
   async function ping(origin) { const r = await fetch(origin + '/', { method: 'GET', headers: {}, timeout: 15000 }); return { status: r.status, ok: r.ok, bytes: (r.body || '').length }; }
   function diagnostics() { return ['harness: ' + location.href.split('#')[0], 'origin: ' + myOrigin, 'identity: ' + (ident ? ident.pub.slice(0, 16) + '…' : 'none') + (secure ? '' : ' (no Web Crypto: plaintext protocol)'), 'bridges: ' + JSON.stringify(list()), 'pending: ' + pending.size, 'log:', ...log].join('\n'); }
-  return { fetch, ping, has, list, health, bookmarklet, bookmarkletSource, openSite, diagnostics, usable, init, identity: () => ident, embedded: () => window.top !== window || location.hash.includes('embedded') };
+  return { fetch, ping, has, list, legacy, health, bookmarklet, bookmarkletSource, openSite, diagnostics, usable, init, identity: () => ident, embedded: () => window.top !== window || location.hash.includes('embedded') };
 })();

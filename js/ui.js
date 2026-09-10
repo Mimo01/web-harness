@@ -96,7 +96,11 @@ H.ui = (() => {
     if (!p.enabled) return { state: 'off', label: 'off' };
     const origin = (() => { try { return new URL(p.kind === 'mcp' ? (p.url || H.settings.get('baseUrl')) : p.baseUrl).origin; } catch { return ''; } })();
     const r = p.route?.type || 'direct';
-    if (r === 'bridge') return H.bridge.has(origin) ? { state: 'on', label: 'bridge connected' } : { state: 'warn', label: 'bridge not connected' };
+    if (r === 'bridge') {
+      const old = H.bridge.legacy(origin);
+      if (old) return { state: 'warn', label: old === 'refused' ? 'old bridge bookmark: re-create it (Set up › step 3)' : 'connected with an old bookmark (unencrypted): re-create it', legacy: true };
+      return H.bridge.has(origin) ? { state: 'on', label: 'bridge connected' } : { state: 'warn', label: 'bridge not connected' };
+    }
     if (r === 'extension') return H.ext.available() ? { state: 'on', label: 'via extension' } : { state: 'warn', label: 'extension missing' };
     if (p.useLitellmKey) return H.settings.apiKey() ? { state: 'on', label: 'via LiteLLM' } : { state: 'warn', label: 'no API key' };
     return { state: 'on', label: r === 'direct' ? 'direct' : r === 'litellm' ? 'via LiteLLM' : 'via proxy' };
@@ -129,7 +133,7 @@ H.ui = (() => {
       box.append(el('span', { class: 'conn-label' }, ['Connections']));
       for (const p of list) {
         const s = pluginStatus(p);
-        const canReconnect = s.state === 'warn' && (p.route?.type || 'direct') === 'bridge';
+        const canReconnect = s.state === 'warn' && !s.legacy && (p.route?.type || 'direct') === 'bridge';
         box.append(el('button', { class: 'conn ' + s.state + (canReconnect ? ' action' : ''), title: canReconnect ? `${p.name}: bridge not connected. Click to open the site in a linked tab, then click the bookmark there.` : `${p.name}: ${s.label}. Click to configure.`, onclick: () => canReconnect ? reconnect(p) : openSettings('plugins') }, [el('span', { class: 'dot' }), shortName(p), el('span', { class: 'conn-state' }, [canReconnect ? 'reconnect ↗' : s.label])]));
       }
 
@@ -693,7 +697,7 @@ H.ui = (() => {
         const target = (() => { try { return new URL(url.value.trim()).origin; } catch { return '(enter the URL above)'; } })();
         if (!H.bridge.usable()) { routeDetail.append(el('div', { class: 'note' }, ['The bridge is not available: this browser could not create the signing identity the bridge needs when the harness is opened from a file (Web Crypto or IndexedDB unavailable). Use Chrome, Edge or Firefox, or put the folder on any http(s) address.'])); return; }
         const status = el('div', { class: 'setup-result' });
-        const upd = () => { const ok = H.bridge.list().find(b => b.origin === target); status.className = 'setup-result ' + (ok ? 'ok' : ''); status.textContent = ok ? `✓ Bridge connected to ${target}` + (ok.mode === 'opener' ? ' (linked tab' : ok.mode ? ` (${ok.mode}` : ' (') + (ok.tabs > 1 ? `, ${ok.tabs} tabs)` : ')') : `Waiting for a bridge from ${target}…\nIf the ${target.replace(/^https?:\/\//, '')} tab already shows a blue bar but nothing happens here, that bar connected to a different harness window (it says "NEW harness window" or "PANEL MODE"). Use the Open button in step 2 below and click the bookmark on the tab it opens: that tab is linked to this one.`; };
+        const upd = () => { const old = H.bridge.legacy(target); if (old) { status.className = 'setup-result err'; status.textContent = `⚠ The ${target.replace(/^https?:\/\//, '')} tab clicked an OLD bridge bookmark${old === 'refused' ? ', which cannot connect to a harness opened from a file' : ' (it works, but unencrypted)'}. Drag the bookmark below to your bookmarks bar again (replace the old one), then click the new one on that tab.`; return; } const ok = H.bridge.list().find(b => b.origin === target); status.className = 'setup-result ' + (ok ? 'ok' : ''); status.textContent = ok ? `✓ Bridge connected to ${target}` + (ok.mode === 'opener' ? ' (linked tab' : ok.mode ? ` (${ok.mode}` : ' (') + (ok.tabs > 1 ? `, ${ok.tabs} tabs)` : ')') : `Waiting for a bridge from ${target}…\nIf the ${target.replace(/^https?:\/\//, '')} tab already shows a blue bar but nothing happens here, that bar connected to a different harness window (it says "NEW harness window" or "PANEL MODE"). Use the Open button in step 2 below and click the bookmark on the tab it opens: that tab is linked to this one.`; };
         upd(); const off = H.bus.on('bridge', upd); const iv = setInterval(() => { if (!document.body.contains(status)) { off(); off2(); clearInterval(iv); } else upd(); }, 2000);
         const trace = el('div', { class: 'setup-result hidden mono small' });
         let waitTimer = null;

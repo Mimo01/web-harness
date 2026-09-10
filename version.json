@@ -1,6 +1,6 @@
 {
-  "version": "1.14.1",
+  "version": "1.14.2",
   "date": "2026-09-10",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "bridge: authenticated encrypted channel (persistent ECDSA identity in the bookmark, signed AES-GCM session keys, all requests/responses encrypted) so the browser-session bridge works safely from a file:// harness; identity mismatch refused and reported; plaintext protocol kept only for http harnesses without Web Crypto"
+  "notes": "bridge: detect old (pre-encryption) bookmarks when clicked and tell the user to re-create them (toast, connection strip, plugin wizard); refused on file:// harnesses, accepted unencrypted on http"
 }
