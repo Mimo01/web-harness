@@ -85,6 +85,8 @@ H.bridge = (() => {
     const started = Date.now();
     H.bus.emit('bridge-request', { id, origin, url, phase: 'sent' });
     return new Promise((resolve, reject) => {
+      if (init.signal?.aborted) return reject(Object.assign(new Error('Cancelled by the user (Stop).'), { name: 'AbortError' }));
+      init.signal?.addEventListener('abort', () => { const p = pending.get(id); if (!p) return; clearTimeout(p.timer); pending.delete(id); note('cancelled ' + id); H.bus.emit('bridge-request', { id, origin, url, phase: 'cancelled' }); reject(Object.assign(new Error('Cancelled by the user (Stop).'), { name: 'AbortError' })); }, { once: true });
       const timer = setTimeout(() => { pending.delete(id); note('timeout ' + id); b.sources.delete(x.source); H.bus.emit('bridge', list()); H.bus.emit('bridge-request', { id, origin, url, phase: 'timeout' }); reject(new Error(`Bridge request timed out after ${Math.round((init.timeout || 30000) / 1000)} s: the ${origin} tab did not answer. It may be on a login page, blocked by a dialog, or asleep. Ask the user to look at that tab (blue bar shows the last error) and click the bookmark again if the bar is gone.`)); }, init.timeout || 30000);
       pending.set(id, { source: x.source, origin, resolve: (v) => { note('result ' + id + ' HTTP ' + v.status); H.bus.emit('bridge-request', { id, origin, url, phase: 'done', status: v.status, ms: Date.now() - started }); resolve(v); }, reject: (e) => { note('failed ' + id + ' ' + e.message); H.bus.emit('bridge-request', { id, origin, url, phase: 'error', error: e.message }); reject(e); }, timer });
       try { x.source.postMessage({ type: 'llm-bridge-fetch', id, url, method: init.method || 'GET', headers: init.headers || {}, body: init.body }, origin); }

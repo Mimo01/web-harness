@@ -548,3 +548,4 @@ label.check .help { margin: 0; font-size: 12px; }
 .md-img.dead { cursor: default; border-style: solid; }
 .md-img .ico { width: 14px; height: 14px; flex: none; }
 .perm-note { margin: 0 0 10px; padding: 8px 10px; border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.truncated-box { background: var(--warn-soft); border-radius: var(--r); padding: 8px 12px; margin: 8px 0; align-items: center; }

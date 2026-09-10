@@ -156,13 +156,13 @@ H.tools = (() => {
     name: 'run_javascript', group: 'Code', risk: 'write',
     description: 'Run JavaScript in a sandboxed Web Worker (no DOM, no workspace access, network via fetch allowed). Use console.log for output; the value of a final `return` is captured. Async/await supported.',
     parameters: obj({ code: str('JavaScript code (body of an async function; use return to yield a value)'), input: { description: 'Optional JSON input available as `input`' }, timeoutMs: num('Timeout in ms (default 15000)') }, ['code']),
-    run: async ({ code, input, timeoutMs }) => ok(await H.runtime.runJS(code, { timeout: timeoutMs || 15000, input })),
+    run: async ({ code, input, timeoutMs }, ctx) => ok(await H.runtime.runJS(code, { timeout: timeoutMs || 15000, input, signal: ctx?.signal })),
   });
   def({
     name: 'run_python', group: 'Code', risk: 'write',
     description: 'Run Python code in the browser via Pyodide (numpy, pandas, etc. available; pure-python packages installable). Output = stdout + value of last expression. No workspace access; pass files via `files`.',
     parameters: obj({ code: str('Python code'), packages: { type: 'array', items: { type: 'string' }, description: 'Packages to load/install, e.g. ["numpy","requests"]' }, files: { type: 'object', description: 'Map filename -> text content to place in the Python working dir', additionalProperties: { type: 'string' } }, timeoutMs: num('Timeout ms (default 60000)') }, ['code']),
-    run: async ({ code, packages, files, timeoutMs }, ctx) => ok(await H.runtime.runPython(code, { packages: packages || [], files: files || {}, timeout: timeoutMs || 60000, onStatus: ctx.onStatus })),
+    run: async ({ code, packages, files, timeoutMs }, ctx) => ok(await H.runtime.runPython(code, { packages: packages || [], files: files || {}, timeout: timeoutMs || 60000, onStatus: ctx.onStatus, signal: ctx.signal })),
   });
   def({
     name: 'run_file', rerun: 'Run again', rerunConfirm: (a) => !/\.html?$/i.test(String(a.path || '')), group: 'Code', risk: 'write',
@@ -195,7 +195,7 @@ H.tools = (() => {
     name: 'calculate', group: 'Code', risk: 'safe',
     description: 'Evaluate a math/JavaScript expression safely (no network access), e.g. "Math.sqrt(2)*10" or "(1234*5)/3".',
     parameters: obj({ expression: str('Expression') }, ['expression']),
-    run: async ({ expression }) => { const r = await H.runtime.runJS('return (' + expression + ');', { timeout: 3000, network: false }); if (r.error) throw new Error(r.error); return ok({ result: r.result }); },
+    run: async ({ expression }, ctx) => { const r = await H.runtime.runJS('return (' + expression + ');', { timeout: 3000, network: false, signal: ctx?.signal }); if (r.error) throw new Error(r.error); return ok({ result: r.result }); },
   });
 
   /* ===================== WEB ===================== */
@@ -204,24 +204,25 @@ H.tools = (() => {
     name: 'web_fetch', group: 'Web', risk: 'safe', scope: originOf,
     description: 'Fetch a URL directly from the browser and return readable text (HTML converted to markdown-ish text) or raw body. Sites that do not allow cross-origin requests cannot be fetched unless the user configured a proxy; in that case suggest open_url so the user can read the page themselves.',
     parameters: obj({ url: str('Absolute URL'), raw: bool('Return raw body instead of extracted text'), maxChars: num('Max characters to return (default 20000)') }, ['url']),
-    run: async ({ url, raw = false, maxChars = 20000 }) => {
-      let text, via = 'direct', status;
+    run: async ({ url, raw = false, maxChars = 20000 }, ctx) => {
+      let text, via = 'direct', status; const signal = ctx?.signal;
       if (!/^https?:\/\//i.test(url)) throw new Error(`url must be an absolute http(s) URL, got "${url}".`);
       try {
         if (H.bridge.has(url)) {   // a logged-in tab of that site is connected: use it (handles sites without CORS and behind login)
-          const b = await H.bridge.fetch(url, { headers: { 'Accept': 'text/html,application/json,text/plain,*/*' } });
+          const b = await H.bridge.fetch(url, { headers: { 'Accept': 'text/html,application/json,text/plain,*/*' }, signal });
           status = b.status; via = 'browser session bridge'; const ct = b.headers?.['content-type'] || '';
           text = raw || !/html/i.test(ct) ? (b.body || '') : H.htmlToText(b.body || '', url);
           return ok({ url, status, via, content: H.clamp(text, maxChars) });
         }
-        const r = await fetchWithProxy(url, { headers: { 'Accept': 'text/html,application/json,text/plain,*/*' } });
+        const r = await fetchWithProxy(url, { headers: { 'Accept': 'text/html,application/json,text/plain,*/*' }, signal });
         status = r.status;
         const ct = r.headers.get('content-type') || '';
         const body = await r.text();
         text = raw || !/html/i.test(ct) ? body : H.htmlToText(body, url);
       } catch (e) {
+        if (e.name === 'AbortError') throw e;
         if (!H.settings.get('jinaFallback')) throw new Error(`Could not fetch ${url} directly from the browser (the site probably does not allow cross-origin requests). No third-party fetch service is enabled (Settings > Security). Suggest open_url so the user can read the page, or ask them to paste the content.`);
-        const r = await fetch('https://r.jina.ai/' + url, { headers: { 'Accept': 'text/plain' } });
+        const r = await fetch('https://r.jina.ai/' + url, { headers: { 'Accept': 'text/plain' }, signal });
         if (!r.ok) throw new Error(`Fetch failed directly (${e.message}) and via r.jina.ai (HTTP ${r.status})`);
         text = await r.text(); via = 'r.jina.ai (third-party reader)'; status = r.status;
       }
@@ -232,14 +233,14 @@ H.tools = (() => {
     name: 'web_search', group: 'Web', risk: 'safe',
     description: 'Search the web using the search provider configured by the user (disabled until configured). Returns result snippets and URLs.',
     parameters: obj({ query: str('Search query'), maxChars: num('Max characters (default 12000)') }, ['query']),
-    run: async ({ query, maxChars = 12000 }) => {
+    run: async ({ query, maxChars = 12000 }, ctx) => {
       const tpl = H.settings.get('searchTemplate');
       if (!tpl) throw new Error('web_search is disabled: no search provider is configured (Settings > Security & web). Ask the user to configure one, or use open_url to open a search page for them.');
       const url = tpl.replace('{q}', encodeURIComponent(query));
       const headers = { 'Accept': 'application/json, text/plain' };
       const hk = H.settings.get('searchKeyHeader'), hv = H.settings.get('searchKeyValue');
       if (hk && hv) headers[hk] = hv;
-      const r = await fetchWithProxy(url, { headers }, { allowProxy: !(hk && hv) });   // a keyed search API is never sent via the proxy
+      const r = await fetchWithProxy(url, { headers, signal: ctx?.signal }, { allowProxy: !(hk && hv) });   // a keyed search API is never sent via the proxy
       if (!r.ok) throw new Error(`Search HTTP ${r.status}: ${H.clamp(await r.text(), 500)}`);
       const ct = r.headers.get('content-type') || '';
       let body = await r.text();
@@ -259,8 +260,9 @@ H.tools = (() => {
       body: { description: 'Request body: object (sent as JSON) or string' },
       timeoutMs: num('Timeout ms (default 30000)'),
     }, ['url']),
-    run: async ({ url, method = 'GET', headers = {}, body, timeoutMs = 30000 }) => {
+    run: async ({ url, method = 'GET', headers = {}, body, timeoutMs = 30000 }, ctx) => {
       const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeoutMs);
+      ctx?.signal?.addEventListener('abort', () => ctl.abort(), { once: true });   // Stop cancels the request too
       const init = { method, headers: { ...headers }, signal: ctl.signal };
       if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
         if (typeof body === 'object') { init.body = JSON.stringify(body); init.headers['Content-Type'] ||= 'application/json'; }
@@ -269,7 +271,7 @@ H.tools = (() => {
       if (!/^https?:\/\//i.test(url)) throw new Error(`url must be an absolute http(s) URL, got "${url}".`);
       try {
         if (H.bridge.has(url)) {
-          const b = await H.bridge.fetch(url, { method, headers: init.headers, body: init.body });
+          const b = await H.bridge.fetch(url, { method, headers: init.headers, body: init.body, signal: ctl.signal });
           return ok({ status: b.status, ok: b.ok, via: 'browser session bridge', headers: b.headers || {}, body: H.tryJSON(b.body || '', H.clamp(b.body || '', 30000)) });
         }
         const r = await fetchWithProxy(url, init, { allowProxy: false });   // arbitrary API calls are never replayed through a proxy
@@ -291,7 +293,7 @@ H.tools = (() => {
     name: 'json_query', group: 'Data', risk: 'safe',
     description: 'Transform JSON data with a JavaScript expression (no network access). `data` holds the parsed input, e.g. "data.items.filter(i => i.open).map(i => i.id)".',
     parameters: obj({ data: { description: 'JSON value or JSON string' }, expression: str('JavaScript expression over `data`') }, ['data', 'expression']),
-    run: async ({ data, expression }) => { const d = typeof data === 'string' ? H.tryJSON(data, data) : data; const r = await H.runtime.runJS(`const data = input; return (${expression});`, { input: d, timeout: 5000, network: false }); if (r.error) throw new Error(r.error); return ok({ result: r.result }); },
+    run: async ({ data, expression }, ctx) => { const d = typeof data === 'string' ? H.tryJSON(data, data) : data; const r = await H.runtime.runJS(`const data = input; return (${expression});`, { input: d, timeout: 5000, network: false, signal: ctx?.signal }); if (r.error) throw new Error(r.error); return ok({ result: r.result }); },
   });
   def({
     name: 'regex_extract', group: 'Data', risk: 'safe',
@@ -370,8 +372,8 @@ H.tools = (() => {
     description: 'Ask the user a clarifying question and wait for their answer. The question appears in the chat; the user answers by clicking a choice or typing in the message box. Optionally offer choices.',
     parameters: obj({ question: str('Question to ask'), choices: { type: 'array', items: { type: 'string' }, description: 'Optional list of choices' } }, ['question']),
     run: ({ question, choices }, ctx) => {
-      if (!ctx?.toolMsg) return Promise.resolve({ answer: null, cancelled: true, note: 'ask_user is only available in the main chat.' });
-      return H.agent.askUser(ctx.chatId, ctx.toolMsg, question, choices, ctx.signal);
+      if (!ctx?.toolMsg || ctx.subagent) return Promise.resolve({ answer: null, cancelled: true, note: 'ask_user is not available inside a sub-agent. Finish with your best assumption and state the open question in your final answer so the main assistant can ask the user.' });
+      return H.agent.askUser(ctx.chatId, ctx.toolMsg, question, choices, ctx.signal, ctx.images);
     },
   });
   def({

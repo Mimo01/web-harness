@@ -75,6 +75,8 @@ H.settings = (() => {
     cur.jinaFallback = false; cur.settingsVersion = 2; localStorage.setItem(KEY, JSON.stringify(cur)); localStorage.setItem('harness.migrated.v2', '1');
   }
   if (cur.permissionMode) { cur.chatMode = cur.permissionMode === 'auto' ? 'auto' : 'default'; cur.alwaysAsk = cur.permissionMode === 'strict'; delete cur.permissionMode; }
+  // another tab of the harness wrote settings: refresh the in-memory copy so this tab does not write stale values back
+  window.addEventListener('storage', (e) => { if (e.key === KEY && e.newValue) { const v = H.tryJSON(e.newValue, null); if (v) { cur = Object.assign({}, defaults, v); H.bus.emit('settings', cur); } } });
   return {
     get: (k) => k ? cur[k] : cur,
     set: (patch) => { Object.assign(cur, patch); localStorage.setItem(KEY, JSON.stringify(cur)); H.bus.emit('settings', cur); },

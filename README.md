@@ -104,8 +104,12 @@ Pick a mode (and the model) in the pills under the message box; both apply to th
 | **Plan** | the model may only use read-only tools. It investigates and writes a numbered plan. A **Plan ready** bar lets you execute it with default permissions or with allow-all; the mode returns to Default afterwards. |
 
 Transient proxy errors (429, 5xx, dropped connections) are retried up to three times with backoff before a reply
-is marked failed, and a failed reply has a Retry button. When the model issues several read-only tool calls at once
-they run in parallel; anything that writes, asks, or needs a permission prompt runs one at a time, in order.
+is marked failed, and a failed reply has a Retry button; an error the proxy sends mid-stream is shown as an error, not
+as an empty reply. A reply cut off at the output limit gets a Continue button. Stop cancels the request and any running
+tool (JavaScript and Python workers are terminated, HTTP and bridge requests aborted). When the model issues several
+read-only tool calls at once they run in parallel; anything that writes, asks, or needs a permission prompt runs one at
+a time, in order. Keep one harness tab open per browser profile: a second tab gets a warning, because settings and
+usage totals are shared.
 
 The model also receives a short usage guide for each enabled plugin (issue-key formats, which call comes before
 which, how to handle errors), and a loop guard blocks a tool call repeated with identical arguments and outcome

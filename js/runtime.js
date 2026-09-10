@@ -10,7 +10,9 @@ H.runtime = (() => {
           for (const n of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'Worker', 'SharedWorker', 'WebTransport', 'RTCPeerConnection']) kill(self, n);
           if (self.navigator) kill(self.navigator, 'sendBeacon');
         })();`;
-  function runJS(code, { timeout = 15000, input, network = true } = {}) {
+  const ABORTED = { error: 'Cancelled by the user (Stop).', logs: [] };
+  function runJS(code, { timeout = 15000, input, network = true, signal } = {}) {
+    if (signal?.aborted) return Promise.resolve({ ...ABORTED });
     return new Promise((resolve) => {
       const src = `${network ? '' : NO_NETWORK}
         const __logs = [];
@@ -29,7 +31,9 @@ H.runtime = (() => {
       const blob = new Blob([src], { type: 'application/javascript' });
       const url = URL.createObjectURL(blob);
       let w; try { w = new Worker(url); } catch (e) { URL.revokeObjectURL(url); return resolve({ error: 'Could not start a Web Worker: ' + e.message, logs: [] }); }
-      const finish = (v) => { clearTimeout(timer); w.terminate(); URL.revokeObjectURL(url); resolve(v); };
+      const onAbort = () => finish({ ...ABORTED });
+      const finish = (v) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); w.terminate(); URL.revokeObjectURL(url); resolve(v); };
+      signal?.addEventListener('abort', onAbort, { once: true });
       const timer = setTimeout(() => finish({ error: `Timed out after ${timeout} ms. The code ran too long (infinite loop or slow network?); increase timeoutMs or simplify.`, logs: [] }), timeout);
       w.onmessage = (e) => finish(e.data);
       w.onerror = (e) => finish({ error: (e.message || 'Worker error') + ' (syntax error in the code? check the line reported)', logs: [] });
@@ -95,7 +99,8 @@ H.runtime = (() => {
     pyWorker = null; pyReady = false;
     for (const [id, p] of pyPending) { clearTimeout(p.timer); pyPending.delete(id); p.resolve({ error: reason, stdout: '', stderr: '' }); }
   }
-  function runPython(code, { packages = [], files = {}, timeout = 60000, onStatus } = {}) {
+  function runPython(code, { packages = [], files = {}, timeout = 60000, onStatus, signal } = {}) {
+    if (signal?.aborted) return Promise.resolve({ error: 'Cancelled by the user (Stop).', stdout: '', stderr: '' });
     if (!H.settings.get('allowPyodideCdn')) return Promise.resolve({ error: 'Python is disabled: downloading the Pyodide runtime is turned off in Settings > Security & privacy. Ask the user to enable it, or use run_javascript instead.', stdout: '', stderr: '' });
     if (!pyWorker) pyStart();
     const id = ++pyId;
@@ -104,7 +109,9 @@ H.runtime = (() => {
     const budget = timeout + (pyReady ? 0 : 120000);
     return new Promise((resolve) => {
       const timer = setTimeout(() => pyKill(`Python timed out after ${Math.round(timeout / 1000)} s and was terminated (infinite loop or very slow code?). The runtime will reload on the next run. Increase timeoutMs or simplify the code.`), budget);
-      pyPending.set(id, { resolve, timer, onStatus });
+      const onAbort = () => { if (pyPending.has(id)) pyKill('Cancelled by the user (Stop). The Python runtime was terminated and will reload on the next run.'); };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      pyPending.set(id, { resolve: (v) => { signal?.removeEventListener('abort', onAbort); resolve(v); }, timer, onStatus });
       try { pyWorker.postMessage({ type: 'run', id, code, packages, files, url, indexURL }); }
       catch (e) { clearTimeout(timer); pyPending.delete(id); resolve({ error: 'Could not start Python: ' + e.message, stdout: '', stderr: '' }); }
     });

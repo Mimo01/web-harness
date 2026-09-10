@@ -233,6 +233,7 @@ H.ui = (() => {
     const es = node.querySelector('.err-slot'); es.innerHTML = '';
     if (m.meta?.error) es.append(el('div', { class: 'error-box row gap wrap' }, [el('span', { style: 'flex:1' }, ['Error: ' + m.meta.error]), el('button', { class: 'btn sm', onclick: () => H.agent.regenerate() }, [H.icon('refresh'), 'Retry'])]));
     if (m.meta?.aborted) es.append(el('div', { class: 'muted small' }, ['(stopped)']));
+    if (m.meta?.truncated && !m.meta.streaming) es.append(el('div', { class: 'row gap wrap truncated-box' }, [el('span', { class: 'muted small', style: 'flex:1' }, ['The reply was cut off at the output limit.']), el('button', { class: 'btn sm primary', onclick: () => H.agent.continueRun() }, ['Continue'])]));
     const turn = turnOf.get(node); if (turn) updateTurnStats(turn);
     const ps = node.querySelector('.plan-slot'); ps.innerHTML = '';
     if (m.meta?.plan && !m.meta.streaming) {
@@ -247,7 +248,7 @@ H.ui = (() => {
   }
   function questionCard(m) {
     const q = m.meta.question; const chatId = H.agent.current()?.id;
-    if (q.answered !== undefined) return el('div', { class: 'ask-card answered' }, [el('div', { class: 'ask-q' }, [H.icon('bolt'), q.text]), el('div', { class: 'ask-a' }, [q.answered?.cancelled ? 'No answer (skipped)' : 'Answer: ' + (q.answered?.answer ?? '')])]);
+    if (q.answered !== undefined) return el('div', { class: 'ask-card answered' }, [el('div', { class: 'ask-q' }, [H.icon('bolt'), q.text]), el('div', { class: 'ask-a' }, [q.answered?.cancelled ? 'No answer (skipped)' : 'Answer: ' + (q.answered?.answer ?? '') + (q.answered?.files?.length ? ` · attached: ${q.answered.files.join(', ')}` : '')])]);
     const input = el('textarea', { rows: 2, placeholder: 'Type your answer here or in the message box below…' });
     const send = () => { if (input.value.trim()) H.agent.answerQuestion(chatId, input.value.trim()); };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });

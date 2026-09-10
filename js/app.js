@@ -11,6 +11,13 @@
   if (H.settings.apiKey()) { H.ui.refreshModels().catch(() => { }); H.usage.refreshModelInfo(); } else { H.ui.setStatus('', 'not configured'); H.ui.openSettings('connection'); }
   H.plugins.connectEnabledMcp();
   H.update.start();
+  // one harness tab per browser profile: two tabs would overwrite each other's settings and usage totals
+  try {
+    const bc = new BroadcastChannel('llm-harness'); const me = H.uid(); let warned = false;
+    const warn = () => { if (warned) return; warned = true; H.toast('The harness is open in another tab. Settings, permissions and usage totals are per browser profile, so two tabs overwrite each other; keep one tab open.', 'warn', 12000); };
+    bc.onmessage = (e) => { const m = e.data || {}; if (m.from === me) return; if (m.type === 'hello') { bc.postMessage({ type: 'here', from: me }); warn(); } else if (m.type === 'here') warn(); };
+    bc.postMessage({ type: 'hello', from: me });
+  } catch { }
   if (!H.fs.supported()) H.toast('This browser lacks the File System Access API; file tools use an in-memory workspace. Use Chrome/Edge for real folders.', 'warn', 8000);
   window.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); H.agent.reset(); H.$('#input').focus(); }

@@ -57,11 +57,14 @@ H.llm = (() => {
     // SSE parsing
     const reader = r.body.getReader();
     const dec = new TextDecoder();
-    let buf = '', content = '', reasoning = '', usage = null, finish = null;
+    let buf = '', raw = '', sawData = false, content = '', reasoning = '', usage = null, finish = null;
     const toolCalls = [];
+    const errorOf = (j) => { const e = j?.error; if (!e) return null; return typeof e === 'string' ? e : (e.message || e.error?.message || JSON.stringify(e)); };
     const handle = (data) => {
       if (data === '[DONE]') return;
       const j = H.tryJSON(data, null); if (!j) return;
+      sawData = true;
+      const err = errorOf(j); if (err) throw new Error('LiteLLM error: ' + H.clamp(err, 600));   // an error chunk mid-stream must not end the turn as an empty reply
       if (j.usage) usage = j.usage;
       const ch = j.choices?.[0]; if (!ch) return;
       if (ch.finish_reason) finish = ch.finish_reason;
@@ -86,7 +89,7 @@ H.llm = (() => {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      buf += dec.decode(value, { stream: true });
+      const chunk = dec.decode(value, { stream: true }); buf += chunk; if (raw.length < 200000) raw += chunk;
       let idx;
       while ((idx = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
@@ -94,6 +97,14 @@ H.llm = (() => {
       }
     }
     if (buf.trim().startsWith('data:')) handle(buf.trim().slice(5).trim());
+    if (!sawData && raw.trim()) {   // no SSE frames at all: the proxy answered with a plain JSON completion (or a JSON error)
+      const j = H.tryJSON(raw.trim(), null);
+      if (!j) throw new Error('Unexpected response from LiteLLM (not SSE, not JSON): ' + H.clamp(raw.trim(), 300));
+      const err = errorOf(j); if (err) throw new Error('LiteLLM error: ' + H.clamp(err, 600));
+      const m = j.choices?.[0]?.message || {};
+      if (m.content) onDelta && onDelta({ content: m.content });
+      return { content: m.content || '', reasoning: m.reasoning_content || '', tool_calls: m.tool_calls || [], usage: j.usage, finish_reason: j.choices?.[0]?.finish_reason };
+    }
     return { content, reasoning, tool_calls: toolCalls.filter(Boolean), usage, finish_reason: finish };
   }
 

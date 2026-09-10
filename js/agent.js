@@ -5,16 +5,26 @@ H.agent = (() => {
   const runs = new Map();    // chatId -> { abort }   (a chat keeps running in the background when you switch away)
   const deleted = new Set(); // chat ids removed by the user: never write them back
   const questions = new Map(); // chatId -> { question, choices, toolMsg, resolve }   (ask_user waits for an answer from the chat UI)
-  function askUser(chatId, toolMsg, question, choices, signal) {
+  function askUser(chatId, toolMsg, question, choices, signal, images) {
     return new Promise((resolve) => {
-      const q = { question, choices: choices || [], toolMsg, resolve: (answer) => { questions.delete(chatId); toolMsg.meta.question.answered = answer; H.bus.emit('question', chatId, null); H.bus.emit('message-updated', toolMsg, chatId); resolve(answer); } };
+      const q = { question, choices: choices || [], toolMsg, images, resolve: (answer) => { questions.delete(chatId); toolMsg.meta.question.answered = answer; H.bus.emit('question', chatId, null); H.bus.emit('message-updated', toolMsg, chatId); resolve(answer); } };
       toolMsg.meta.question = { text: question, choices: choices || [], answered: undefined };
       questions.set(chatId, q);
       H.bus.emit('question', chatId, q); H.bus.emit('message-updated', toolMsg, chatId);
       signal?.addEventListener('abort', () => { if (questions.get(chatId) === q) q.resolve({ answer: null, cancelled: true, note: 'The run was stopped before the user answered.' }); }, { once: true });
     });
   }
-  function answerQuestion(chatId, text) { const q = questions.get(chatId); if (!q) return false; q.resolve({ answer: text }); return true; }
+  /* The answer carries the user's attachments too: text files inline in the tool result, images through the run's
+     image queue (delivered to the model as vision content after the tool call, like view_image). */
+  function answerQuestion(chatId, text, attachments = []) {
+    const q = questions.get(chatId); if (!q) return false;
+    const texts = attachments.filter(a => a.kind === 'text'), imgs = attachments.filter(a => a.kind === 'image');
+    const out = { answer: text };
+    if (texts.length) out.attachments = texts.map(a => ({ name: a.name, content: (a.content || '').trim() ? a.content : '(no text could be extracted)', note: a.note }));
+    if (imgs.length) { if (q.images) { q.images.push(...imgs.map(a => ({ name: a.name, content: a.content }))); out.images = imgs.map(a => a.name).join(', ') + ' (shown to you in the next message)'; } else out.images = 'The user attached images, but they cannot be delivered here.'; }
+    if (attachments.length) out.files = attachments.map(a => a.name);
+    q.resolve(out); return true;
+  }
   const pendingQuestion = (chatId) => questions.get(chatId || chat?.id) || null;
   const live = new Map();    // chatId -> chat object currently in memory (so switching back shows live updates)
 
@@ -109,7 +119,7 @@ When you have enough information, write a concrete, numbered implementation plan
   }
 
   const chatIdOf = (messages) => { for (const c of live.values()) if (c.messages === messages) return c.id; return chat?.id; };
-  async function loop(messages, { onEvent, signal, maxIterations, onUsage, mode }) {
+  async function loop(messages, { onEvent, signal, maxIterations, onUsage, mode, subagent = false }) {
     const tools = H.tools.openaiSpecs();
     const model = H.settings.get('model');
     let finalText = '';
@@ -144,6 +154,8 @@ When you have enough information, write a concrete, numbered implementation plan
       assistant.meta.streaming = false;
       if (res.usage) { assistant.meta.usage = res.usage; assistant.meta.cost = H.usage.costOfUsage(model, res.usage); onUsage?.(res.usage, assistant.meta.cost); }
       if (!assistant.tool_calls.length && mode === 'plan' && assistant.content) assistant.meta.plan = true;
+      if (!assistant.tool_calls.length && res.finish_reason === 'length') assistant.meta.truncated = true;   // the UI offers "Continue"
+
       onEvent?.('assistant-end', assistant);
       finalText = assistant.content;
       if (!assistant.tool_calls.length) break;
@@ -157,7 +169,7 @@ When you have enough information, write a concrete, numbered implementation plan
       });
       const execOne = async ({ tc, toolMsg, sig }) => {
         if (signal?.aborted) { toolMsg.meta.running = false; toolMsg.content = JSON.stringify({ error: 'Cancelled by the user.' }); onEvent?.('tool-end', toolMsg); return; }
-        const ctx = { signal, finishReason: res.finish_reason, images, chatId: chatIdOf(messages), toolMsg, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
+        const ctx = { signal, finishReason: res.finish_reason, images, chatId: chatIdOf(messages), toolMsg, subagent, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
         const prev = seen.get(sig);
         let out;
         if (prev && prev.count >= 3) {
@@ -184,7 +196,7 @@ When you have enough information, write a concrete, numbered implementation plan
       if (stalled) {
         messages.push({ role: 'user', content: '[system] Repeated identical tool calls were blocked by the loop guard. Summarize what you found, explain what is blocking you, and ask the user how to proceed. Do not call tools in this reply.', ts: Date.now(), meta: { system: true } });
         onEvent?.('user-added', messages.at(-1));
-        return await loop(messages, { onEvent, signal, maxIterations: 1, onUsage, mode });
+        return await loop(messages, { onEvent, signal, maxIterations: 1, onUsage, mode, subagent });
       }
       if (images.length) {   // images requested by tools are delivered as a user message with vision content
         const um = { role: 'user', content: `[Images requested via view_image: ${images.map(i => i.name).join(', ')}]`, display: `🖼 ${images.map(i => i.name).join(', ')} shown to the model`, ts: Date.now(), meta: { system: true }, apiContent: [{ type: 'text', text: `Here are the images you asked for: ${images.map(i => i.name).join(', ')}` }, ...images.map(i => ({ type: 'image_url', image_url: { url: i.content } }))] };
@@ -242,7 +254,7 @@ When you have enough information, write a concrete, numbered implementation plan
   /* ---------- public: main chat ---------- */
   async function send(text, attachments = [], opts = {}) {
     if (!chat) chat = newChat();
-    if (questions.has(chat.id)) { answerQuestion(chat.id, text); return; }   // the model is waiting for this
+    if (questions.has(chat.id)) { answerQuestion(chat.id, text, attachments); return; }   // the model is waiting for this
     if (runs.has(chat.id)) return;
     const slash = H.skills.expandSlash(text);
     const userMsg = { role: 'user', content: slash ? slash.content : text, display: slash ? slash.display : (opts.display || undefined), ts: Date.now(), attachments: attachments.map(a => ({ name: a.name, size: a.size, kind: a.kind, chars: a.kind === 'text' ? (a.content || '').length : undefined, empty: a.kind === 'text' && !(a.content || '').trim(), note: a.note })), meta: opts.meta };
@@ -280,6 +292,13 @@ When you have enough information, write a concrete, numbered implementation plan
       if (chat !== c) H.toast(`Chat "${c.title}" finished in the background.`, 'success', 5000);
       if (H.settings.get('autoTitle') && c.title === 'New chat' && c.messages.length >= 2) autoTitle(c);
     }
+  }
+
+  /* Continue a reply that hit the output limit (finish_reason "length") */
+  async function continueRun() {
+    if (!chat || runs.has(chat.id)) return;
+    const last = chat.messages.at(-1); if (last?.meta?.truncated) last.meta.truncated = false;
+    await send('Continue exactly where you left off. Do not repeat what you already wrote; pick up mid-sentence or mid-code-block if needed.', [], { display: '▶ Continue', meta: { system: true } });
   }
 
   /* Execute a plan produced in plan mode: switch to the chosen permission mode for this run */
@@ -347,9 +366,9 @@ When you have enough information, write a concrete, numbered implementation plan
   async function runOnce({ task, maxIterations = 15, onStatus, signal }) {
     const msgs = [{ role: 'user', content: task }];
     let steps = 0;
-    const text = await loop(msgs, { signal, maxIterations, mode: H.perms.effectiveMode() === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
+    const text = await loop(msgs, { signal, maxIterations, subagent: true, mode: H.perms.effectiveMode() === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
     return text || '(sub-agent produced no final text)';
   }
 
-  return { send, stop, run, regenerate, load, reset, remove, rename, deleteMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runningIds, systemPrompt };
+  return { send, stop, run, regenerate, continueRun, load, reset, remove, rename, deleteMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runningIds, systemPrompt };
 })();
