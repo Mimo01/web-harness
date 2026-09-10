@@ -1,6 +1,6 @@
 {
-  "version": "1.14.4",
+  "version": "1.14.5",
   "date": "2026-09-10",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "fix blank render_html preview when the harness is opened from a file: Chrome reports location.origin as 'file://' there, which was passed as a postMessage target and dropped; the preview host and the panel now use a target only for http(s) origins"
+  "notes": "preview panel: Download button saves the rendered HTML as a file (the model's original HTML, without the injected preview policy)"
 }

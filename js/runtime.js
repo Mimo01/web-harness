@@ -135,7 +135,7 @@ H.runtime = (() => {
     return meta + src;
   }
   function previewHTML(html, { title = 'Preview' } = {}) {
-    H.bus.emit('preview', { title, html: hardenHTML(html) });   // sandboxed srcdoc iframe (unique origin) with an injected CSP; never a same-origin blob URL
+    H.bus.emit('preview', { title, html: hardenHTML(html), raw: String(html || '') });   // raw: what the model wrote, for Download   // sandboxed srcdoc iframe (unique origin) with an injected CSP; never a same-origin blob URL
     return 'preview';
   }
 

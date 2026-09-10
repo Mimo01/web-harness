@@ -932,9 +932,9 @@ H.ui = (() => {
     });
     previewReady.set(win, pr); return pr;
   }
-  async function showPreview({ url, title, html }) {
+  async function showPreview({ url, title, html, raw }) {
     const p = $('#preview'); p.classList.remove('hidden');
-    p.querySelector('.ptitle').textContent = title; p.dataset.html = html;
+    p.querySelector('.ptitle').textContent = title; p.dataset.html = html; p.dataset.raw = raw ?? html;
     const fr = p.querySelector('iframe');
     if (!fr.getAttribute('src')) { fr.src = previewURL(); }
     await waitPreview(fr.contentWindow);
@@ -1027,6 +1027,11 @@ H.ui = (() => {
     $('#bug-btn').onclick = bugReport;
     $('#chat-title').onclick = () => { const c = H.agent.current(); if (!c) return; const t = prompt('Chat title', c.title); if (t && t.trim()) { H.agent.rename(t.trim()).then(() => { updateTitle(); renderChatList(); }); } };
     $('#preview-close').onclick = () => $('#preview').classList.add('hidden');
+    $('#preview-download').onclick = () => {   // the HTML as the model wrote it (without the injected preview policy)
+      const p = $('#preview'); const html = p.dataset.raw || p.dataset.html || ''; if (!html) return H.toast('Nothing to download yet.', 'info');
+      const name = ((p.querySelector('.ptitle').textContent || 'preview').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'preview') + '.html';
+      H.download(name, html, 'text/html'); H.toast(`Saved ${name}`, 'success');
+    };
     $('#preview-open').onclick = async () => {   // never open model HTML on this origin: preview.html hosts it in a sandboxed frame with a strict CSP
       const html = $('#preview').dataset.html || ''; const title = $('#preview .ptitle').textContent || 'Preview';
       const w = window.open(previewURL(), '_blank'); if (!w) return H.toast('Popup blocked by the browser.', 'warn');
