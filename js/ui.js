@@ -368,10 +368,8 @@ H.ui = (() => {
 
   /* ---------------- context / cost meter ---------------- */
   function updateContextMeter() {
-    const chat = H.agent.current(); const model = H.settings.get('model');
-    const est = H.usage.contextEstimate(chat);
-    const p = H.usage.priceFor(model); const ctx = p.context || 128000;
-    const pct = Math.min(100, Math.round(est / ctx * 100));
+    const chat = H.agent.current();
+    const b = H.usage.contextBreakdown(chat); const pct = b.pct;
     const bar = $('#ctx-meter'); const circ = 2 * Math.PI * 15.5;
     bar.querySelector('.fg').style.strokeDasharray = `${circ * pct / 100} ${circ}`;
     bar.classList.toggle('warn', pct >= 70); bar.classList.toggle('danger', pct >= 90);
@@ -380,7 +378,94 @@ H.ui = (() => {
     const cc = H.usage.chatCost(chat);
     const costTxt = H.settings.get('showCost') ? ' · ' + (cc.known ? H.usage.fmtCost(cc.cost) : 'set pricing') : '';
     $('#usage').textContent = `${H.usage.fmtTok((u.prompt || 0) + (u.completion || 0))} tok${costTxt}`;
-    bar.title = `Context window: ~${est.toLocaleString()} of ${ctx.toLocaleString()} tokens used (${pct}%)${pct >= 70 ? '\nThe older part will be compacted automatically before the next message (type /compact to do it now).' : ''}\nChat total: ${(u.prompt || 0).toLocaleString()} in / ${(u.completion || 0).toLocaleString()} out` + (cc.known ? `\nCost: ${H.usage.fmtCost(cc.cost)}${cc.partial ? ' (some messages have no pricing)' : ''}` : '\nCost unknown: set pricing in Settings > Usage & costs');
+    ctxPop?.repaint();
+  }
+
+  /* ---------------- context popup ----------------
+     What the ring means, in one small panel: how the window is filled (what is always sent vs. the
+     conversation vs. what is left), what the chat has cost so far, and the two things worth doing about
+     it — compact now, or open the full usage page. Same floating-panel mechanics as picker(): a fixed
+     .menu.float on <body>, placed against its trigger and registered in openMenus, so one outside click
+     or Escape closes it and no two floating things are open at once. */
+  let ctxPop = null;
+  function openCtxPopup(trigger) {
+    closeMenus();
+    const body = el('div', { class: 'ctx-body' });
+    const box = el('div', { class: 'ctx-pop', role: 'dialog', tabindex: '-1', 'aria-label': 'Context and cost for this chat', onclick: (e) => e.stopPropagation() }, [body]);
+    const place = () => {
+      const r = trigger.getBoundingClientRect();
+      if (window.matchMedia('(max-width: 560px)').matches) { box.style.left = '8px'; box.style.right = '8px'; box.style.width = 'auto'; }
+      else { box.style.right = 'auto'; box.style.width = ''; box.style.left = Math.round(Math.min(Math.max(8, r.right - box.offsetWidth), Math.max(8, window.innerWidth - box.offsetWidth - 8))) + 'px'; }
+      const h = box.offsetHeight;
+      const up = r.top > h + 8 || r.bottom + h + 8 > window.innerHeight;   // the composer sits at the bottom: hang it above
+      box.style.top = Math.round(Math.min(Math.max(8, up ? r.top - 8 - h : r.bottom + 8), Math.max(8, window.innerHeight - h - 8))) + 'px';
+    };
+    const close = () => {
+      if (!ctxPop) return;
+      box.remove(); ctxPop = null;
+      trigger.setAttribute('aria-expanded', 'false');
+      removeEventListener('scroll', place, true); removeEventListener('resize', place);
+      openMenus.delete(handle);
+    };
+    const repaint = () => { const h = box.offsetHeight; paintCtxPopup(body, close); if (box.offsetHeight !== h) place(); };
+    const handle = { close };
+    ctxPop = { close, repaint, trigger };
+    paintCtxPopup(body, close);
+    box.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); trigger.focus(); } });
+    document.body.append(box); place(); box.focus();
+    addEventListener('scroll', place, true); addEventListener('resize', place);
+    trigger.setAttribute('aria-expanded', 'true');
+    openMenus.add(handle);
+  }
+  function toggleCtxPopup(trigger) {
+    if (ctxPop) { const same = ctxPop.trigger === trigger; ctxPop.close(); if (same) return; }
+    openCtxPopup(trigger);
+  }
+  function paintCtxPopup(body, close) {
+    const chat = H.agent.current();
+    const b = H.usage.contextBreakdown(chat);
+    const t = H.usage.chatTokens(chat); const cc = H.usage.chatCost(chat);
+    const pct = b.pct; const level = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : '';
+    const sent = t.requests > 0 || (chat?.messages || []).length > 0;
+    const seg = (cls, tok) => el('div', { class: 'ctx-seg ' + cls, style: `width:${Math.max(0, tok / b.ctx * 100)}%` });
+    const legend = (cls, label, tok, sub) => el('div', { class: 'ctx-leg' }, [
+      el('span', { class: 'sw ' + cls }), el('span', { class: 'nm' }, [label]),
+      el('span', { class: 'v' }, [H.usage.fmtTok(tok)]), sub ? el('span', { class: 'sub' }, [sub]) : null,
+    ]);
+    const kv = (k, v, cls) => el('div', { class: 'ctx-kv' }, [el('span', {}, [k]), el('b', { class: cls || null }, [].concat(v))]);
+
+    body.className = 'ctx-body' + (level ? ' ' + level : '');
+    body.innerHTML = '';
+    body.append(
+      el('div', { class: 'ctx-head' }, [el('span', { class: 'mono nm' }, [b.model || 'No model']), el('span', { class: 'muted' }, [`${H.usage.fmtTok(b.ctx)} window`])]),
+      el('div', { class: 'ctx-pct' }, [el('b', {}, [pct + '%']), el('span', {}, ['of the context window in use'])]),
+      el('div', { class: 'ctx-bar' }, [seg('fixed', b.fixed), seg('conv', b.conversation)]),
+      el('div', { class: 'ctx-legs' }, [
+        legend('fixed', 'System prompt + tools', b.fixed),
+        legend('conv', 'Conversation', b.conversation, b.anchored ? null : 'estimated'),
+        legend('free', 'Free', b.free),
+      ]),
+    );
+    if (pct >= 70) body.append(el('p', { class: 'ctx-note' }, [
+      H.settings.get('autoCompact')
+        ? 'The older part will be summarised automatically before your next message, so the chat can keep going.'
+        : 'Auto-compaction is off, so the chat will stop once the window is full. Type /compact to summarise the earlier part yourself.',
+    ]));
+
+    body.append(el('div', { class: 'ctx-kvs' }, [
+      kv('Input', H.usage.fmtTok(t.prompt) + (t.cached ? ` (${H.usage.fmtTok(t.cached)} cached)` : '')),
+      kv('Output', H.usage.fmtTok(t.completion)),
+      kv('Requests', String(t.requests)),
+      H.settings.get('showCost')
+        ? kv('Cost', cc.known ? H.usage.fmtCost(cc.cost) + (cc.partial ? ' +' : '') : el('a', { href: '#', onclick: (e) => { e.preventDefault(); close(); openSettings('usage'); } }, ['set pricing']))
+        : null,
+    ]));
+    if (!sent) body.append(el('p', { class: 'ctx-note muted' }, ['Nothing sent yet — the window holds the system prompt and the tool definitions.']));
+
+    /* the way out of this chat's numbers and into every chat's: a quiet full-width row, not a stray button */
+    body.append(el('button', { class: 'ctx-foot', onclick: () => { close(); openSettings('usage'); } }, [
+      H.icon('chart'), el('span', { class: 'nm' }, ['Usage & costs across all chats']), H.icon('chev', 'ico go'),
+    ]));
   }
 
   /* ---------------- sidebar ---------------- */
@@ -1306,14 +1391,9 @@ H.ui = (() => {
   function usagePanel() {
     const wrap = el('div', {});
     const stat = (label, value, sub) => el('div', { class: 'stat' }, [el('div', { class: 'stat-v' }, [value]), el('div', { class: 'stat-l' }, [label]), sub ? el('div', { class: 'stat-s' }, [sub]) : null]);
-    const chat = H.agent.current(); const u = chat?.usage || { prompt: 0, completion: 0, requests: 0 };
+    /* the chat you are in is covered by the popup on the ring under the message box; this page is the
+       cross-chat view, so it starts at the all-time figures */
     const model = H.settings.get('model'); const p = H.usage.priceFor(model);
-    const est = H.usage.contextEstimate(chat); const cc = H.usage.chatCost(chat);
-    wrap.append(sec('Current chat', null, [el('div', { class: 'stats' }, [
-      stat('Context in use', `${H.usage.fmtTok(est)}`, `of ${H.usage.fmtTok(p.context)} (${Math.round(est / p.context * 100)}%)`),
-      stat('Input tokens', H.usage.fmtTok(u.prompt || 0)), stat('Output tokens', H.usage.fmtTok(u.completion || 0)),
-      stat('Cost', cc.known ? H.usage.fmtCost(cc.cost) : 'set pricing', `${u.requests || 0} requests${cc.partial ? ' · partly unpriced' : ''}`),
-    ])]));
     const totalBox = el('div', {}, [el('p', { class: 'muted small' }, ['Loading…'])]);
     wrap.append(sec('All time (this browser)', 'Aggregated over every request made from this device, including deleted chats.', [totalBox]));
     (async () => {
@@ -1606,7 +1686,12 @@ H.ui = (() => {
     $('#attach-btn').onclick = () => { const i = el('input', { type: 'file', multiple: true }); i.onchange = () => addFiles([...i.files]); i.click(); };
     $('#new-chat').onclick = () => H.agent.reset();
     $('#settings-btn').onclick = () => openSettings('general');
-    $('#usage').onclick = () => openSettings('usage'); $('#ctx-meter').onclick = () => openSettings('usage');
+    for (const sel of ['#ctx-meter', '#usage']) {
+      const t = $(sel);
+      t.setAttribute('aria-haspopup', 'dialog'); t.setAttribute('aria-expanded', 'false');
+      t.onclick = (e) => { e.stopPropagation(); toggleCtxPopup(t); };
+      t.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCtxPopup(t); } });
+    }
     $('#sidebar-bug-btn').onclick = bugReport;
     const narrow = () => window.matchMedia('(max-width: 900px)').matches;
     const openDrawer = (on) => { $('#sidebar').classList.toggle('open', on); $('#backdrop').classList.toggle('hidden', !on); };

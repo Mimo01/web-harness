@@ -1,6 +1,6 @@
 {
-  "version": "1.19.0",
+  "version": "1.20.0",
   "date": "2026-09-11",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "settings, reorganised: ten sections that each do one job — General (proxy + appearance), Model, Permissions (per-tool overrides merged in from Tools), Workspace (.gitignore, AGENTS.md and file history, out of Security), Web access (who the app talks to, search, fetching, updates), Privacy & data (Security and Data merged); every control now has the shape of the thing it holds — switches that say what the current value means, sliders for temperature and compaction (0.7 now reads \"70% of the window\"), steppers with units, a revealable API key, a table for model prices instead of raw JSON — and the knobs nobody touches sit behind Advanced; old deep links to the previous section names still work"
+  "notes": "the ring under the message box opens a panel about the chat you are in: how the context window is filled (system prompt and tool definitions, the conversation, what is left), tokens in and out with the cached share, requests and cost, a line about compaction once the window is 70% full, and a way through to the full usage page — which drops its \"Current chat\" section, since it is the cross-chat view"
 }

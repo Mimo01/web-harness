@@ -61,21 +61,46 @@ H.usage = (() => {
   /* estimate the current context size of a chat (tokens that would be sent on the next request) */
   let specsMemo = { list: null, tokens: 0 };
   function specsEstimate() { const specs = H.tools.openaiSpecs(); const key = specs.map(s => s.function.name).join(','); if (specsMemo.list !== key) specsMemo = { list: key, tokens: H.estTokens(JSON.stringify(specs)) }; return specsMemo.tokens; }
-  function contextEstimate(chat) {
-    if (!chat) return 0;
-    const msgs = chat.messages;
+  const msgTokens = (m) => H.estTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + (m.tool_calls ? H.estTokens(JSON.stringify(m.tool_calls)) : 0) + 4;
+  const contextEstimate = (chat) => contextBreakdown(chat).total;
+  /* the same estimate, split into the parts the popup shows: what is always sent (system prompt + tool
+     schemas) and what the conversation itself costs. `anchored` says whether a real prompt_tokens figure
+     from the last reply backs the number, or whether the whole thing is an estimate. */
+  function contextBreakdown(chat) {
+    const model = H.settings.get('model');
+    const ctx = priceFor(model).context || 128000;
+    const fixed = H.estTokens(H.agent.systemPrompt()) + specsEstimate();
+    const msgs = chat?.messages || [];
+    let total = 0, anchored = false;
     let lastPromptIdx = -1, lastPrompt = 0;
     msgs.forEach((m, i) => { if (m.role === 'assistant' && !m.meta?.compacted && m.meta?.usage?.prompt_tokens) { lastPromptIdx = i; lastPrompt = m.meta.usage.prompt_tokens + (m.meta.usage.completion_tokens || 0); } });
     const summaryAfter = msgs.some((m, i) => m.meta?.summary && i > lastPromptIdx);
     if (lastPromptIdx >= 0 && !summaryAfter) {
-      let est = lastPrompt;
-      for (let i = lastPromptIdx + 1; i < msgs.length; i++) { const m = msgs[i]; if (m.meta?.compacted) continue; est += H.estTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + (m.tool_calls ? H.estTokens(JSON.stringify(m.tool_calls)) : 0) + 4; }
-      return est;
+      anchored = true;
+      total = lastPrompt;
+      for (let i = lastPromptIdx + 1; i < msgs.length; i++) { const m = msgs[i]; if (m.meta?.compacted) continue; total += msgTokens(m); }
+    } else {
+      // no usage figure to anchor on (fresh chat or just compacted): estimate what would be sent now
+      total = fixed;
+      for (const m of H.agent.apiMessages(msgs)) total += msgTokens(m);
     }
-    // no usage figure to anchor on (fresh chat or just compacted): estimate what would be sent now
-    let est = H.estTokens(H.agent.systemPrompt()) + specsEstimate();
-    for (const m of H.agent.apiMessages(msgs)) est += H.estTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + (m.tool_calls ? H.estTokens(JSON.stringify(m.tool_calls)) : 0) + 4;
-    return est;
+    const shown = Math.min(total, ctx);
+    const fixedPart = Math.min(fixed, shown);
+    return {
+      model, ctx, total, anchored,
+      pct: Math.min(100, Math.round(total / ctx * 100)),
+      fixed: fixedPart,
+      conversation: Math.max(0, shown - fixedPart),
+      free: Math.max(0, ctx - total),
+    };
+  }
+
+  /* per-chat token totals; cached tokens are summed from the messages because chat.usage does not track them */
+  function chatTokens(chat) {
+    const u = chat?.usage || {};
+    let cached = 0;
+    for (const m of chat?.messages || []) cached += cachedOf(m.meta?.usage);
+    return { prompt: u.prompt || 0, completion: u.completion || 0, cached, requests: u.requests || 0 };
   }
 
   /* fetch LiteLLM /model/info for context windows + prices (best effort) */
@@ -108,5 +133,5 @@ H.usage = (() => {
     return out;
   }
 
-  return { priceFor, cost, costOfUsage, cachedOf, chatCost, fmtCost, fmtTok, record, contextEstimate, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
+  return { priceFor, cost, costOfUsage, cachedOf, chatCost, chatTokens, fmtCost, fmtTok, record, contextEstimate, contextBreakdown, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
 })();

@@ -372,6 +372,37 @@ body.asking .composer-box { border-color: var(--warn); }
 #ctx-meter.warn .ring .fg { stroke: var(--warn); } #ctx-meter.danger .ring .fg { stroke: var(--danger); }
 #ctx-meter .txt { font-weight: 500; color: var(--fg-2); } #ctx-meter.warn .txt { color: var(--warn); } #ctx-meter.danger .txt { color: var(--danger); }
 #usage { margin-right: 6px; font-size: 11.5px; cursor: pointer; font-variant-numeric: tabular-nums; }
+
+/* the panel behind the ring: what fills the window, what the chat has cost, and the two things to do about it */
+.ctx-pop { position: fixed; z-index: 60; width: 328px; max-width: calc(100vw - 16px); background: var(--raised); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); animation: pop .12s ease; cursor: default; }
+.ctx-pop:focus-visible { outline: none; }
+.ctx-body { padding: 14px; font-variant-numeric: tabular-nums; --seg: var(--fg); }
+.ctx-body.warn { --seg: var(--warn); } .ctx-body.danger { --seg: var(--danger); }
+.ctx-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 12px; }
+.ctx-head .nm { overflow: hidden; color: var(--fg-2); text-overflow: ellipsis; white-space: nowrap; }
+.ctx-pct { display: flex; align-items: baseline; gap: 7px; margin: 8px 0 7px; }
+.ctx-pct b { font-size: 26px; font-weight: 600; letter-spacing: -.02em; line-height: 1; color: var(--seg); }
+.ctx-pct span { font-size: 12px; color: var(--muted); }
+.ctx-bar { display: flex; height: 8px; overflow: hidden; border-radius: 999px; background: var(--surface-3); }
+.ctx-seg { transition: width .4s; } .ctx-seg + .ctx-seg { border-left: 1px solid var(--raised); }
+.ctx-seg.fixed { background: var(--fg-2); opacity: .45; } .ctx-seg.conv { background: var(--seg); }
+.ctx-legs { margin-top: 10px; }
+.ctx-leg { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12.5px; color: var(--fg-2); }
+.ctx-leg .sw { width: 8px; height: 8px; flex-shrink: 0; border-radius: 2px; }
+.ctx-leg .sw.fixed { background: var(--fg-2); opacity: .45; } .ctx-leg .sw.conv { background: var(--seg); }
+.ctx-leg .sw.free { background: var(--surface-3); }
+.ctx-leg .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-leg .v { font-weight: 500; color: var(--fg); } .ctx-leg .sub { font-size: 11px; color: var(--muted); }
+.ctx-note { margin: 10px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.ctx-body.warn .ctx-note, .ctx-body.danger .ctx-note { color: var(--seg); }
+.ctx-kvs { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.ctx-kv { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 12.5px; color: var(--muted); }
+.ctx-kv b { font-weight: 500; color: var(--fg); }
+/* full width, so it reads as the way out of the panel rather than a button left on its own */
+.ctx-foot { display: flex; align-items: center; gap: 8px; width: calc(100% + 28px); margin: 12px -14px -14px; padding: 10px 14px; border: 0; border-top: 1px solid var(--border); border-radius: 0 0 var(--r-lg) var(--r-lg); background: none; color: var(--fg-2); font-size: 12.5px; text-align: left; cursor: pointer; }
+.ctx-foot:hover { background: var(--surface-2); color: var(--fg); }
+.ctx-foot .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-foot .ico { color: var(--muted); } .ctx-foot .go { width: 14px; height: 14px; transform: rotate(-90deg); }
 #send-btn, #stop-btn { width: 32px; height: 32px; padding: 0; border-radius: 50%; flex-shrink: 0; }
 #send-btn .ico, #stop-btn .ico { width: 16px; height: 16px; margin: 0; stroke-width: 2.2; }
 #stop-btn .ico { fill: currentColor; stroke: none; }
@@ -620,6 +651,7 @@ details.adv[open] > summary { margin-bottom: 4px; } details.adv[open] > summary 
   .pill-strip { grid-area: pills; display: flex; align-items: center; gap: 4px; padding: 0 2px; overflow-x: auto; scrollbar-width: none; }
   .pill-strip::-webkit-scrollbar { display: none; }
   .pill-strip .spacer { flex: 1; } .pill-strip #usage { display: none; }
+  .ctx-pop { width: auto; } .ctx-body { padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); }
   .pill-btn { height: 24px; max-width: 42vw; flex-shrink: 0; padding: 0 6px; font-size: 11.5px; } .pill-btn .ico { width: 12px; height: 12px; } .pill-btn .chev { width: 10px; height: 10px; }
   /* the strip scrolls sideways, so the menus are pinned to the viewport instead of to the pill inside it */
   .pill-strip .menu { position: fixed; left: 8px; right: 8px; bottom: 58px; min-width: 0; max-height: 58vh; overflow-y: auto; }
