@@ -100,9 +100,9 @@ Multiple persisted conversations, streaming responses, markdown + syntax highlig
 | Group | Tools |
 |---|---|
 | Documents & media | chat attachments, `fs_upload_from_user` and `fs_read` convert PDF (pdf.js), .docx / .pptx (JSZip + XML), .xlsx / .xls / .ods / .csv (SheetJS) to text, client-side. Images are downscaled (max 1600 px) and sent as vision input; `view_image` lets the model look at an image in the workspace. Videos: up to 6 sampled frames + transcript; audio: transcript (needs a transcription model set in Settings → Model). HEIC and legacy .doc/.ppt are reported as unsupported. |
-| Files (workspace folder you pick) | `fs_list`, `fs_read` (one file, a line range, or several at once), `fs_write`, `fs_edit`, `fs_append`, `fs_mkdir`, `fs_delete`, `fs_move`, `fs_stat`, `fs_search` (grep with context lines, globs and `.gitignore` rules), `fs_find` (glob), `fs_upload_from_user`, `download_file` |
+| Files (workspace folder you pick) | `fs_list`, `fs_read` (one file, a line range, or several at once), `fs_write`, `fs_edit`, `fs_append`, `fs_mkdir`, `fs_delete`, `fs_move` (refuses to overwrite unless asked), `fs_stat`, `fs_search` (grep with context lines, globs and `.gitignore` rules), `fs_find` (glob), `fs_upload_from_user`, `download_file` |
 | Code intelligence | `project_overview` (languages, structure, manifests, entry points, tests, CI, README, git state — the first call in an unfamiliar project), `code_outline` (a file's classes/functions/imports with line numbers, without reading it), `code_symbol` (definitions and references of a name), `code_deps` (what a file imports, and what imports it), `workspace_snapshot` / `workspace_changes` (diff a folder against a baseline when it is not a repository) |
-| Git (read-only) | `git_status`, `git_diff` (working tree or between refs, with a `downloadAs` patch export), `git_log`, `git_show`, `git_show_file` (a file at any commit), `git_file_history`, `git_branches`, `git_blame` |
+| Git (read-only) | `git_status`, `git_diff` (working tree or between refs; pipe the patch to `download_file` to save it), `git_log`, `git_show`, `git_show_file` (a file at any commit), `git_file_history`, `git_branches`, `git_blame` |
 | Code | `run_javascript` (sandboxed Web Worker), `run_python` (Pyodide, numpy/pandas etc.), `run_file` (.js/.py/.html/.json), `render_html` (preview panel), `calculate` |
 | Web | `web_fetch` (direct, HTML → text), `web_search` (needs a configured provider), `http_request` (call any API), `open_url` |
 | Data | `json_query`, `regex_extract`, `csv_parse`, `text_stats`, `base64`, `hash_text` |
@@ -294,10 +294,12 @@ after an admin allowlists your origin; **Jira Cloud never does**. Step 3 of the 
 | LiteLLM pass-through / CORS proxy | browser → relay → API | someone who administers the relay |
 
 **Extension details.** `extension/manifest.json` (Manifest V3), a service worker that does the fetch, a content script
-that only activates on pages marked as the harness, and an options page with the allowed-sites list. The harness
-detects it automatically and marks plugins "via extension". Requests go with cookies when the plugin uses "My browser
-login session", or with the plugin's token (and without cookies) otherwise. Jira Server/Cloud work with the login
-session; for GitLab use a personal access token (its cookie sessions need a CSRF token the extension cannot read).
+that only activates on pages marked as the harness, and an options page with the allowed-sites list. It installs with
+access to **no** sites: host permissions are optional, and adding a site under "APIs it may call" asks Chrome for that
+one origin (removing it hands the access back). A site listed but not granted shows a *Grant* button. The harness
+detects the extension automatically and marks plugins "via extension". Requests go with cookies when the plugin uses
+"My browser login session", or with the plugin's token (and without cookies) otherwise. Jira Server/Cloud work with the
+login session; for GitLab use a personal access token (its cookie sessions need a CSRF token the extension cannot read).
 If the harness is opened from a file, enable "Allow access to file URLs" in the extension's details.
 
 Alternative for Jira/Confluence/GitHub: the **LiteLLM MCP gateway** plugin. The LiteLLM admin registers MCP servers
@@ -341,7 +343,7 @@ credentials live in the browser and there is no CORS issue.
   at its origin. This is what makes the bridge safe from a `file://` harness, whose origin is `null`. Where Web
   Crypto is missing (plain http harness) the origin-checked plaintext protocol is used. Request ids are
   cryptographic. The connector extension only talks to pages served from harness origins you list in its options,
-  and only calls APIs you list there.
+  and only calls APIs you list there — and it holds no browser access to a site until you add it and Chrome grants it.
 - **Prompt injection.** Tool output is untrusted; the system prompt says so. Every outbound channel either asks or is
   closed: `web_fetch` and `http_request` prompt once per site (origin) in Default and Plan mode, with "allow this site
   for session / always"; a request routed through a connected browser tab (your login session) prompts in every mode,
