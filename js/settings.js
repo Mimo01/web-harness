@@ -83,7 +83,7 @@ H.settings = (() => {
     if (/jina\.ai/.test(cur.searchTemplate || '')) cur.searchTemplate = '';
     cur.jinaFallback = false; cur.settingsVersion = 2; H.store.write(KEY, cur); H.store.write('harness.migrated.v2', '1');
   }
-  if (cur.permissionMode) { cur.chatMode = cur.permissionMode === 'auto' ? 'auto' : 'default'; cur.alwaysAsk = cur.permissionMode === 'strict'; delete cur.permissionMode; }
+  if (cur.permissionMode) { cur.chatMode = cur.permissionMode === 'auto' ? 'auto' : 'default'; cur.alwaysAsk = cur.permissionMode === 'strict'; delete cur.permissionMode; H.store.write(KEY, cur); }
   // another tab of the harness wrote settings: refresh the in-memory copy so this tab does not write stale values back
   window.addEventListener('storage', (e) => { if (e.key === KEY && e.newValue) { const v = H.tryJSON(e.newValue, null); if (v) { cur = Object.assign({}, defaults, v); H.bus.emit('settings', cur); } } });
   return {

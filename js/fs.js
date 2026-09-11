@@ -81,7 +81,7 @@ H.fs = (() => {
     if (parts.includes('..')) throw new Error('Path traversal outside the workspace ("..") is not allowed.');
     return { parts, path: parts.join('/') };
   }
-  const missing = (path, what) => Object.assign(new Error(`${what} "${path}" does not exist. Use fs_list/fs_find to locate it (names are case-sensitive on macOS/Linux)${what === 'File' ? ' or fs_write to create it' : ' (use fs_mkdir or write a file into it to create it)'}.`), { name: 'NotFoundError' });
+  const missing = (path, what) => Object.assign(new Error(`${what} "${path}" does not exist. Use fs_list/fs_find to locate it (names are case-sensitive on macOS/Linux)${what === 'Directory' ? ' (use fs_mkdir or write a file into it to create it)' : ' or fs_write to create it'}.`), { name: 'NotFoundError' });
 
   /* line endings: remember CRLF so edits keep the file's style */
   const eolOf = (t) => (t.match(/\r\n/g) || []).length > (t.match(/(?<!\r)\n/g) || []).length ? '\r\n' : '\n';
@@ -166,7 +166,7 @@ H.fs = (() => {
     const name = parts[parts.length - 1];
     const d = await dirHandle(parts.slice(0, -1));
     try { const f = await (await d.getFileHandle(name)).getFile(); return { name, kind: 'file', size: f.size, modified: f.lastModified, type: f.type }; } catch { }
-    try { await d.getDirectoryHandle(name); } catch { throw missing(rel, 'File'); }
+    try { await d.getDirectoryHandle(name); } catch { throw missing(rel, 'File or directory'); }
     return { name, kind: 'directory' };
   }
   /* skipDir(name, path) decides which directories a recursive walk descends into. H.code passes the

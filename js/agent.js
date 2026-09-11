@@ -27,6 +27,18 @@ H.agent = (() => {
   }
   const pendingQuestion = (chatId) => questions.get(chatId || chat?.id) || null;
   const live = new Map();    // chatId -> chat object currently in memory (so switching back shows live updates)
+  /* A chat has to stay in memory while it is running, waiting for an answer, or waiting to be written — and it is
+     worth keeping a few more so flipping between two chats does not re-read them. Beyond that it is just the
+     whole transcript, images and all, held for the life of the tab. Least recently touched goes first. */
+  const LIVE_KEEP = 6;
+  function pruneLive() {
+    for (const id of [...live.keys()]) {
+      if (live.size <= LIVE_KEEP) break;
+      if (id === chat?.id || runs.has(id) || questions.has(id) || pendingPersist.has(id)) continue;
+      live.delete(id);
+    }
+  }
+  const touchLive = (c) => { live.delete(c.id); live.set(c.id, c); pruneLive(); };   // Map keeps insertion order
 
   /* A new chat starts with no folder: the first thing you do in it is say what it is about, and picking the folder
      is part of that. Inheriting the last one silently aims a fresh conversation at whatever you had open before. */
@@ -324,7 +336,7 @@ When you have enough information, write a concrete, numbered implementation plan
     const ctl = new AbortController();
     const f = H.fs.folder();
     const runFolder = f ? { id: f.id, name: f.name } : null;   // the folder this run belongs to, for the whole run
-    runs.set(c.id, { abort: ctl, folder: runFolder }); live.set(c.id, c);
+    runs.set(c.id, { abort: ctl, folder: runFolder }); touchLive(c);
     const mode = H.perms.effectiveMode(c.id);
     H.bus.emit('run-state', true, c.id);
     try {
@@ -414,13 +426,13 @@ When you have enough information, write a concrete, numbered implementation plan
   async function load(id) {
     if (chat?.id === id) return;
     let c = live.get(id);                       // running (or recently run) chats live in memory: reuse the same object
-    if (!c) { c = await H.db.getChat(id); if (!c || !c.id) { H.bus.emit('chat-updated'); return; } c.usage ||= { prompt: 0, completion: 0, cost: 0, requests: 0 }; settleInterrupted(c); live.set(id, c); }
-    chat = c; H.bus.emit('chat-loaded', chat);
+    if (!c) { c = await H.db.getChat(id); if (!c || !c.id) { H.bus.emit('chat-updated'); return; } c.usage ||= { prompt: 0, completion: 0, cost: 0, requests: 0 }; settleInterrupted(c); }
+    chat = c; touchLive(c); H.bus.emit('chat-loaded', chat);
     /* a chat carries its own folder: opening one from last month must not aim its paths at today's project */
     await H.fs.use(c.folder ?? c.mounts ?? null).catch(e => console.warn('workspace restore', e));
   }
   async function reset() {
-    chat = newChat(); live.set(chat.id, chat); H.perms.clearSession();
+    chat = newChat(); touchLive(chat); H.perms.clearSession();
     await H.fs.use(null);                          // and the folder that was open belongs to the chat you just left
     await H.db.putChat(chat);                      // exists right away: visible in the sidebar, switchable, keeps its draft
     H.bus.emit('chat-loaded', chat); H.bus.emit('chat-updated', chat);

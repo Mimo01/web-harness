@@ -2,8 +2,14 @@
 H.usage = (() => {
   const TOTAL_KEY = 'usage.total';
   let total = null; // { prompt, completion, cost, requests, byModel: { model: {prompt, completion, cost, requests} }, byDay: { 'YYYY-MM-DD': {...} } }
+  let loading = null;   // the in-flight read, so two callers share one record instead of racing to replace it
 
-  async function loadTotal() { if (!total) total = (await H.db.kvGet(TOTAL_KEY)) || { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; return total; }
+  function loadTotal() {
+    if (total) return Promise.resolve(total);
+    return loading ||= H.db.kvGet(TOTAL_KEY)
+      .then(v => (total = v || { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }))
+      .finally(() => { loading = null; });
+  }
 
   /* pricing: manual override > LiteLLM model info */
   /* cached prompt tokens as reported by the API (OpenAI: prompt_tokens_details.cached_tokens; Anthropic via LiteLLM: cache_read_input_tokens) */
@@ -132,5 +138,5 @@ H.usage = (() => {
     return out;
   }
 
-  return { priceFor, cost, costOfUsage, cachedOf, chatCost, chatTokens, fmtCost, fmtTok, record, contextEstimate, contextBreakdown, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
+  return { priceFor, cost, costOfUsage, cachedOf, chatCost, chatTokens, fmtCost, fmtTok, record, contextEstimate, contextBreakdown, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { loading = null; total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
 })();

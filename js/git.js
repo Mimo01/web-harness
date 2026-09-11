@@ -142,6 +142,9 @@ H.git = (() => {
     let packs = null, refsCache = null, indexCache = null, headCache = null;
 
     function resetCaches() { objCache.clear(); treeCache.clear(); mapCache.clear(); packs = null; refsCache = null; indexCache = null; headCache = null; repo = null; }
+    /* Anything that reads the repository calls this first. Reaching the object store through resolve()/commit()
+       without going past detect() (git_show, git_show_file, git_file_history do exactly that) would otherwise
+       answer from refs and an index that files changed on disk have already invalidated. */
     function checkGen() { const g = H.code?.generation?.() ?? 0; if (g !== gen) { gen = g; resetCaches(); } }
 
     const NO_REPO = (extra) => new Error(`This workspace is not a git repository (no .git directory in "${H.fs.name() || 'the workspace'}").${extra || ''} Folders extracted from a zip have no git history — use workspace_changes to see what changed since the folder was opened, or the GitHub/GitLab plugin for a hosted repository.`);
@@ -283,6 +286,7 @@ H.git = (() => {
 
     /** { type, data } for a full 40-char sha */
     async function readObject(sha) {
+      checkGen();
       sha = String(sha).toLowerCase();
       if (!isSha(sha)) throw new Error(`"${sha}" is not a 40-character object id. Resolve a name with git_log/git_branches first.`);
       const hit = objCache.get(sha); if (hit) return hit;
@@ -386,6 +390,7 @@ H.git = (() => {
       return out;
     }
     async function loadRefs() {
+      checkGen();
       if (refsCache) return refsCache;
       const refs = new Map(await packedRefs());
       for (const dir of ['.git/refs']) {
@@ -399,6 +404,7 @@ H.git = (() => {
       return (refsCache = refs);
     }
     async function head() {
+      checkGen();
       if (headCache) return headCache;
       const raw = (await textOf('.git/HEAD')).trim();
       let h;
@@ -471,6 +477,7 @@ H.git = (() => {
 
     /* ============================ index (.git/index) ============================ */
     async function readIndex() {
+      checkGen();
       if (indexCache) return indexCache;
       const map = new Map();
       if (!(await exists('.git/index'))) return (indexCache = map);
@@ -545,7 +552,7 @@ H.git = (() => {
         if (changed) modified.push(path);
         if (idx.has(path) && headMap.has(path) && idx.get(path).sha !== headMap.get(path).sha) staged.push(path);
         else if (idx.has(path) && !headMap.has(path)) staged.push(path);
-        if (modified.length + untracked.length > maxFiles) break;
+        if (modified.length + deleted.length > maxFiles) break;   // untracked is collected after this loop, so it could never bound it
       }
       for (const f of files.files) if (!tracked.has(f.path)) untracked.push(f.path);
       label = { branch: h.branch || (h.sha || '').slice(0, 8), dirty: modified.length + deleted.length, untracked: untracked.length };
@@ -644,24 +651,32 @@ H.git = (() => {
       await requireRepo();
       const startSha = await resolve(ref);
       const sinceMs = since ? Date.parse(since) : null, untilMs = until ? Date.parse(until) : null;
-      const seen = new Set(); const queue = [startSha]; const out = [];
+      const seen = new Set(); const out = [];
       let walked = 0;
       const cap = Math.max(2000, (max + skip) * 40);
       let truncated = false, skipped = 0;
-      while (queue.length && out.length < max) {
+      /* The frontier is kept newest-first so the log reads chronologically. It used to be re-dated and re-sorted
+         in full after every commit — one parse of every queued commit per step, which on a repository with a wide
+         merge history is quadratic. Each commit is now dated once, when it enters, and inserted where it belongs. */
+      const frontier = [];          // [{ sha, t }], newest first
+      const queued = new Set();
+      const insert = async (sha) => {
+        if (seen.has(sha) || queued.has(sha)) return;
+        let t = 0; try { t = Date.parse((await commit(sha)).date || 0) || 0; } catch { }
+        let lo = 0, hi = frontier.length;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (frontier[mid].t > t) lo = mid + 1; else hi = mid; }
+        frontier.splice(lo, 0, { sha, t });
+        queued.add(sha);
+      };
+      await insert(startSha);
+      while (frontier.length && out.length < max) {
         if (walked++ > cap) { truncated = true; break; }
-        const sha = queue.shift();
+        const sha = frontier.shift().sha;
+        queued.delete(sha);
         if (seen.has(sha)) continue;
         seen.add(sha);
         let c; try { c = await commit(sha); } catch { continue; }
-        for (const p of c.parents) if (!seen.has(p)) queue.push(p);
-        // keep the frontier in date order so the log reads chronologically
-        if (queue.length > 1) {
-          const dated = [];
-          for (const q of queue) { try { dated.push([q, Date.parse((await commit(q)).date || 0) || 0]); } catch { dated.push([q, 0]); } }
-          dated.sort((x, y) => y[1] - x[1]);
-          queue.length = 0; queue.push(...dated.map(d => d[0]));
-        }
+        for (const p of c.parents) await insert(p);
         if (sinceMs && Date.parse(c.date) < sinceMs) continue;
         if (untilMs && Date.parse(c.date) > untilMs) continue;
         if (author && !((c.author?.name || '') + ' ' + (c.author?.email || '')).toLowerCase().includes(author.toLowerCase())) continue;
@@ -674,7 +689,7 @@ H.git = (() => {
         if (skipped++ < skip) continue;
         out.push({ sha, short: sha.slice(0, 8), subject: c.subject, author: c.author?.name, email: c.author?.email, date: c.date, parents: c.parents, files: touched ? touched.map(t => t.path) : undefined });
       }
-      return { ref, commits: out, truncated: truncated || queue.length > 0 && out.length === max };
+      return { ref, commits: out, truncated: truncated || (frontier.length > 0 && out.length === max) };
     }
 
     /** best-effort blame: walk the file's history and attribute each line to the commit that introduced it */
@@ -750,8 +765,18 @@ H.git = (() => {
 
   /* H.git.<anything>() reads the repository in the folder this chat has open; one instance per folder, so its
      parsed packfiles and refs survive a trip to another project and back. */
+  /* Each instance holds parsed packfiles and object caches, so it is worth keeping across a trip to another
+     project — but not forever: a profile that has opened twenty repositories would hold twenty sets. Least
+     recently used goes first. */
   const inst = new Map();
-  const of = () => { const id = H.fs.folder()?.id || 'none'; if (!inst.has(id)) inst.set(id, make(id)); return inst.get(id); };
+  const MAX_REPOS = 4;
+  const of = () => {
+    const id = H.fs.folder()?.id || 'none';
+    if (inst.has(id)) { const i = inst.get(id); inst.delete(id); inst.set(id, i); return i; }   // Map keeps insertion order
+    inst.set(id, make(id));
+    while (inst.size > MAX_REPOS) inst.delete(inst.keys().next().value);
+    return inst.get(id);
+  };
   const shared = {
     inflate, isSha,
     resetCaches: () => { for (const i of inst.values()) i.resetCaches(); },

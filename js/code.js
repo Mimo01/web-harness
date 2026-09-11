@@ -479,8 +479,17 @@ H.code = (() => {
 
   /* One instance per folder, created on first use and kept while that folder stays in the registry: coming back to
      a project an hour later finds its index and caches intact. Everything goes through the folder that is open. */
+  /* Kept across folder switches, but not without end: each instance carries a file index and up to 8 MB of file
+     contents, so the least recently used ones are dropped. */
   const inst = new Map();
-  const of = () => { const id = H.fs.folder()?.id || 'none'; if (!inst.has(id)) inst.set(id, make(id)); return inst.get(id); };
+  const MAX_FOLDERS = 4;
+  const of = () => {
+    const id = H.fs.folder()?.id || 'none';
+    if (inst.has(id)) { const i = inst.get(id); inst.delete(id); inst.set(id, i); return i; }   // Map keeps insertion order
+    inst.set(id, make(id));
+    while (inst.size > MAX_FOLDERS) inst.delete(inst.keys().next().value);
+    return inst.get(id);
+  };
 
   /* ============================ system prompt ============================ */
   let contextCache = null, contextFor = null;

@@ -159,13 +159,23 @@ H.tools = (() => {
     name: 'fs_upload_from_user', group: 'Files', risk: 'safe',
     description: 'Ask the user to pick one or more files from their computer (outside the workspace). Returns their text contents; PDF, Word, PowerPoint and spreadsheets are converted to text.',
     parameters: obj({ accept: str('Accept filter, e.g. ".csv,.txt" (optional)') }),
-    run: ({ accept }) => new Promise((res) => {
+    run: ({ accept }, ctx) => new Promise((res) => {
       const inp = H.el('input', { type: 'file', multiple: true, accept: accept || '' });
-      let done = false; const finish = (v) => { if (!done) { done = true; res(v); } };
+      let done = false;
+      const finish = (v) => {
+        if (done) return;
+        done = true;
+        window.removeEventListener('focus', onFocus);
+        ctx?.signal?.removeEventListener('abort', onStop);
+        res(v);
+      };
       inp.onchange = async () => { const out = []; for (const f of inp.files) { const r = await H.extract.fromFile(f, { maxChars: 100000 }); out.push({ name: f.name, size: f.size, kind: r.kind, content: r.kind === 'text' ? r.content : (r.kind === 'image' ? '(image; attach it in the chat to view it)' : ''), note: r.note }); } finish({ files: out }); };
       inp.oncancel = () => finish({ files: [], cancelled: true, note: 'The user cancelled the file dialog.' });
       // browsers without the cancel event: resolve when focus returns and nothing was chosen
-      window.addEventListener('focus', () => setTimeout(() => { if (!inp.files.length) finish({ files: [], cancelled: true, note: 'The user closed the file dialog without choosing a file.' }); }, 800), { once: true });
+      const onFocus = () => setTimeout(() => { if (!inp.files.length) finish({ files: [], cancelled: true, note: 'The user closed the file dialog without choosing a file.' }); }, 800);
+      window.addEventListener('focus', onFocus);
+      const onStop = () => finish({ files: [], cancelled: true, note: 'The run was stopped before the user picked a file.' });
+      ctx?.signal?.addEventListener('abort', onStop, { once: true });
       inp.click();
     }),
   });
@@ -466,7 +476,10 @@ H.tools = (() => {
     }, ['url']),
     run: async ({ url, method = 'GET', headers = {}, body, timeoutMs = 30000 }, ctx) => {
       const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeoutMs);
-      ctx?.signal?.addEventListener('abort', () => ctl.abort(), { once: true });   // Stop cancels the request too
+      /* Stop cancels the request too — but the listener sits on the *run* signal, which outlives this call, so a
+         long run would otherwise collect one per request. */
+      const onStop = () => ctl.abort();
+      ctx?.signal?.addEventListener('abort', onStop, { once: true });
       const init = { method, headers: { ...headers }, signal: ctl.signal };
       if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
         if (typeof body === 'object') { init.body = JSON.stringify(body); init.headers['Content-Type'] ||= 'application/json'; }
@@ -482,7 +495,7 @@ H.tools = (() => {
         const text = await r.text();
         const hdrs = {}; r.headers.forEach((v, k) => hdrs[k] = v);
         return ok({ status: r.status, ok: r.ok, headers: hdrs, body: H.tryJSON(text, H.clamp(text, 30000)) });
-      } finally { clearTimeout(t); }
+      } finally { clearTimeout(t); ctx?.signal?.removeEventListener('abort', onStop); }
     },
   });
   def({
