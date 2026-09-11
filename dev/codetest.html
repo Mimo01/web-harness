@@ -213,8 +213,9 @@ async function run() {
     return 'ok';
   });
   await test('git: changed files match `git diff --name-status HEAD~1 HEAD`', async () => {
+    // keep git's own order (byte order, so "README.md" precedes "css/…"); localeCompare would reorder it
     const want = (await git('diff', '--name-status', 'HEAD~1', 'HEAD')).trim().split('\n').filter(Boolean)
-      .map(l => l.split('\t')).map(([s, p]) => ({ status: s[0] === 'A' ? 'added' : s[0] === 'D' ? 'deleted' : 'modified', path: p })).sort((a, b) => a.path.localeCompare(b.path));
+      .map(l => l.split('\t')).map(([s, p]) => ({ status: s[0] === 'A' ? 'added' : s[0] === 'D' ? 'deleted' : 'modified', path: p }));
     const got = (await H.git.diffRefs({ from: 'HEAD~1', to: 'HEAD', statOnly: true })).files;
     eq(got.length, want.length, 'file count');
     for (let i = 0; i < want.length; i++) { eq(got[i].path, want[i].path, 'path'); eq(got[i].status, want[i].status, 'status of ' + want[i].path); }
