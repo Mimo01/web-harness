@@ -155,5 +155,5 @@ H.diff = (() => {
     return out;
   }
 
-  return { lines, unified, stat, isBinary, splitLines };
+  return { lines, unified, stat, splitLines };
 })();

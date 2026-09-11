@@ -3,7 +3,7 @@ H.ui = (() => {
   const $ = H.$, el = H.el;
   let attachments = [];
   let slashIdx = -1;
-  const drafts = new Map();   // chatId -> unsent text
+  const drafts = new Map();   // chatId -> unsent text (H.agent asks this before it sweeps an empty chat away)
 
   /* ---------------- markdown ---------------- */
   /* Images are never fetched on render: a remote <img> in a reply would be a silent GET carrying whatever the model put
@@ -811,14 +811,21 @@ H.ui = (() => {
       if (!recent.length || box.classList.contains('hidden')) return;
       box.append(el('div', { class: 'menu-sec' }, ['Recent']));
       for (const r of recent) {
-        box.append(el('button', {
+        const row = el('button', {
           class: 'opt', title: 'Work in this folder again (the browser will ask for access)',
           onclick: async (e) => {
             e.stopPropagation();
             try { await H.fs.open(r.handle, { mode: r.mode || 'readwrite' }); if (!await H.fs.grant()) H.toast(`Access to "${r.name}" was not granted.`, 'warn'); closeMenus(); }
             catch (err) { H.toast(err.message, 'error', 6000); }
           },
-        }, [el('span', { class: 'nm' }, [r.name]), el('span', { class: 'sub' }, [H.relTime(r.lastUsed || Date.now())])]));
+        }, [el('span', { class: 'nm' }, [r.name]), el('span', { class: 'sub' }, [H.relTime(r.lastUsed || Date.now())])]);
+        /* each row holds a live directory handle the browser will re-grant on a click, so there has to be a way to
+           drop one — otherwise the list only ever grows, for the life of the browser profile */
+        row.append(el('span', { class: 'acts' }, [el('span', {
+          class: 'act', title: `Forget "${r.name}": it leaves this list and the handle is dropped. The folder itself is untouched.`,
+          onclick: async (e) => { e.stopPropagation(); await H.db.folderDel(r.id).catch(() => { }); H.toast(`Forgot "${r.name}"`, 'success', 2500); renderWorkspaceMenu(); },
+        }, ['forget'])]));
+        box.append(row);
       }
     }).catch(() => { });
   }
@@ -1503,7 +1510,9 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
       if (models.length) totalBox.append(el('table', { class: 'table' }, [el('thead', {}, [el('tr', {}, ['Model', 'Requests', 'Input', 'Output', 'Cost'].map(h => el('th', {}, [h])))]), el('tbody', {}, models.map(([m, v]) => { const c = H.usage.cost(m, v.prompt, v.completion, v.cached || 0); return el('tr', {}, [el('td', { class: 'mono' }, [m]), el('td', {}, [String(v.requests)]), el('td', {}, [H.usage.fmtTok(v.prompt) + (v.cached ? ` (${H.usage.fmtTok(v.cached)} cached)` : '')]), el('td', {}, [H.usage.fmtTok(v.completion)]), el('td', {}, [c == null ? 'set pricing' : H.usage.fmtCost(c)])]); }))]));
       const days = Object.entries(t.byDay).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 14);
       if (days.length) { const max = Math.max(...days.map(([, v]) => v.prompt + v.completion)); totalBox.append(el('div', { class: 'bars' }, days.reverse().map(([d, v]) => el('div', { class: 'bar', title: `${d}: ${(v.prompt + v.completion).toLocaleString()} tokens · ${H.usage.fmtCost(v.cost)}` }, [el('div', { class: 'bar-fill', style: `height:${Math.max(3, (v.prompt + v.completion) / max * 60)}px` }), el('span', {}, [d.slice(5)])])))); }
-      if (agg.top.length) totalBox.append(el('table', { class: 'table' }, [el('thead', {}, [el('tr', {}, ['Most expensive chats', 'Tokens', 'Cost'].map(h => el('th', {}, [h])))]), el('tbody', {}, agg.top.map(c => el('tr', {}, [el('td', {}, [el('a', { href: '#', onclick: (e) => { e.preventDefault(); settingsModal?.remove(); settingsModal = null; H.agent.load(c.id); } }, [c.title])]), el('td', {}, [H.usage.fmtTok(c.tokens)]), el('td', {}, [H.usage.fmtCost(c.cost)])])))]));
+      /* priced at today's prices from each chat's own per-model split, the same basis as the table above; a chat
+         written before that split was kept can only show what it was charged, and says so */
+      if (agg.top.length) totalBox.append(el('table', { class: 'table' }, [el('thead', {}, [el('tr', {}, ['Most expensive chats', 'Tokens', 'Cost'].map(h => el('th', {}, [h])))]), el('tbody', {}, agg.top.map(c => el('tr', {}, [el('td', {}, [el('a', { href: '#', onclick: (e) => { e.preventDefault(); settingsModal?.remove(); settingsModal = null; H.agent.load(c.id); } }, [c.title])]), el('td', {}, [H.usage.fmtTok(c.tokens)]), el('td', { title: c.current ? 'At current prices' : 'As charged at the time: this chat predates per-model token tracking' }, [H.usage.fmtCost(c.cost) + (c.current ? '' : ' *')])])))]));
       totalBox.append(el('div', { class: 'row gap', style: 'margin-top:10px' }, [el('button', { class: 'btn sm danger-outline', onclick: async () => { if (confirm('Reset all-time usage counters?')) { await H.usage.resetTotal(); settingsRepaint?.(); } } }, ['Reset counters'])]));
     })();
     wrap.append(sec('Model prices', `Prices come from your proxy's /model/info where it offers them — for the model you are using now, they were ${p.source === 'litellm' ? 'found there' : p.source === 'manual' ? 'set by hand below' : 'not found, so no cost can be shown'}. Fill in a row for any model your proxy does not price.`, [
@@ -1775,6 +1784,7 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
   }
   function init() {
     applyTheme(); a11yInit();
+    H.agent.setDraftCheck((id) => !!(drafts.get(id) || '').trim() || (id === H.agent.current()?.id && !!$('#input').value.trim()));
     const input = $('#input');
     input.addEventListener('input', () => { autoresize(); showSlash(); });
     input.addEventListener('keydown', (e) => {
@@ -1887,5 +1897,5 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     H.bus.on('perm-prompt', () => { try { if (document.hidden && Notification.permission === 'granted') new Notification('Permission needed', { body: 'The assistant is waiting for your approval.' }); } catch { } });
   }
 
-  return { init, renderChat, renderChatList, refreshModels, openSettings, setStatus, updateWorkspaceBtn, updateContextMeter, applyTheme };
+  return { init, renderChatList, refreshModels, openSettings, setStatus, updateWorkspaceBtn };
 })();

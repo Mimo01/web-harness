@@ -190,7 +190,7 @@ When you have enough information, write a concrete, numbered implementation plan
       assistant.content = res.content; assistant.reasoning = res.reasoning || assistant.reasoning;
       assistant.tool_calls = (res.tool_calls || []).map(t => ({ id: t.id || H.uid(), type: 'function', function: { name: t.function.name, arguments: t.function.arguments || '{}' } }));
       assistant.meta.streaming = false;
-      if (res.usage) { assistant.meta.usage = res.usage; assistant.meta.cost = H.usage.costOfUsage(model, res.usage); onUsage?.(res.usage, assistant.meta.cost); }
+      if (res.usage) { assistant.meta.usage = res.usage; assistant.meta.cost = H.usage.costOfUsage(model, res.usage); onUsage?.(res.usage, assistant.meta.cost, model); }
       if (!assistant.tool_calls.length && mode === 'plan' && assistant.content) assistant.meta.plan = true;
       if (!assistant.tool_calls.length && res.finish_reason === 'length') assistant.meta.truncated = true;   // the UI offers "Continue"
 
@@ -253,13 +253,17 @@ When you have enough information, write a concrete, numbered implementation plan
 
   /* Every request a chat pays for lands here, so the ring under the message box counts the side requests
      (compaction, auto-title) the same way it counts the ones in the transcript. */
-  function addUsage(c, u, cost) {
+  function addUsage(c, u, cost, forModel) {
     if (!c || !u) return;
-    const model = H.settings.get('model');
+    const model = forModel || H.settings.get('model');   // a model switched mid-run must not mis-file the reply it did not answer
     c.usage.prompt += u.prompt_tokens || 0;
     c.usage.completion += u.completion_tokens || 0;
     c.usage.cost = (c.usage.cost || 0) + (cost ?? H.usage.costOfUsage(model, u) ?? 0);
     c.usage.requests = (c.usage.requests || 0) + 1;
+    /* the per-model token split is kept alongside the running cost, so the usage page can price a chat at today's
+       prices — the same basis as its all-time table — instead of the prices in force when each request was made */
+    const m = ((c.usage.byModel ||= {})[model] ||= { prompt: 0, completion: 0, cached: 0 });
+    m.prompt += u.prompt_tokens || 0; m.completion += u.completion_tokens || 0; m.cached += H.usage.cachedOf(u);
     H.usage.record(model, u);
     H.bus.emit('usage', c);
   }
@@ -343,7 +347,7 @@ When you have enough information, write a concrete, numbered implementation plan
       await loop(c.messages, {
         signal: ctl.signal, maxIterations: H.settings.get('maxToolIterations'), mode, runFolder, chatId: c.id,
         onEvent: (ev, msg) => { if (ev === 'assistant-start' || ev === 'tool-start' || ev === 'user-added') H.bus.emit('message-added', msg, c.id); else H.bus.emit('message-updated', msg, c.id); if (ev === 'assistant-end' || ev === 'tool-end') persist(c); },
-        onUsage: (u, cost) => addUsage(c, u, cost),
+        onUsage: (u, cost, model) => addUsage(c, u, cost, model),
       });
     } catch (e) { H.toast((chat === c ? '' : `[${c.title}] `) + e.message, 'error', 8000); }
     finally {
@@ -431,11 +435,31 @@ When you have enough information, write a concrete, numbered implementation plan
     /* a chat carries its own folder: opening one from last month must not aim its paths at today's project */
     await H.fs.use(c.folder ?? c.mounts ?? null).catch(e => console.warn('workspace restore', e));
   }
+  /* Set by the UI: "does this chat still hold text the user typed but never sent?" An empty chat with a draft in
+     it is not disposable. Without an answer, nothing is swept. */
+  let hasDraft = () => true;
+  /* A new chat is written to storage straight away so it is visible and switchable and keeps its draft — which
+     means a run of false starts leaves a column of "New chat (empty)" rows behind. Anything with no messages, no
+     draft, and nothing running is not history; it goes when the next new chat is made. */
+  async function sweepEmpty(keepIds) {
+    try {
+      const keep = new Set(keepIds.filter(Boolean));
+      for (const c of await H.db.listChats()) {
+        if (keep.has(c.id) || c.count || c.title !== 'New chat' || runs.has(c.id) || questions.has(c.id) || hasDraft(c.id)) continue;
+        deleted.add(c.id); live.delete(c.id);
+        await H.db.delChat(c.id);
+        H.journal?.clear(c.id).catch(() => { });
+      }
+      H.bus.emit('chat-updated');
+    } catch (e) { console.warn('sweep empty chats', e); }
+  }
   async function reset() {
+    const prev = chat;
     chat = newChat(); touchLive(chat); H.perms.clearSession();
     await H.fs.use(null);                          // and the folder that was open belongs to the chat you just left
     await H.db.putChat(chat);                      // exists right away: visible in the sidebar, switchable, keeps its draft
     H.bus.emit('chat-loaded', chat); H.bus.emit('chat-updated', chat);
+    sweepEmpty([chat.id, prev?.id]);               // the one being left keeps its place; the abandoned ones do not
     return chat;
   }
   async function remove(id) {
@@ -466,5 +490,5 @@ When you have enough information, write a concrete, numbered implementation plan
     return text || '(sub-agent produced no final text)';
   }
 
-  return { send, stop, run, regenerate, continueRun, load, reset, remove, rename, deleteMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runFolderOf, systemPrompt };
+  return { send, stop, run, regenerate, continueRun, load, reset, remove, rename, deleteMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runFolderOf, systemPrompt, setDraftCheck: (fn) => { hasDraft = fn; } };
 })();

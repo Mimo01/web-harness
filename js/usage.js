@@ -66,6 +66,10 @@ H.usage = (() => {
   /* estimate the current context size of a chat (tokens that would be sent on the next request) */
   let specsMemo = { list: null, tokens: 0 };
   function specsEstimate() { const specs = H.tools.openaiSpecs(); const key = specs.map(s => s.function.name).join(','); if (specsMemo.list !== key) specsMemo = { list: key, tokens: H.estTokens(JSON.stringify(specs)) }; return specsMemo.tokens; }
+  /* contextBreakdown runs on every message the UI adds — once per tool card — and the system prompt is assembled
+     from the plugin guides, the skill list and the project context file each time. Measure it when it changes. */
+  let promptMemo = { text: null, tokens: 0 };
+  function promptEstimate() { const t = H.agent.systemPrompt(); if (promptMemo.text !== t) promptMemo = { text: t, tokens: H.estTokens(t) }; return promptMemo.tokens; }
   const msgTokens = (m) => H.estTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + (m.tool_calls ? H.estTokens(JSON.stringify(m.tool_calls)) : 0) + 4;
   const contextEstimate = (chat) => contextBreakdown(chat).total;
   /* the same estimate, split into the parts the popup shows: what is always sent (system prompt + tool
@@ -74,7 +78,7 @@ H.usage = (() => {
   function contextBreakdown(chat) {
     const model = H.settings.get('model');
     const ctx = priceFor(model).context || 128000;
-    const fixed = H.estTokens(H.agent.systemPrompt()) + specsEstimate();
+    const fixed = promptEstimate() + specsEstimate();
     const msgs = chat?.messages || [];
     let total = 0, anchored = false;
     let lastPromptIdx = -1, lastPrompt = 0;
@@ -130,13 +134,22 @@ H.usage = (() => {
     return null;
   }
 
+  /* What a chat costs at today's prices, from the per-model token split kept on it. Chats written before that
+     split existed fall back to the figure accumulated at request time — the only number they have. */
+  function costOfChatUsage(u) {
+    const by = u?.byModel;
+    if (!by || !Object.keys(by).length) return { cost: u?.cost || 0, current: false };
+    let sum = 0, known = false;
+    for (const [m, v] of Object.entries(by)) { const c = cost(m, v.prompt, v.completion, v.cached || 0); if (c != null) { sum += c; known = true; } }
+    return known ? { cost: sum, current: true } : { cost: u.cost || 0, current: false };
+  }
   async function aggregateChats() {
     const chats = await H.db.listChats();
     const out = { chats: chats.length, prompt: 0, completion: 0, cost: 0, top: [] };
-    for (const c of chats) { const u = c.usage || {}; out.prompt += u.prompt || 0; out.completion += u.completion || 0; out.cost += u.cost || 0; out.top.push({ id: c.id, title: c.title, tokens: (u.prompt || 0) + (u.completion || 0), cost: u.cost || 0 }); }
+    for (const c of chats) { const u = c.usage || {}; const k = costOfChatUsage(u); out.prompt += u.prompt || 0; out.completion += u.completion || 0; out.cost += k.cost; out.top.push({ id: c.id, title: c.title, tokens: (u.prompt || 0) + (u.completion || 0), cost: k.cost, current: k.current }); }
     out.top.sort((a, b) => b.tokens - a.tokens); out.top = out.top.slice(0, 8);
     return out;
   }
 
-  return { priceFor, cost, costOfUsage, cachedOf, chatCost, chatTokens, fmtCost, fmtTok, record, contextEstimate, contextBreakdown, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { loading = null; total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
+  return { priceFor, cost, costOfUsage, costOfChatUsage, cachedOf, chatCost, chatTokens, fmtCost, fmtTok, record, contextEstimate, contextBreakdown, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { loading = null; total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
 })();

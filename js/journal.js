@@ -152,5 +152,5 @@ H.journal = (() => {
   const clear = (chat) => (chat ? H.db.journalClear(chat).then(() => H.bus.emit('journal', chat)) : Promise.resolve());
   const clearAll = () => H.db.journalClear().then(() => H.bus.emit('journal', null));
 
-  return { capture, list, revert, forget, clear, clearAll, enabled, count: async (chat) => (await H.db.journalOf(chat || chatId() || '')).length };
+  return { capture, list, revert, clear, clearAll, enabled };
 })();

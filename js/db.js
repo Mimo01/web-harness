@@ -145,6 +145,8 @@ H.db = (() => {
     kvDel: (k) => tx('kv', 'readwrite', s => s.delete(k)),
     folders: () => all('folders'),
     folderPut: (f) => tx('folders', 'readwrite', s => s.put(f)),
+    /* a registry row holds a live directory handle, so "forget this folder" is a real revocation, not just tidying */
+    folderDel: (id) => tx('folders', 'readwrite', s => s.delete(id)),
     journalPut: (rec) => tx('journal', 'readwrite', s => s.put(rec)),
     journalOf: (chat) => tx('journal', 'readonly', s => s.index('chat').getAll(chat)),
     journalDel: (id) => tx('journal', 'readwrite', s => s.delete(id)),

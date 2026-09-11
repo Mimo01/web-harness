@@ -3,7 +3,6 @@
 H.update = (() => {
   const KEY = 'harness.update.lastCheck';
   const cmp = (a, b) => { const pa = String(a).split('.').map(n => parseInt(n, 10) || 0), pb = String(b).split('.').map(n => parseInt(n, 10) || 0); for (let i = 0; i < Math.max(pa.length, pb.length); i++) { if ((pa[i] || 0) > (pb[i] || 0)) return 1; if ((pa[i] || 0) < (pb[i] || 0)) return -1; } return 0; };
-  let latest = null;
 
   async function check({ manual = false } = {}) {
     if (!manual && !H.settings.get('checkUpdates')) return null;
@@ -11,10 +10,9 @@ H.update = (() => {
     try {
       const r = await fetch(url, { cache: 'no-store' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      latest = await r.json();
+      const latest = await r.json();
       H.store.write(KEY, String(Date.now()));
       const newer = cmp(latest.version, H.ABOUT.version) > 0;
-      H.bus.emit('update', { latest, newer });
       if (newer && (manual || localStorage.getItem('harness.update.dismissed') !== latest.version)) notify(latest);
       else if (manual) H.toast(`You have the latest version (${H.ABOUT.version}).`, 'success');
       return { latest, newer };
@@ -40,5 +38,5 @@ H.update = (() => {
     if (Date.now() - last > 3600 * 1000) setTimeout(() => check(), 4000);
     setInterval(() => check(), 3600 * 1000);
   }
-  return { check, start, latest: () => latest, cmp };
+  return { check, start };
 })();

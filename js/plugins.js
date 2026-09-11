@@ -451,7 +451,7 @@ H.plugins = (() => {
        the token of a removed plugin would sit in storage for the life of the browser profile */
     remove: (id) => { plugins = plugins.filter(p => p.id !== id); mcpCache.delete(id); H.secrets.del('plugin:' + id); invalidateTools(); save(); },
     setEnabled: async (id, on) => { const p = plugins.find(x => x.id === id); if (!p) return; p.enabled = on; save(); if (on && p.kind === 'mcp') { try { await mcpConnect(p, true); invalidateTools(); H.bus.emit('plugins', plugins); } catch (e) { H.toast('MCP connect failed: ' + e.message, 'error', 6000); } } },
-    tools, test, connectEnabledMcp, mcpConnect,
+    tools, test, connectEnabledMcp,
     exportAll: () => JSON.stringify(plugins.map(p => splitSecrets(p).pub), null, 2),
     exportSafe: (p) => splitSecrets(p).pub,
     hasCode: (p) => (p.tools || []).some(t => t.transform || t.prepare || t.pathFn),

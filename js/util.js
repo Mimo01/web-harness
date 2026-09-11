@@ -224,6 +224,9 @@ H.estTokens = (s) => Math.ceil(String(s ?? '').length / 4);
 /* A pattern the model wrote runs on the UI thread (fs_search, regex_extract), so one that backtracks
    catastrophically freezes the tab with no way to stop it. Nested quantifiers over a group are the shape that
    does it — (a+)+, (\w*)* — and refusing them costs nothing the model cannot express another way.
+   This is a speed bump, not a proof: alternation that overlaps under a quantifier ((a|a)*, (a|ab)*) is just as
+   exponential and is not detected here, and nothing but moving the match loop into a Worker would make the tab
+   interruptible. Treat it as "the obvious footgun is blocked", not "regexes are safe".
    Returns the pattern so it can be used inline; throws an explanation the model can act on. */
 H.safeRegex = (pattern) => {
   const p = String(pattern);

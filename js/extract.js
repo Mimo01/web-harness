@@ -177,5 +177,5 @@ H.extract = (() => {
     } catch (e) { return { kind: 'unsupported', content: '', note: `${file.name}: could not extract text (${e.message}).` }; }
   }
   const isDocument = (name) => ['pdf', 'docx', 'pptx', 'sheet'].includes(kindOf(name));
-  return { fromFile, kindOf, isDocument, lib, image };
+  return { fromFile, kindOf, isDocument };
 })();

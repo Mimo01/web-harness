@@ -245,5 +245,5 @@ if(!b.querySelector('[data-x]')){const x=document.createElement('span');x.datase
   /** minimal end-to-end check: GET the site root through the bridge */
   async function ping(origin) { const r = await fetch(origin + '/', { method: 'GET', headers: {}, timeout: 15000 }); return { status: r.status, ok: r.ok, bytes: (r.body || '').length }; }
   function diagnostics() { return ['harness: ' + location.href.split('#')[0], 'origin: ' + myOrigin, 'identity: ' + (ident ? ident.pub.slice(0, 16) + '…' : 'none') + (secure ? '' : ' (no Web Crypto: plaintext protocol)'), 'bridges: ' + JSON.stringify(list()), 'pending: ' + pending.size, 'log:', ...log].join('\n'); }
-  return { fetch, ping, has, list, legacy, health, bookmarklet, openSite, diagnostics, usable, init, identity: () => ident, embedded: () => window.top !== window || location.hash.includes('embedded') };
+  return { fetch, ping, has, list, legacy, health, bookmarklet, openSite, diagnostics, usable, init, embedded: () => window.top !== window || location.hash.includes('embedded') };
 })();

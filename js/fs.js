@@ -255,7 +255,7 @@ H.fs = (() => {
        every call: H.fs is global, so switching chats mid-run would otherwise aim a background chat's writes at
        whatever project the foreground chat just opened. */
     folderId: () => (folder ? folder.id : null),
-    readFile, writeFile, appendFile, exists, stat, list, mkdir, remove, move, globMatch, replaceText, eolOf,
+    readFile, writeFile, appendFile, stat, list, mkdir, remove, move, globMatch, replaceText,
     name: () => (folder ? folder.name : ''), hasRoot,
     /** one line for the system prompt: which folder this chat works in */
     describe: () => (folder
