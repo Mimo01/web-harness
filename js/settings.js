@@ -61,6 +61,9 @@ H.settings = (() => {
     autoCompact: true,             // summarise the older part of a chat when the context passes compactAt
     compactAt: 0.7,                // fraction of the model's context window
     compactKeepTurns: 3,           // most recent user turns are never summarised
+    respectGitignore: true,        // file listings, search and the code index follow the project's .gitignore
+    projectContextFile: true,      // load AGENTS.md / CLAUDE.md from the workspace root into the system prompt
+    maxIndexFiles: 20000,          // upper bound for the workspace file index
     transcriptionModel: '',        // e.g. whisper-1 on the LiteLLM proxy; empty = audio/video transcription off            // GET version.json from GitHub on startup / every 6 h
     settingsVersion: 2,
   };

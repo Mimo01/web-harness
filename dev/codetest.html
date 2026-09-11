@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Harness code & git module tests</title>
+<style>
+  body { font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; margin: 24px; background: #faf9f6; color: #1b1a17; }
+  h1 { font: 600 18px/1.3 system-ui, sans-serif; }
+  .bar { position: sticky; top: 0; background: #faf9f6; padding: 8px 0; border-bottom: 1px solid #ddd9d0; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  td { padding: 4px 8px; border-bottom: 1px solid #eae7e0; vertical-align: top; }
+  td.s { width: 64px; font-weight: 600; }
+  .pass { color: #2f7a4f; } .fail { color: #b3261e; } .soft { color: #9a6b00; }
+  pre { margin: 4px 0 0; white-space: pre-wrap; color: #6b675e; max-height: 220px; overflow: auto; }
+  input { font: inherit; width: 420px; }
+</style>
+</head>
+<body>
+<h1>Harness code &amp; git module tests</h1>
+<div class="bar">
+  repo under test (server-side path, blank = this repo):
+  <input id="base" placeholder="/abs/path/to/fixture">
+  <button id="run">Run</button>
+  <span id="summary"></span>
+</div>
+<table id="out"></table>
+<div id="toasts"></div>
+
+<script src="../js/util.js"></script>
+<script src="../js/db.js"></script>
+<script src="../js/settings.js"></script>
+<script src="../js/fs.js"></script>
+<script src="../js/diff.js"></script>
+<script src="../js/code.js"></script>
+<script src="../js/git.js"></script>
+<script>
+/* ---- H.fs adapter: the real modules only ever talk to H.fs, so the dev server can stand in for
+   the File System Access API and the tests can run unattended in a real browser. ---- */
+let BASE = '';
+const api = (ep, params) => `/${ep}?` + new URLSearchParams({ ...params, ...(BASE ? { base: BASE } : {}) });
+H.fs.name = () => 'testrepo';
+H.fs.hasRoot = () => true;
+H.fs.supported = () => true;
+H.fs.readFile = async (p, { binary = false } = {}) => {
+  const r = await fetch(api('__read', { path: p }));
+  if (!r.ok) throw Object.assign(new Error(`File "${p}" does not exist.`), { name: 'NotFoundError' });
+  return binary ? await r.blob() : await r.text();
+};
+H.fs.stat = async (p) => {
+  const r = await fetch(api('__stat', { path: p }));
+  if (!r.ok) throw Object.assign(new Error(`"${p}" not found`), { name: 'NotFoundError' });
+  return r.json();
+};
+H.fs.list = async (p = '', { recursive = false, maxEntries = 500, skipDir = null } = {}) => {
+  const base = String(p || '').replace(/^\.?\/+/, '').replace(/\/+$/, '');
+  const out = [];
+  const skip = skipDir || (() => false);
+  async function walk(dir) {
+    const r = await fetch(api('__ls', { path: dir }));
+    if (!r.ok) throw Object.assign(new Error(`Directory "${dir}" does not exist.`), { name: 'NotFoundError' });
+    const { entries } = await r.json();
+    for (const e of entries) {
+      if (out.length >= maxEntries) return;
+      const full = dir ? dir + '/' + e.name : e.name;
+      if (e.kind === 'file') out.push({ path: full, kind: 'file', size: e.size, modified: e.mtime });
+      else { out.push({ path: full, kind: 'directory' }); if (recursive && !skip(e.name, full)) await walk(full); }
+    }
+  }
+  await walk(base);
+  return out;
+};
+const git = async (...args) => {
+  const r = await fetch(api('__git', { args: JSON.stringify(args) }));
+  const j = await r.json();
+  if (!j.ok && !j.stdout) throw new Error('git ' + args.join(' ') + ': ' + j.stderr);
+  return j.stdout;
+};
+
+/* ---- tiny assertion harness ---- */
+const results = [];
+const tbody = document.getElementById('out');
+function row(name, state, detail) {
+  results.push({ name, state, detail });
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td class="s ${state}">${state.toUpperCase()}</td><td><b>${name}</b>${detail ? `<pre>${String(detail).replace(/[<&]/g, c => c === '<' ? '&lt;' : '&amp;')}</pre>` : ''}</td>`;
+  tbody.append(tr);
+}
+async function test(name, fn) {
+  try { const d = await fn(); row(name, 'pass', d && String(d).slice(0, 1200)); }
+  catch (e) { row(name, e.soft ? 'soft' : 'fail', (e.message || e) + (e.stack && !e.soft ? '\n' + e.stack.split('\n').slice(1, 3).join('\n') : '')); }
+}
+const eq = (a, b, msg) => { if (a !== b) throw new Error(`${msg || 'not equal'}\n  got:      ${JSON.stringify(a)}\n  expected: ${JSON.stringify(b)}`); };
+const soft = (cond, msg) => { if (!cond) throw Object.assign(new Error(msg), { soft: true }); };
+
+/* a patch reconstructs the file if it matches exactly, give or take the trailing newline */
+const sameText = (got, want) => got === want || got + '\n' === want || got === String(want).replace(/\n$/, '');
+
+/* apply a unified diff to `oldText`; used to prove our own patches are self-consistent */
+function applyPatch(oldText, patch) {
+  const src = (oldText ?? '').split('\n');
+  const lines = patch.split('\n');
+  let out = [], cursor = 0, i = 0;
+  while (i < lines.length && !lines[i].startsWith('@@')) i++;
+  for (; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.startsWith('@@')) {
+      const m = l.match(/^@@ -(\d+)(?:,(\d+))? \+/);
+      const start = Number(m[1]) - 1;
+      out = out.concat(src.slice(cursor, Math.max(cursor, start)));
+      cursor = Math.max(0, start);
+      continue;
+    }
+    if (l.startsWith('\\')) continue;
+    if (l === '' && i === lines.length - 1) continue;
+    const t = l[0], body = l.slice(1);
+    if (t === ' ') { out.push(src[cursor++]); }
+    else if (t === '-') { cursor++; }
+    else if (t === '+') { out.push(body); }
+  }
+  out = out.concat(src.slice(cursor));
+  return out.join('\n');
+}
+
+async function run() {
+  tbody.innerHTML = ''; results.length = 0;
+  BASE = document.getElementById('base').value.trim();
+  H.code.bump(); H.git.resetCaches();
+
+  /* ---------------- diff engine ---------------- */
+  await test('diff: identical text produces no patch', () => eq(H.diff.unified('a\nb\n', 'a\nb\n', { path: 'x' }), ''));
+  await test('diff: insert/delete counts', () => {
+    const s = H.diff.stat('a\nb\nc\n', 'a\nB\nc\nd\n');
+    eq(s.added, 2, 'added'); eq(s.removed, 1, 'removed');
+  });
+  await test('diff: patch round-trips on random edits', () => {
+    let checked = 0;
+    for (let n = 0; n < 200; n++) {
+      const a = [], b = [];
+      const len = 1 + Math.floor(Math.random() * 40);
+      for (let i = 0; i < len; i++) a.push('line ' + Math.floor(Math.random() * 12));
+      for (const l of a) { const r = Math.random(); if (r < 0.15) continue; if (r < 0.3) b.push('new ' + Math.floor(Math.random() * 9)); b.push(l); }
+      if (Math.random() < 0.4) b.push('tail');
+      const A = a.join('\n') + '\n', B = b.join('\n') + '\n';
+      const p = H.diff.unified(A, B, { path: 'f', context: 3 });
+      const applied = p ? applyPatch(A, p) : A;
+      if (applied !== B) throw new Error('round-trip failed\n--- patch ---\n' + p + '\n--- got ---\n' + JSON.stringify(applied) + '\n--- want ---\n' + JSON.stringify(B));
+      checked++;
+    }
+    return checked + ' random cases round-tripped';
+  });
+
+  /* ---------------- git plumbing ---------------- */
+  const headSha = (await git('rev-parse', 'HEAD')).trim();
+  await test('git: repository detected', async () => { const d = await H.git.detect(); if (!d.ok) throw new Error('detect() says ' + d.reason); return 'ok'; });
+  await test('git: HEAD matches `git rev-parse HEAD`', async () => {
+    const h = await H.git.head();
+    eq(h.sha, headSha, 'HEAD sha');
+    const branch = (await git('rev-parse', '--abbrev-ref', 'HEAD')).trim();
+    if (branch !== 'HEAD') eq(h.branch, branch, 'branch name');
+    return `${h.branch || '(detached)'} @ ${h.sha.slice(0, 8)}`;
+  });
+  await test('git: object types match `git cat-file -t` for 60 objects', async () => {
+    const list = (await git('rev-list', '--objects', '--max-count=40', 'HEAD')).trim().split('\n').map(l => l.split(' ')[0]).filter(Boolean).slice(0, 60);
+    let n = 0;
+    for (const sha of list) {
+      const want = (await git('cat-file', '-t', sha)).trim();
+      const got = (await H.git.readObject(sha)).type;
+      eq(got, want, 'type of ' + sha.slice(0, 8));
+      n++;
+    }
+    return n + ' objects read (loose and/or packed)';
+  });
+  await test('git: blob contents match `git cat-file -p`', async () => {
+    const entries = (await git('ls-tree', '-r', 'HEAD')).trim().split('\n').slice(0, 8);
+    let n = 0;
+    for (const line of entries) {
+      const m = line.match(/^(\d+) (\w+) ([0-9a-f]{40})\t(.*)$/);
+      if (!m || m[2] !== 'blob') continue;
+      const want = await git('cat-file', '-p', m[3]);
+      const got = await H.git.blobText(m[3]);
+      if (got !== want) throw new Error(`blob ${m[4]} differs (${got.length} vs ${want.length} chars)`);
+      n++;
+    }
+    return n + ' blobs identical';
+  });
+  await test('git: recursive tree matches `git ls-tree -r HEAD`', async () => {
+    const want = (await git('ls-tree', '-r', '--name-only', 'HEAD')).trim().split('\n').sort();
+    const map = await H.git.treeMap((await H.git.commit(headSha)).tree);
+    const got = [...map.keys()].sort();
+    eq(got.length, want.length, 'file count');
+    for (let i = 0; i < want.length; i++) eq(got[i], want[i], 'entry ' + i);
+    return want.length + ' paths';
+  });
+  await test('git: log matches `git log`', async () => {
+    const want = (await git('log', '--format=%H%x09%s', '-n', '15')).trim().split('\n').map(l => l.split('\t'));
+    const got = (await H.git.log({ max: 15 })).commits;
+    eq(got.length, want.length, 'commit count');
+    for (let i = 0; i < want.length; i++) { eq(got[i].sha, want[i][0], 'sha at ' + i); eq(got[i].subject, want[i][1], 'subject at ' + i); }
+    return want.length + ' commits in order';
+  });
+  await test('git: log --author / path filters', async () => {
+    const f = (await git('ls-tree', '-r', '--name-only', 'HEAD')).trim().split('\n').find(p => /\.(js|md)$/.test(p));
+    const want = (await git('log', '--format=%H', '-n', '8', '--', f)).trim().split('\n').filter(Boolean);
+    const got = (await H.git.log({ max: 8, path: f })).commits.map(c => c.sha);
+    eq(got.join(','), want.join(','), 'commits touching ' + f);
+    return `${f}: ${want.length} commits`;
+  });
+  await test('git: revision syntax (HEAD~2, short sha, branch)', async () => {
+    eq(await H.git.resolve('HEAD~2'), (await git('rev-parse', 'HEAD~2')).trim(), 'HEAD~2');
+    eq(await H.git.resolve(headSha.slice(0, 7)), headSha, 'short sha');
+    const branch = (await git('rev-parse', '--abbrev-ref', 'HEAD')).trim();
+    if (branch !== 'HEAD') eq(await H.git.resolve(branch), headSha, 'branch name');
+    return 'ok';
+  });
+  await test('git: changed files match `git diff --name-status HEAD~1 HEAD`', async () => {
+    const want = (await git('diff', '--name-status', 'HEAD~1', 'HEAD')).trim().split('\n').filter(Boolean)
+      .map(l => l.split('\t')).map(([s, p]) => ({ status: s[0] === 'A' ? 'added' : s[0] === 'D' ? 'deleted' : 'modified', path: p })).sort((a, b) => a.path.localeCompare(b.path));
+    const got = (await H.git.diffRefs({ from: 'HEAD~1', to: 'HEAD', statOnly: true })).files;
+    eq(got.length, want.length, 'file count');
+    for (let i = 0; i < want.length; i++) { eq(got[i].path, want[i].path, 'path'); eq(got[i].status, want[i].status, 'status of ' + want[i].path); }
+    return want.map(w => w.status[0] + ' ' + w.path).join('\n');
+  });
+  await test('git: commit patches apply back to the parent content', async () => {
+    const files = (await H.git.commitChanges(headSha, { patch: true })).filter(f => f.status === 'modified');
+    const parent = (await H.git.commit(headSha)).parents[0];
+    const a = await H.git.treeMap((await H.git.commit(parent)).tree), b = await H.git.treeMap((await H.git.commit(headSha)).tree);
+    let n = 0;
+    for (const f of files.slice(0, 6)) {
+      const oldText = await H.git.blobText(a.get(f.path).sha), newText = await H.git.blobText(b.get(f.path).sha);
+      if (!sameText(applyPatch(oldText, f.patch), newText)) throw new Error(`${f.path}: patch does not reconstruct the new content`);
+      n++;
+    }
+    return n + ' patches verified against the real blobs';
+  });
+  await test('git: line counts close to `git diff --numstat`', async () => {
+    const want = new Map((await git('diff', '--numstat', 'HEAD~1', 'HEAD')).trim().split('\n').filter(Boolean).map(l => { const [a, d, p] = l.split('\t'); return [p, [Number(a), Number(d)]]; }));
+    const got = (await H.git.diffRefs({ from: 'HEAD~1', to: 'HEAD' })).files;
+    const diffs = [];
+    for (const f of got) { const w = want.get(f.path); if (!w || Number.isNaN(w[0])) continue; if (w[0] !== f.added || w[1] !== f.removed) diffs.push(`${f.path}: ours +${f.added}/-${f.removed}, git +${w[0]}/-${w[1]}`); }
+    soft(!diffs.length, 'different but valid diff shape (patience vs myers):\n' + diffs.join('\n'));
+    return got.length + ' files with identical +/- counts';
+  });
+  await test('git: status matches `git status --porcelain`', async () => {
+    const porcelain = (await git('status', '--porcelain', '-uall')).split('\n').filter(Boolean);   // never trim: column 1 is the staged status
+    const wantMod = porcelain.filter(l => /^.[MD]|^[MARC]/.test(l) && !l.startsWith('??')).map(l => l.slice(3).replace(/^"|"$/g, ''));
+    const wantUntracked = porcelain.filter(l => l.startsWith('??')).map(l => l.slice(3).replace(/^"|"$/g, '')).sort();
+    const st = await H.git.status({ thorough: true });
+    const gotChanged = [...new Set([...st.modified, ...st.deleted, ...st.staged])].sort();
+    const missing = wantMod.filter(p => !gotChanged.includes(p));
+    const extra = gotChanged.filter(p => !wantMod.includes(p));
+    if (missing.length || extra.length) throw new Error(`changed files differ\n  missing: ${missing.join(', ') || '-'}\n  extra:   ${extra.join(', ') || '-'}`);
+    const uMissing = wantUntracked.filter(p => !st.untracked.includes(p));
+    const uExtra = st.untracked.filter(p => !wantUntracked.includes(p));
+    if (uMissing.length) throw new Error('untracked files missing: ' + uMissing.join(', '));
+    soft(!uExtra.length, 'reported as untracked but git ignores them (check .gitignore parsing): ' + uExtra.slice(0, 10).join(', '));
+    return `modified ${st.modified.length}, deleted ${st.deleted.length}, untracked ${st.untracked.length}, staged ${st.staged.length}`;
+  });
+  await test('git: working-tree diff reconstructs the files on disk', async () => {
+    const d = await H.git.diffWorktree({ thorough: true });
+    let n = 0;
+    for (const f of d.files.filter(f => f.status === 'modified' && f.patch).slice(0, 5)) {
+      const map = await H.git.treeMap((await H.git.commit(headSha)).tree);
+      const oldText = await H.git.blobText(map.get(f.path).sha);
+      const cur = (await H.fs.readFile(f.path)).replace(/\r\n/g, '\n');
+      if (!sameText(applyPatch(oldText, f.patch), cur)) throw new Error(f.path + ': working-tree patch does not reconstruct the file');
+      n++;
+    }
+    return n ? n + ' working-tree patches verified' : 'working tree clean (nothing to verify)';
+  });
+  await test('git: a changed binary file is reported as modified, not deleted', async () => {
+    const porcelain = (await git('status', '--porcelain', '-uall')).split('\n').filter(Boolean);
+    const changed = porcelain.filter(l => !l.startsWith('??')).map(l => l.slice(3));
+    const bin = [];
+    for (const p of changed) { const t = await (await fetch(api('__read', { path: p }))).arrayBuffer(); if (new Uint8Array(t).includes(0)) bin.push(p); }
+    if (!bin.length) return 'no modified binary file in this working tree (nothing to check)';
+    const d = await H.git.diffWorktree({ paths: bin, thorough: true });
+    for (const p of bin) {
+      const f = d.files.find(x => x.path === p);
+      if (!f) throw new Error(p + ' is a changed binary file but is missing from the diff');
+      if (f.status !== 'modified') throw new Error(`${p}: reported as "${f.status}", expected "modified"`);
+    }
+    return bin.length + ' binary file(s) reported correctly';
+  });
+  await test('git: branches and tags match `git for-each-ref`', async () => {
+    const want = (await git('for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/tags')).trim().split('\n').filter(Boolean).sort();
+    const b = await H.git.branches();
+    const got = [...b.branches.map(x => 'refs/heads/' + x.name), ...b.tags.map(x => 'refs/tags/' + x.name)].sort();
+    eq(got.join(','), want.join(','), 'refs');
+    return `${b.branches.length} branches, ${b.tags.length} tags, current ${b.current}`;
+  });
+  await test('git: blame attributes lines like `git blame`', async () => {
+    const file = (await git('ls-tree', '-r', '--name-only', 'HEAD')).trim().split('\n').find(p => /\.(js|md|json)$/.test(p) && !/package-lock/.test(p));
+    // git marks the oldest commit in range with a leading ^ ("boundary"); strip it before comparing
+    const want = (await git('blame', '-l', '--no-abbrev', '-s', 'HEAD', '--', file)).split('\n').filter(Boolean).map(l => l.replace(/^\^/, '').slice(0, 40));
+    const got = (await H.git.blame(file, { maxRevisions: 200 })).lines;
+    eq(got.length, want.length, 'line count for ' + file);
+    let same = 0;
+    for (let i = 0; i < want.length; i++) if (want[i].startsWith(got[i].sha)) same++;
+    const pct = Math.round(same / want.length * 100);
+    soft(pct >= 90, `${file}: ${pct}% of lines attributed to the same commit as git (approximate blame, no rename detection)`);
+    return `${file}: ${pct}% identical attribution over ${want.length} lines`;
+  });
+  await test('git: index (.git/index) lists the tracked files', async () => {
+    const want = (await git('ls-files')).trim().split('\n').filter(Boolean).sort();
+    const got = [...(await H.git.readIndex()).keys()].sort();
+    eq(got.length, want.length, 'tracked file count');
+    for (let i = 0; i < want.length; i++) eq(got[i], want[i], 'entry ' + i);
+    return want.length + ' index entries';
+  });
+
+  /* ---------------- code intelligence ---------------- */
+  await test('code: .gitignore patterns behave like git', () => {
+    const cases = [
+      ['node_modules/', 'node_modules/x/y.js', true], ['node_modules/', 'app/node_modules/a.js', true], ['node_modules/', 'nodemodules.js', false],
+      ['*.log', 'a/b/c.log', true], ['*.log', 'a.logx', false],
+      ['/build', 'build/out.js', true], ['/build', 'src/build/out.js', false],
+      ['docs/**/*.md', 'docs/a/b.md', true], ['docs/**/*.md', 'docs/b.md', true], ['docs/**/*.md', 'other/b.md', false],
+      ['**/tmp', 'a/b/tmp/x', true], ['**/tmp', 'tmp/x', true],
+      ['*.js\n!keep.js', 'keep.js', false], ['*.js\n!keep.js', 'drop.js', true],
+      ['temp?', 'temp1', true], ['temp?', 'temp12', false],
+      ['src/*.ts', 'src/a.ts', true], ['src/*.ts', 'src/deep/a.ts', false],
+      ['a.txt', 'dir/a.txt', true], ['/a.txt', 'dir/a.txt', false],
+    ];
+    const bad = cases.filter(([pat, path, want]) => H.code.matchesIgnore(pat, path, path.endsWith('/')) !== want)
+      .map(([pat, path, want]) => `${JSON.stringify(pat)} vs ${path}: expected ${want}`);
+    if (bad.length) throw new Error(bad.join('\n'));
+    return cases.length + ' patterns match git\'s semantics';
+  });
+  await test('code: no source file is mistaken for a binary', async () => {
+    const { files } = await H.code.index({ refresh: true });
+    const bad = [];
+    for (const f of files.filter(f => /\.(js|html|css|json|md)$/.test(f.path)).slice(0, 60)) {
+      const t = await H.code.read(f.path, f);
+      if (t.includes('\0')) bad.push(f.path);
+    }
+    if (bad.length) throw new Error('contain NUL bytes and would be treated as binary: ' + bad.join(', '));
+    return 'checked ' + Math.min(60, files.length) + ' text files';
+  });
+  await test('code: index respects .gitignore and skips .git', async () => {
+    const { files } = await H.code.index({ refresh: true });
+    if (files.some(f => f.path.startsWith('.git/'))) throw new Error('.git leaked into the index');
+    const tracked = (await git('ls-files')).trim().split('\n').filter(Boolean);
+    const missing = tracked.filter(p => !files.some(f => f.path === p));
+    soft(!missing.length, 'tracked files missing from the index: ' + missing.slice(0, 10).join(', '));
+    return `${files.length} files indexed, ${tracked.length} tracked`;
+  });
+  await test('code: search finds a known string with context', async () => {
+    const r = await H.code.search({ query: 'executeToolCall', contextLines: 1 });
+    if (!r.totalMatches) throw new Error('no matches (is this the harness repo?)');
+    return `${r.totalMatches} matches in ${r.files.length} files, scanned ${r.filesScanned}`;
+  });
+  await test('code: outline of a known module', async () => {
+    const o = await H.code.outline('js/fs.js');
+    const names = o.symbols.map(s => s.name);
+    for (const want of ['readFile', 'writeFile', 'list', 'replaceText']) if (!names.includes(want)) throw new Error('missing symbol ' + want + ' (found: ' + names.join(', ') + ')');
+    return `${o.language}, ${o.lines} lines, ${o.symbolCount} symbols: ${names.slice(0, 12).join(', ')}`;
+  });
+  await test('code: symbol lookup finds the definition', async () => {
+    const s = await H.code.symbol('executeToolCall');
+    const def = s.definitions.find(d => d.file === 'js/agent.js');
+    if (!def) throw new Error('definition not found in js/agent.js; got ' + JSON.stringify(s.definitions.map(d => d.file + ':' + d.line)));
+    return `js/agent.js:${def.line} (${def.kind}), ${s.referenceCount} references`;
+  });
+  await test('code: import graph', async () => {
+    const d = await H.code.deps('js/tools.js');
+    return `imports ${d.imports.length}, imported by ${d.importedByCount ?? 0}`;
+  });
+  await test('code: project overview', async () => {
+    const o = await H.code.overview();
+    if (!o.languages.length) throw new Error('no languages detected');
+    if (!o.git?.repository) throw new Error('overview did not detect the repository');
+    return `${o.fileCount} files · ${o.languages.slice(0, 4).map(l => l.language + ' ' + l.kb + 'kb').join(', ')} · branch ${o.git.branch} · entry points: ${o.entryPoints.join(', ') || '-'}`;
+  });
+  await test('code: snapshot then detect a change', async () => {
+    const snap = await H.code.snapshot({ note: 'test' });
+    const before = await H.code.changes();
+    if (before.changed !== 0) throw new Error('a fresh snapshot should report no changes, got ' + before.changed);
+    // simulate an edit purely in the snapshot store, then confirm the diff shows up
+    const rec = await H.code.getSnapshot();
+    const victim = Object.keys(rec.files).find(p => p.endsWith('.js') && rec.files[p].text);
+    rec.files[victim].text = 'CHANGED\n' + rec.files[victim].text;
+    rec.files[victim].mtime = 1;
+    await H.db.kvSet('snapshot:' + H.fs.name(), rec);
+    const after = await H.code.changes();
+    const f = after.files.find(x => x.path === victim);
+    if (!f || f.status !== 'modified' || !f.patch.includes('-CHANGED')) throw new Error('change not detected for ' + victim);
+    return `${snap.files} files snapshotted; edit to ${victim} detected (+${f.added}/-${f.removed})`;
+  });
+
+  const pass = results.filter(r => r.state === 'pass').length, fail = results.filter(r => r.state === 'fail').length, softs = results.filter(r => r.state === 'soft').length;
+  document.getElementById('summary').innerHTML = ` — <b class="${fail ? 'fail' : 'pass'}">${pass} pass, ${fail} fail, ${softs} soft</b>`;
+  window.__results = { pass, fail, soft: softs, results };
+  window.__done = true;
+}
+document.getElementById('run').onclick = () => run();
+window.__done = false;
+run();
+</script>
+</body>
+</html>

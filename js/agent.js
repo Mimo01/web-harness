@@ -47,12 +47,13 @@ When you have enough information, write a concrete, numbered implementation plan
       `Files the user attaches are delivered inline as <attached_file> blocks inside their message and remain in the conversation history: refer back to them in later turns and never ask the user to send a file again unless the block says no text could be extracted.`,
       `Tool discipline: never repeat a call with identical arguments. If a call fails, read the error (it says why and how to fix it), change something, or stop and ask the user. After two failures of the same kind, stop and report. When a tool returns an empty result, say so instead of retrying variations endlessly.`,
     ].join('\n');
+    const git = H.git.state();
     const tail = [
-      H.fs.hasRoot() ? `A workspace folder named "${H.fs.name()}" is open; file tools operate relative to it.` : `No workspace folder is open; file tools will fail until the user opens one (top bar > Workspace).`,
+      H.fs.hasRoot() ? `A workspace folder named "${H.fs.name()}" is open; file tools operate relative to it.${git?.branch ? ` It is a git repository on branch "${git.branch}"${git.dirty != null ? ` with ${git.dirty} changed and ${git.untracked} untracked file(s) as of the last git_status` : ''}.` : ''}` : `No workspace folder is open; file tools will fail until the user opens one (top bar > Workspace).`,
       `Older tool results in this conversation may appear as short stubs marked [tool result truncated]; call the tool again if you need the full data.`,
       `Date: ${new Date().toISOString().slice(0, 10)}. Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}.`,
     ].join('\n');
-    return (s.systemPrompt ? s.systemPrompt + '\n\n' : '') + env + H.plugins.promptSection() + H.skills.promptSection() + (mode === 'plan' ? '\n\n' + PLAN_PROMPT : '') + '\n\n' + tail;
+    return (s.systemPrompt ? s.systemPrompt + '\n\n' : '') + env + H.plugins.promptSection() + H.skills.promptSection() + H.code.promptSection() + (mode === 'plan' ? '\n\n' + PLAN_PROMPT : '') + '\n\n' + tail;
   }
 
   /* What the model sees: compacted messages are replaced by their summary; old tool results become stubs. */

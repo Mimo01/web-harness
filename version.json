@@ -1,6 +1,6 @@
 {
-  "version": "1.14.5",
-  "date": "2026-09-10",
+  "version": "1.15.0",
+  "date": "2026-09-11",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "preview panel: Download button saves the rendered HTML as a file (the model's original HTML, without the injected preview policy)"
+  "notes": "code projects and git: project_overview, code_outline/code_symbol/code_deps, gitignore-aware cached search index, read-only git (status, diff, log, show, file history, branches, blame) parsed straight from .git, workspace snapshots for folders without a repository, AGENTS.md as project instructions, branch on the workspace button and rendered diffs in tool cards"
 }

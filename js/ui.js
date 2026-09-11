@@ -262,6 +262,37 @@ H.ui = (() => {
       el('div', { class: 'row gap', style: 'margin-top:6px' }, [el('button', { class: 'btn sm primary', onclick: send }, ['Answer']), el('button', { class: 'btn sm ghost', onclick: () => H.agent.answerQuestion(chatId, '(The user chose not to answer. Proceed with your best judgement or explain what you need.)') }, ['Skip'])]),
     ]);
   }
+  /* Tool results that carry unified diffs (git_diff, git_show, workspace_changes…) are worth looking at,
+     not reading as JSON. fs_edit gets the same treatment, reconstructed from its own arguments. */
+  function patchesOf(m) {
+    const out = [];
+    const push = (path, patch) => { if (typeof patch === 'string' && patch.trim()) out.push({ path: path || '', patch }); };
+    if (m.name === 'fs_edit' && m.meta?.args?.old_string && !m.meta?.error) {
+      const a = m.meta.args;
+      push(a.path, H.diff.unified(String(a.old_string), String(a.new_string ?? ''), { path: a.path || 'file', context: 1 }));
+      return out.length ? out : null;
+    }
+    if (!m.content || m.content[0] !== '{') return null;
+    let d; try { d = JSON.parse(m.content); } catch { return null; }
+    if (d?.error) return null;
+    for (const f of d.files || []) push(f.path, f.patch);
+    for (const c of d.commits || []) for (const f of c.changes || []) push(f.path, f.patch);
+    if (!out.length) push(d.path, d.patch);
+    return out.length ? out : null;
+  }
+  const MAX_DIFF_LINES = 400;
+  function renderPatch({ path, patch }) {
+    const lines = patch.split('\n');
+    const shown = lines.slice(0, MAX_DIFF_LINES);
+    const pre = el('pre', { class: 'diff' });
+    for (const line of shown) {
+      const c = line[0];
+      const cls = line.startsWith('---') || line.startsWith('+++') ? 'dh' : line.startsWith('@@') ? 'dk' : c === '+' ? 'da' : c === '-' ? 'dr' : c === '\\' ? 'dh' : '';
+      pre.append(el('span', { class: 'dl' + (cls ? ' ' + cls : '') }, [line === '' ? '\n' : line + '\n']));
+    }
+    if (lines.length > shown.length) pre.append(el('span', { class: 'dl dh' }, [`… ${lines.length - shown.length} more lines\n`]));
+    return el('div', { class: 'diff-wrap' }, [path ? el('div', { class: 'diff-path' }, [path]) : null, pre]);
+  }
   function updateTool(node, m) {
     const bodyKey = (m.meta?.running ? 'r' : 'd') + '|' + (m.meta?.error || '') + '|' + (m.content?.length || 0) + '|' + (m.meta?.question ? JSON.stringify(m.meta.question.answered ?? null) : '');
     const bodyChanged = node._bodyKey !== bodyKey; node._bodyKey = bodyKey;
@@ -288,7 +319,15 @@ H.ui = (() => {
     }
     const body = node.querySelector('.tbody'); body.innerHTML = '';
     body.append(el('div', { class: 'lbl' }, ['Arguments']), el('pre', {}, [typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a || '')]));
-    if (!m.meta?.running) { let out = m.content; try { out = JSON.stringify(JSON.parse(out), null, 2); } catch { } body.append(el('div', { class: 'lbl' }, ['Result', el('span', { class: 'lbl-extra' }, [H.fmtBytes(m.content.length)])]), el('pre', {}, [H.clamp(out, 20000)])); }
+    if (!m.meta?.running) {
+      const patches = patchesOf(m);
+      if (patches) {
+        body.append(el('div', { class: 'lbl' }, ['Changes', el('span', { class: 'lbl-extra' }, [patches.length + (patches.length === 1 ? ' file' : ' files')])]));
+        for (const p of patches) body.append(renderPatch(p));
+      }
+      let out = m.content; try { out = JSON.stringify(JSON.parse(out), null, 2); } catch { }
+      body.append(el('div', { class: 'lbl' }, ['Result', el('span', { class: 'lbl-extra' }, [H.fmtBytes(m.content.length)])]), el('pre', {}, [H.clamp(out, patches ? 4000 : 20000)]));
+    }
     body.append(el('div', { class: 'rerun-slot' }));
   }
   async function rerunTool(node, tool, args) {
@@ -448,7 +487,22 @@ H.ui = (() => {
     } catch (e) { setStatus('error', 'LiteLLM unreachable'); console.warn(e); throw e; }
   }
   function setStatus(kind, text) { const s = $('#status'); s.className = kind; s.querySelector('.txt').textContent = text; }
-  function updateWorkspaceBtn(name) { $('#ws-btn .lbl').textContent = name || 'Workspace'; $('#ws-btn').classList.toggle('primary', !!name); }
+  /* "folder · branch ●3" — the branch comes from .git/HEAD (one small read); the change count only
+     appears once something has actually run git_status, it is never computed to paint a button. */
+  function updateWorkspaceBtn(name) {
+    const n = (name === undefined ? H.fs.name() : name) || '';
+    const btn = $('#ws-btn');
+    btn.querySelector('.lbl').textContent = n || 'Workspace';
+    btn.classList.toggle('primary', !!n);
+    const g = n ? H.git.state() : null;
+    let tag = btn.querySelector('.ws-git');
+    if (g?.branch) {
+      if (!tag) { tag = el('span', { class: 'ws-git' }); btn.append(tag); }
+      const dirty = (g.dirty || 0) + (g.untracked || 0);
+      tag.textContent = '· ' + g.branch + (dirty ? ' ●' + dirty : '');
+      btn.title = `${n} — git branch ${g.branch}` + (g.dirty != null ? `, ${g.dirty} changed and ${g.untracked} untracked file(s) at the last git_status` : '');
+    } else { tag?.remove(); btn.title = n ? `Workspace folder: ${n}` : 'Open a local folder as the workspace for file tools'; }
+  }
   function updateModeUI() {
     const mode = H.perms.effectiveMode(); const sel = $('#mode-select'); sel.value = H.settings.get('chatMode');
     document.body.dataset.mode = mode;
@@ -864,6 +918,10 @@ H.ui = (() => {
         el('li', {}, ['web_fetch and http_request ask once per site (origin) in Default and Plan mode; "Allow this site for session" / "Always allow this site" remember the answer. A request routed through a connected browser tab (your login session) always asks, in every mode.']),
         el('li', {}, ['Tool output is treated as untrusted; the system prompt tells the model not to follow instructions embedded in fetched content. Review permission prompts for http_request and plugin write calls, which could exfiltrate data if the model is manipulated.']),
       ])]),
+      sec('Workspace & code', 'How the assistant reads the folder you open. Nothing here sends anything anywhere.', [
+        check('Follow the project\'s .gitignore when listing and searching files', 'respectGitignore', 'off = only the usual noise folders (node_modules, dist, build…) are skipped'),
+        check('Load AGENTS.md / CLAUDE.md from the workspace root as project instructions', 'projectContextFile', 'the file becomes part of the system prompt; turn this off for folders you do not trust'),
+      ]),
       sec('Update checks', null, [check('Check GitHub for a newer version (startup and every hour)', 'checkUpdates', 'only a public version file is fetched; no data about you is sent')]),
       sec('Python runtime', null, [check('Allow downloading Pyodide from the configured URL when Python is first used', 'allowPyodideCdn'), field('Pyodide URL', 'pyodideUrl')]),
     ]);
@@ -1074,6 +1132,7 @@ H.ui = (() => {
       H.toast('All plugins connected ✓', 'success', 2500);
     };
     H.bus.on('workspace', updateWorkspaceBtn);
+    H.bus.on('git-state', () => updateWorkspaceBtn());
     H.bus.on('preview', showPreview);
     H.bus.on('settings', (s) => { if ($('#mode-select').value !== s.chatMode) updateModeUI(); if ($('#model-select').value !== s.model) fillModelSelect($('#model-select'), s.models || [], s.model); });
     H.bus.on('perm-prompt', () => { try { if (document.hidden && Notification.permission === 'granted') new Notification('Permission needed', { body: 'The assistant is waiting for your approval.' }); } catch { } });

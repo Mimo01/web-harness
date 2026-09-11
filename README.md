@@ -11,9 +11,10 @@
 </p>
 
 Point it at your **LiteLLM proxy** (or any OpenAI-compatible endpoint) and the model gets hands: it reads and edits
-files in a folder you choose, runs Python and JavaScript, calls REST APIs, works your **Jira**, **GitHub** and
-**GitLab**, follows reusable **skills**, and asks before doing anything risky. Locked-down laptop? That's the
-whole point: it's a folder of static files. Double-click `index.html` and you're in.
+files in a folder you choose, **understands code projects and reads their git history**, runs Python and JavaScript,
+calls REST APIs, works your **Jira**, **GitHub** and **GitLab**, follows reusable **skills**, and asks before doing
+anything risky. Locked-down laptop? That's the whole point: it's a folder of static files. Double-click `index.html`
+and you're in.
 
 ## 🚀 Install
 
@@ -49,7 +50,14 @@ Don't want the check? Turn it off in Settings → Security & privacy; it only ev
 - **Attach anything**: PDF, Word, PowerPoint, Excel/CSV, code and text files become text; images are resized and
   sent as vision input; videos become sampled frames plus a transcript; audio becomes a transcript (transcription
   uses a speech model on your proxy, e.g. whisper). All of it happens in the browser; nothing is uploaded elsewhere.
-- **40+ built-in tools**: files, code execution (Python via Pyodide, JavaScript in a sandbox), web, data, memory.
+- **Code projects, understood**: one call orients the model in an unfamiliar repo (languages, structure, manifests,
+  entry points); it navigates by symbol rather than by string, follows the import graph, and greps a `.gitignore`-aware
+  index instead of re-reading every file.
+- **Git, read-only**: the harness parses `.git` itself — branch, status, uncommitted diff, log, commit contents, file
+  history, blame — with no git binary and no server. It never writes to a repository. No `.git`? Take a snapshot of the
+  folder and it will still show you everything that changed.
+- **50+ built-in tools**: files, code intelligence, git, code execution (Python via Pyodide, JavaScript in a sandbox),
+  web, data, memory.
 - **Three chat modes**: *Default* asks before writes, *Allow all* just goes, *Plan* investigates read-only and
   hands you a plan with an **Execute** button.
 - **Skills**: reusable playbooks you trigger with `/name` or the model picks up on its own.
@@ -64,10 +72,12 @@ Don't want the check? Turn it off in Settings → Security & privacy; it only ev
 
 ## 🧭 Quick tour
 
-1. Click **Workspace** and pick a project folder. Ask: *"List the files and summarize what this project does."*
-2. Switch to **Plan mode** and ask: *"Plan how to add unit tests."* Review the plan, hit **Execute**.
-3. Type `/research` followed by a topic, or `/review` on a file, to use a skill.
-4. Settings → **Plugins** → *Set up* Jira or GitLab, click the bookmarklet on your logged-in tab, then ask:
+1. Click **Workspace** and pick a project folder. Ask: *"Summarize what this project does and how it is put together."*
+   (or type `/explain-repo`). If it is a git checkout, the branch appears next to the folder name.
+2. Ask *"What have I changed?"* — or type `/review-diff` to have the uncommitted diff reviewed.
+3. Switch to **Plan mode** and ask: *"Plan how to add unit tests."* Review the plan, hit **Execute**.
+4. Type `/research` followed by a topic, or `/review` on a file, to use a skill.
+5. Settings → **Plugins** → *Set up* Jira or GitLab, click the bookmarklet on your logged-in tab, then ask:
    *"What are my open issues? Group them by status."*
 
 ## 📚 Features in detail
@@ -81,7 +91,9 @@ Multiple persisted conversations, streaming responses, markdown + syntax highlig
 | Group | Tools |
 |---|---|
 | Documents & media | chat attachments, `fs_upload_from_user` and `fs_read` convert PDF (pdf.js), .docx / .pptx (JSZip + XML), .xlsx / .xls / .ods / .csv (SheetJS) to text, client-side. Images are downscaled (max 1600 px) and sent as vision input; `view_image` lets the model look at an image in the workspace. Videos: up to 6 sampled frames + transcript; audio: transcript (needs a transcription model set in Settings → Model). HEIC and legacy .doc/.ppt are reported as unsupported. |
-| Files (workspace folder you pick) | `fs_list`, `fs_read`, `fs_write`, `fs_edit`, `fs_append`, `fs_mkdir`, `fs_delete`, `fs_move`, `fs_stat`, `fs_search` (grep), `fs_find` (glob), `fs_upload_from_user`, `download_file` |
+| Files (workspace folder you pick) | `fs_list`, `fs_read` (one file, a line range, or several at once), `fs_write`, `fs_edit`, `fs_append`, `fs_mkdir`, `fs_delete`, `fs_move`, `fs_stat`, `fs_search` (grep with context lines, globs and `.gitignore` rules), `fs_find` (glob), `fs_upload_from_user`, `download_file` |
+| Code intelligence | `project_overview` (languages, structure, manifests, entry points, tests, CI, README, git state — the first call in an unfamiliar project), `code_outline` (a file's classes/functions/imports with line numbers, without reading it), `code_symbol` (definitions and references of a name), `code_deps` (what a file imports, and what imports it), `workspace_snapshot` / `workspace_changes` (diff a folder against a baseline when it is not a repository) |
+| Git (read-only) | `git_status`, `git_diff` (working tree or between refs, with a `downloadAs` patch export), `git_log`, `git_show`, `git_show_file` (a file at any commit), `git_file_history`, `git_branches`, `git_blame` |
 | Code | `run_javascript` (sandboxed Web Worker), `run_python` (Pyodide, numpy/pandas etc.), `run_file` (.js/.py/.html/.json), `render_html` (preview panel), `calculate` |
 | Web | `web_fetch` (direct, HTML → text), `web_search` (needs a configured provider), `http_request` (call any API), `open_url` |
 | Data | `json_query`, `regex_extract`, `csv_parse`, `text_stats`, `base64`, `hash_text` |
@@ -93,6 +105,39 @@ Multiple persisted conversations, streaming responses, markdown + syntax highlig
 
 Click **📁 Workspace** to grant access to a local folder; file tools operate inside it (path traversal is blocked).
 Browsers without the File System Access API fall back to an in-memory workspace.
+
+### Code projects & git
+Open a project folder and the assistant treats it as a codebase rather than a pile of files.
+
+- **Orientation in one call.** `project_overview` returns languages by size, the directory shape, parsed manifests
+  (`package.json` scripts and dependencies, `pyproject.toml`, `go.mod`, `Cargo.toml`, `pom.xml`, `Gemfile`,
+  `composer.json`…), entry points, where the tests and CI live, the head of the README, and the git branch and remote.
+- **Navigation by meaning.** `code_outline` lists a file's classes, functions, methods and imports with line numbers so
+  a 3000-line file can be understood without reading it; `code_symbol` separates the *definition* of a name from its
+  *uses*; `code_deps` answers "what does this file import, and what breaks if I change it". Outline rules cover
+  JavaScript/TypeScript, Python, Go, Rust, Java, Kotlin, C#, Ruby, PHP, Swift, C/C++, shell, SQL, CSS and Markdown.
+- **Search that scales.** One cached index of the folder (invalidated when anything is written) backs `fs_search`,
+  `fs_find` and `fs_list`; it follows the project's `.gitignore` and skips binaries, minified bundles and lockfiles.
+  Searches return matches grouped per file, with optional context lines.
+- **Git without git.** The harness reads `.git` directly — loose objects *and* packfiles (including deltas), refs and
+  `packed-refs`, the index (v2/v3/v4), trees and commits — using its own inflate implementation. So `git_status`,
+  `git_diff`, `git_log`, `git_show`, `git_file_history`, `git_branches` and `git_blame` work on a folder that was
+  cloned on some other machine, on a network share, or inside a zip that happened to contain `.git`. Nothing is ever
+  written into `.git`: the harness cannot commit, push, checkout or stage, and therefore cannot corrupt a repository.
+  `git_diff` can hand you the patch as a downloaded `.patch` file, which is the practical way to get a change out of a
+  machine that has no git command.
+- **No repository? Still diffable.** `workspace_snapshot` records a baseline of the folder and `workspace_changes`
+  then reports every file added, changed or deleted since, with the same unified diffs — the answer to "show me
+  everything you just changed" in a folder extracted from a zip.
+- **Project instructions.** An `AGENTS.md`, `CLAUDE.md`, `.harness/context.md` or `HARNESS.md` in the workspace root is
+  loaded into the system prompt as your standing instructions for that project (a toast tells you when it happens;
+  turn it off in Settings → Security & privacy → *Workspace & code*).
+- **In the interface.** The Workspace button shows the branch and, once something has run `git_status`, how many files
+  differ. Tool results that carry a diff — `git_diff`, `git_show`, `workspace_changes`, and `fs_edit` — are rendered as
+  a real diff instead of raw JSON.
+
+The `/review-diff` and `/explain-repo` skills use all of this; `/commit` writes a commit message from the actual diff
+(you paste it, since the harness cannot commit).
 
 ### Chat modes & permissions
 Pick a mode (and the model) in the pills under the message box; both apply to the chat you are in and to new chats:
@@ -213,7 +258,8 @@ credentials live in the browser and there is no CORS issue.
   third parties. The only other hosts contacted are CDNs that serve static code and fonts at startup (cdnjs for
   marked / DOMPurify / highlight.js, Google Fonts) and jsDelivr for Pyodide on first Python use; none of your data is
   sent to them.
-- **Storage.** Settings, policies, skills and plugin manifests: `localStorage`. Chats, memories, usage: IndexedDB.
+- **Storage.** Settings, policies, skills and plugin manifests: `localStorage`. Chats, memories, usage and workspace
+  snapshots: IndexedDB.
   API key and plugin credentials: a separate secret store, either `localStorage` (remembered) or `sessionStorage`
   (cleared when the tab closes) — toggle in Security & privacy. Exports never contain secrets. Plugin manifests are
   saved with credentials stripped.
@@ -246,7 +292,14 @@ credentials live in the browser and there is no CORS issue.
   manifest expressions run in a Worker with fetch, XHR, WebSocket, EventSource, importScripts and nested workers
   removed; HTML previews get an injected CSP (`connect-src 'none'`, no remote images or form posts); markdown images
   are click-to-load placeholders, never fetched on render. Use Plan mode when exploring untrusted content, and review
-  the arguments in every permission prompt.
+  the arguments in every permission prompt. One deliberate exception: a project context file (`AGENTS.md`,
+  `CLAUDE.md`, …) in the workspace root is treated as *your* instructions, not as untrusted data — that is the point of
+  it. A toast names the file whenever one is loaded, and the switch is in Settings → Security & privacy → *Workspace &
+  code*; turn it off before opening a repository you did not write.
+- **Git is read-only.** The git tools parse `.git` and never write to it, so nothing the model does can rewrite,
+  corrupt or lose history; there is no commit, push, checkout or stage. Reading a repository does execute the
+  harness's own object parsers over files from that repository, so the usual rule applies: only open folders you
+  would open in an editor.
 - **Residual risks.** Anything stored in the browser profile is readable by other extensions or someone with access
   to your machine. Serve the app from a trusted origin; if you open it via `file://` the origin is `null`.
 
@@ -265,6 +318,9 @@ extension/        the browser extension (Manifest V3): load unpacked in Chrome/E
 js/permissions.js policies + permission prompt
 js/llm.js         LiteLLM client (SSE streaming, tool calls)
 js/fs.js          File System Access API workspace
+js/diff.js        text diff engine (line diff, unified patches)
+js/code.js        the workspace as a codebase: ignore rules, file index, grep, outlines, symbols, imports, snapshots
+js/git.js         read-only git: inflate, loose objects and packfiles, refs, index, trees, status, diff, log, blame
 js/runtime.js     JS worker sandbox, Pyodide, HTML preview
 js/tools.js       built-in tools registry
 js/plugins.js     REST plugin engine, MCP client, Jira/GitHub manifests
@@ -273,7 +329,8 @@ js/agent.js       agent loop
 js/ui.js          UI
 js/app.js         bootstrap
 skills/           example skills to import
-dev/              optional dev helpers: serve.js (static server), mock-litellm.js (fake OpenAI API for testing)
+dev/              optional dev helpers: serve.js (static server), mock-litellm.js (fake OpenAI API),
+                  codetest.html (runs the code and git modules against a real .git and checks them against git itself)
 ```
 
 ## 🚢 Releasing
@@ -290,6 +347,13 @@ load time) and to `version.json` (what the update check reads), then commits and
 node dev/mock-litellm.js   # fake OpenAI-compatible API on :4000 (echoes, emits sample tool calls)
 node dev/serve.js          # static server on :8765
 ```
+The code and git modules have their own test page. With the server running, open
+http://localhost:8765/dev/codetest.html: it swaps a `fetch`-backed adapter into `H.fs` (the modules only ever talk to
+`H.fs`, so no folder picker is involved) and checks every parser against the real `git` command through the dev
+server's read-only `/__git` endpoint — object types, blob contents, trees, log, index, status, diffs and blame. Put
+another repository's path in the box at the top to run the same suite against it; a fully packed clone
+(`git clone --local … && git repack -a -d`) is the one worth trying, since it exercises packfiles and deltas.
+
 Then set base URL `http://localhost:4000`, any API key, model `mock-gpt`. Messages containing "calc" trigger a
 `calculate` tool call; messages containing "ask" trigger `fs_write` (exercises the permission prompt).
 Libraries (marked, DOMPurify, highlight.js, fonts) load from public CDNs so the folder works out of the box with no
@@ -301,7 +365,10 @@ runs (plain-text markdown, no Python).
 Designed to stay light on modest laptops: no framework, nothing runs while idle, libraries load only when needed.
 Streaming renders at most once per animation frame (syntax highlighting happens once, when the reply is complete),
 long chats render their most recent part with a "Show earlier messages" control, tool cards rebuild their body only
-when the result changes, the sidebar works from a small in-memory index, and storage writes are coalesced. The heavy
+when the result changes, the sidebar works from a small in-memory index, and storage writes are coalesced. The
+workspace is walked once into a cached file index (invalidated whenever a file tool writes) that search, globbing and
+the code tools share, with a bounded cache of file contents on top; git objects, trees and refs are cached per
+repository state, and packfiles are read through byte ranges rather than loaded whole. The heavy
 optional parts are Pyodide (Python, ~10 MB download and a few seconds of CPU on first use) and parsing very large
 PDFs; both happen only when you use them.
 

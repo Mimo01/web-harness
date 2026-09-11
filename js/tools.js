@@ -31,29 +31,57 @@ H.tools = (() => {
   /* ===================== FILE SYSTEM ===================== */
   def({
     name: 'fs_list', group: 'Files', risk: 'safe',
-    description: 'List files and directories in the workspace. Returns paths relative to workspace root.',
-    parameters: obj({ path: str('Directory path relative to workspace root (empty = root)'), recursive: bool('List recursively (skips node_modules/.git etc.)') }),
-    run: async ({ path = '', recursive = false }) => ok({ workspace: H.fs.name(), entries: await H.fs.list(path, { recursive }) }),
+    description: 'List files and directories in the workspace. Returns paths relative to workspace root. A recursive listing follows the project\'s .gitignore and skips .git and node_modules. For a first look at an unfamiliar project use project_overview instead.',
+    parameters: obj({ path: str('Directory path relative to workspace root (empty = root)'), recursive: bool('List recursively (respects .gitignore)') }),
+    run: async ({ path = '', recursive = false }) => {
+      if (!recursive) return ok({ workspace: H.fs.name(), entries: await H.fs.list(path, { recursive: false }) });
+      const base = String(path || '').replace(/^\.?\/+/, '').replace(/\/+$/, '');
+      const { files, dirs, truncated } = await H.code.index();
+      const inScope = (p) => !base || p === base || p.startsWith(base + '/');
+      const entries = files.filter(f => inScope(f.path)).map(f => ({ path: f.path, kind: 'file', size: f.size }));
+      return ok({
+        workspace: H.fs.name(), count: entries.length, directories: dirs.filter(d => d.path && inScope(d.path)).map(d => d.path).slice(0, 500),
+        entries: entries.slice(0, 2000), truncated: truncated || entries.length > 2000,
+      });
+    },
   });
+  async function readOneFile(path, startLine, endLine, ctx, budget = 60000) {
+    let text;
+    if (H.extract.kindOf(path) === 'image') throw new Error(`${path} is an image. Use view_image to look at it.`);
+    if (['video', 'audio', 'binary', 'heic'].includes(H.extract.kindOf(path))) throw new Error(`${path} is a ${H.extract.kindOf(path)} file; it has no text to read. (Videos/audio can be attached by the user in the chat for frame sampling / transcription.)`);
+    if (H.extract.isDocument(path)) {
+      const file = await H.fs.readFile(path, { binary: true });
+      const blob = file instanceof Blob ? file : new Blob([file]);
+      const r = await H.extract.fromFile(Object.assign(blob, { name: path.split('/').pop() }), { onStatus: ctx?.onStatus });
+      if (r.kind !== 'text') throw new Error(r.note || 'No text could be extracted');
+      text = r.text ?? r.content; if (r.note) text = `[${r.note}]\n` + text;
+    } else text = (await H.fs.readFile(path)).replace(/\r\n/g, '\n');
+    const lines = text.split('\n');
+    const s = Math.max(1, startLine || 1), e = Math.min(lines.length, endLine || lines.length);
+    const slice = lines.slice(s - 1, e).map((l, i) => `${String(s + i).padStart(5)}| ${l}`).join('\n');
+    return { path, totalLines: lines.length, from: s, to: e, content: H.clamp(slice, budget) };
+  }
   def({
     name: 'fs_read', group: 'Files', risk: 'safe',
-    description: 'Read a file from the workspace as text. PDF, Word (.docx), PowerPoint (.pptx) and spreadsheets (.xlsx/.xls/.ods/.csv) are converted to text automatically. Optionally a line range.',
-    parameters: obj({ path: str('File path'), startLine: num('1-based first line (optional)'), endLine: num('1-based last line inclusive (optional)') }, ['path']),
-    run: async ({ path, startLine, endLine }, ctx) => {
-      let text;
-      if (H.extract.kindOf(path) === 'image') throw new Error(`${path} is an image. Use view_image to look at it.`);
-      if (['video', 'audio', 'binary', 'heic'].includes(H.extract.kindOf(path))) throw new Error(`${path} is a ${H.extract.kindOf(path)} file; it has no text to read. (Videos/audio can be attached by the user in the chat for frame sampling / transcription.)`);
-      if (H.extract.isDocument(path)) {
-        const file = await H.fs.readFile(path, { binary: true });
-        const blob = file instanceof Blob ? file : new Blob([file]);
-        const r = await H.extract.fromFile(Object.assign(blob, { name: path.split('/').pop() }), { onStatus: ctx?.onStatus });
-        if (r.kind !== 'text') throw new Error(r.note || 'No text could be extracted');
-        text = r.text ?? r.content; if (r.note) text = `[${r.note}]\n` + text;
-      } else text = (await H.fs.readFile(path)).replace(/\r\n/g, '\n');
-      const lines = text.split('\n');
-      const s = Math.max(1, startLine || 1), e = Math.min(lines.length, endLine || lines.length);
-      const slice = lines.slice(s - 1, e).map((l, i) => `${String(s + i).padStart(5)}| ${l}`).join('\n');
-      return ok({ path, totalLines: lines.length, from: s, to: e, content: H.clamp(slice, 60000) });
+    description: 'Read a file from the workspace as text, with line numbers. PDF, Word (.docx), PowerPoint (.pptx) and spreadsheets (.xlsx/.xls/.ods/.csv) are converted to text automatically. Optionally a line range; pass `paths` to read several files in one call ("src/a.js" or "src/a.js:120-260").',
+    parameters: obj({
+      path: str('File path'), startLine: num('1-based first line (optional)'), endLine: num('1-based last line inclusive (optional)'),
+      paths: { type: 'array', items: { type: 'string' }, description: 'Several files at once, each "path" or "path:startLine-endLine". Use instead of path.' },
+    }),
+    run: async ({ path, startLine, endLine, paths }, ctx) => {
+      if (Array.isArray(paths) && paths.length) {
+        const budget = Math.max(4000, Math.floor(60000 / paths.length));
+        const files = [];
+        for (const spec of paths.slice(0, 25)) {
+          const m = String(spec).match(/^(.*?):(\d+)-(\d+)$/);
+          const p = m ? m[1] : String(spec);
+          try { files.push(await readOneFile(p, m ? Number(m[2]) : undefined, m ? Number(m[3]) : undefined, ctx, budget)); }
+          catch (e) { files.push({ path: p, error: H.explainError(e, { path: p }) }); }
+        }
+        return ok({ files, note: paths.length > 25 ? 'Only the first 25 paths were read.' : undefined });
+      }
+      if (!path) throw new Error('fs_read needs either "path" or "paths".');
+      return ok(await readOneFile(path, startLine, endLine, ctx));
     },
   });
   def({
@@ -105,15 +133,24 @@ H.tools = (() => {
   });
   def({
     name: 'fs_search', group: 'Files', risk: 'safe',
-    description: 'Search file contents (grep). Returns matching lines with file and line number.',
-    parameters: obj({ query: str('Text or regex to search for'), path: str('Directory to search in (default root)'), regex: bool('Treat query as a regular expression'), caseSensitive: bool('Case sensitive'), glob: str('Only files matching glob, e.g. *.js or src/**/*.py'), maxResults: num('Max results (default 200)') }, ['query']),
-    run: async (a) => ok({ hits: await H.fs.search(a) }),
+    description: 'Search file contents (grep) across the workspace. Results are grouped by file with line numbers and optional context lines. Files ignored by .gitignore, binaries, minified bundles and lockfiles are skipped.',
+    parameters: obj({
+      query: str('Text or regex to search for'), path: str('Directory to search in (default root)'),
+      regex: bool('Treat query as a regular expression'), caseSensitive: bool('Case sensitive'),
+      glob: str('Only files matching glob, e.g. *.js or src/**/*.py'), exclude: str('Skip files matching this glob'),
+      contextLines: num('Lines of context before and after each match (default 0)'),
+      maxResults: num('Max files with matches (default 100)'), maxPerFile: num('Max matches per file (default 20)'),
+      filesOnly: bool('Return only the file names, not the matching lines'),
+      includeNoisy: bool('Also search lockfiles and generated files'),
+      refresh: bool('Re-scan the workspace instead of using the cached file index'),
+    }, ['query']),
+    run: async (a) => ok(await H.code.search(a)),
   });
   def({
     name: 'fs_find', group: 'Files', risk: 'safe',
-    description: 'Find files by glob pattern, e.g. "**/*.ts" or "*.md".',
-    parameters: obj({ glob: str('Glob pattern'), path: str('Directory to search in') }, ['glob']),
-    run: async ({ glob, path = '' }) => ok({ files: await H.fs.find(glob, path) }),
+    description: 'Find files by glob pattern, e.g. "**/*.ts" or "*.md". Respects .gitignore.',
+    parameters: obj({ glob: str('Glob pattern'), path: str('Directory to search in'), refresh: bool('Re-scan the workspace first') }, ['glob']),
+    run: async ({ glob, path = '', refresh }) => { const files = await H.code.find(glob, path, { refresh }); return ok({ count: files.length, files: files.slice(0, 1000), truncated: files.length > 1000 }); },
   });
   def({
     name: 'fs_upload_from_user', group: 'Files', risk: 'safe',
@@ -148,6 +185,162 @@ H.tools = (() => {
       if (r.kind !== 'image') throw new Error(r.note || 'Not a decodable image');
       (ctx.images ||= []).push({ name: path, content: r.content });
       return ok({ queued: path, note: 'The image will be shown to you as vision input in the next turn.' + (r.note ? ' ' + r.note : '') });
+    },
+  });
+
+  /* ===================== CODE INTELLIGENCE ===================== */
+  def({
+    name: 'project_overview', group: 'Code', risk: 'safe',
+    description: 'Understand the open project in one call: languages and sizes, directory structure, manifests (package.json, pyproject.toml, go.mod, Cargo.toml…) with their scripts and dependencies, entry points, test and CI locations, README head, and git branch/remote if it is a repository. Call this first when you do not already know the project.',
+    parameters: obj({ refresh: bool('Re-scan the workspace instead of using the cached index') }),
+    run: async ({ refresh }) => ok(await H.code.overview({ refresh })),
+  });
+  def({
+    name: 'code_outline', group: 'Code', risk: 'safe',
+    description: 'Structure of a source file without its contents: classes, functions, methods, types and imports with line numbers. Use it to decide which part of a large file to read. Pass a glob instead of a path to outline many files at once.',
+    parameters: obj({ path: str('File path'), glob: str('Outline every file matching this glob instead, e.g. "src/**/*.ts"'), maxSymbols: num('Max symbols per file (default 400)') }),
+    run: async ({ path, glob, maxSymbols }) => {
+      if (glob) return ok(await H.code.outlineGlob(glob, '', {}));
+      if (!path) throw new Error('code_outline needs either "path" or "glob".');
+      return ok(await H.code.outline(path, { maxSymbols }));
+    },
+  });
+  def({
+    name: 'code_symbol', group: 'Code', risk: 'safe',
+    description: 'Find where a symbol (function, class, constant, method) is defined and where it is used. Returns definitions with surrounding context first, then references grouped by file. Better than fs_search when you know the name of the thing you are looking for.',
+    parameters: obj({ name: str('Symbol name, e.g. "executeToolCall" or "UserService"'), path: str('Limit to a directory'), refresh: bool('Re-scan the workspace first') }, ['name']),
+    run: async ({ name, path, refresh }) => ok(await H.code.symbol(name, { path, refresh })),
+  });
+  def({
+    name: 'code_deps', group: 'Code', risk: 'safe',
+    description: 'Import graph around a file: what it imports (resolved to workspace paths where possible) and which files import it. Use it to see what a change would affect.',
+    parameters: obj({ path: str('File path'), reverse: bool('Also find files that import this one (default true)') }, ['path']),
+    run: async ({ path, reverse = true }) => ok(await H.code.deps(path, { reverse })),
+  });
+  def({
+    name: 'workspace_snapshot', group: 'Code', risk: 'safe',
+    description: 'Record the current state of the workspace as a baseline, so workspace_changes can later show everything that changed. Useful in folders that are not git repositories (for example extracted from a zip). Replaces any previous baseline for this folder.',
+    parameters: obj({ note: str('What this baseline marks, e.g. "before refactor"') }),
+    run: async ({ note }) => ok(await H.code.snapshot({ note })),
+  });
+  def({
+    name: 'workspace_changes', group: 'Code', risk: 'safe',
+    description: 'Show every file added, changed or deleted since the last workspace_snapshot, with unified diffs. The non-git equivalent of git_diff; use git_diff when the folder is a repository.',
+    parameters: obj({ paths: { type: 'array', items: { type: 'string' }, description: 'Limit to these files or directories' }, statOnly: bool('Only list the files, without diffs'), context: num('Context lines (default 3)') }),
+    run: async ({ paths, statOnly, context }) => {
+      const r = await H.code.changes({ paths, statOnly, context });
+      return ok(clampDiff(r));
+    },
+  });
+
+  /* ===================== GIT (read-only) ===================== */
+  /* Diffs can be huge: keep whole patches for the first files and fall back to stats for the rest. */
+  function clampDiff(r, budget = 60000) {
+    if (!r?.files?.length) return r;
+    let used = 0, dropped = 0;
+    r.files = r.files.map(f => {
+      if (!f.patch) return f;
+      used += f.patch.length;
+      if (used <= budget) return f;
+      dropped++;
+      const { patch, ...rest } = f;
+      return { ...rest, patchOmitted: `${patch.length} characters; call again with paths:["${f.path}"] to see this one` };
+    });
+    if (dropped) r.note = `${dropped} of ${r.files.length} patches were omitted to stay within a reasonable size. Ask for specific paths, or use statOnly to see the file list first.`;
+    return r;
+  }
+  const gitGroup = 'Git';
+  def({
+    name: 'git_status', group: gitGroup, risk: 'safe',
+    description: 'Current state of the git repository in the workspace: branch, upstream, HEAD commit, and which files are modified, deleted, untracked or staged. Read-only — the harness can never commit, push or check out.',
+    parameters: obj({ thorough: bool('Hash every tracked file instead of trusting size and timestamp (slower, exact)') }),
+    run: async ({ thorough }) => ok(await H.git.status({ thorough })),
+  });
+  def({
+    name: 'git_diff', group: gitGroup, risk: 'safe',
+    description: 'Unified diff. With no arguments: the uncommitted working-tree changes against HEAD (what "git diff HEAD" shows, including untracked files). With `from` (and optionally `to`): the difference between two commits, branches or tags.',
+    parameters: obj({
+      from: str('Commit, branch or tag to compare from (e.g. "HEAD~1", "main", a sha). Omit to diff the working tree.'),
+      to: str('Commit to compare to (default HEAD). Only used together with from.'),
+      paths: { type: 'array', items: { type: 'string' }, description: 'Limit to these files or directories' },
+      context: num('Context lines (default 3)'), statOnly: bool('Only list changed files with their status'),
+      thorough: bool('For the working-tree diff: hash every tracked file instead of trusting timestamps'),
+      downloadAs: str('Also save the full patch to the user\'s Downloads under this file name, e.g. "changes.patch"'),
+    }),
+    run: async ({ from, to, paths, context, statOnly, thorough, downloadAs }) => {
+      const r = from ? await H.git.diffRefs({ from, to: to || 'HEAD', paths, context, statOnly })
+        : await H.git.diffWorktree({ paths, context, thorough });
+      if (statOnly && !from) r.files = r.files.map(({ patch, ...f }) => f);
+      const full = r.files.map(f => f.patch).filter(Boolean).join('');
+      if (downloadAs) { H.download(String(downloadAs).replace(/[/\\]/g, '_'), full || '(no changes)', 'text/x-patch'); r.downloaded = downloadAs; }
+      r.summary = { files: r.files.length, added: r.files.reduce((n, f) => n + (f.added || 0), 0), removed: r.files.reduce((n, f) => n + (f.removed || 0), 0) };
+      return ok(clampDiff(r));
+    },
+  });
+  def({
+    name: 'git_log', group: gitGroup, risk: 'safe',
+    description: 'Commit history: sha, author, date and subject, newest first. Filter by path, author, date or message text.',
+    parameters: obj({
+      ref: str('Branch, tag or commit to start from (default HEAD)'), max: num('How many commits (default 20)'), skip: num('Skip this many first'),
+      path: str('Only commits that touched this file or directory'), author: str('Substring of the author name or email'),
+      since: str('Only commits after this date (ISO, e.g. 2025-01-01)'), until: str('Only commits before this date'),
+      messageContains: str('Only commits whose message contains this text'),
+    }),
+    run: async (a) => ok(await H.git.log(a)),
+  });
+  def({
+    name: 'git_show', group: gitGroup, risk: 'safe',
+    description: 'Everything about one commit: message, author, parents and the files it changed, with their diffs.',
+    parameters: obj({ ref: str('Commit sha, branch or tag (default HEAD)'), patch: bool('Include the diffs (default true)'), context: num('Context lines (default 3)'), paths: { type: 'array', items: { type: 'string' }, description: 'Limit to these files' } }),
+    run: async ({ ref = 'HEAD', patch = true, context, paths }) => {
+      const sha = await H.git.resolve(ref);
+      const c = await H.git.commit(sha);
+      const files = await H.git.commitChanges(sha, { patch, context, paths });
+      return ok(clampDiff({ sha, short: sha.slice(0, 8), subject: c.subject, message: c.message, author: c.author, committer: c.committer, date: c.date, parents: c.parents, fileCount: files.length, files }));
+    },
+  });
+  def({
+    name: 'git_show_file', group: gitGroup, risk: 'safe',
+    description: 'The contents of a file as it was at a given commit, branch or tag — what the file looked like before a change.',
+    parameters: obj({ path: str('File path'), ref: str('Commit, branch or tag (default HEAD)'), startLine: num('1-based first line'), endLine: num('1-based last line') }, ['path']),
+    run: async ({ path, ref = 'HEAD', startLine, endLine }) => {
+      const sha = await H.git.resolve(ref);
+      const map = await H.git.treeMap((await H.git.commit(sha)).tree);
+      const e = map.get(path);
+      if (!e) throw new Error(`"${path}" does not exist at ${ref} (${sha.slice(0, 8)}). Use git_show to see which paths that commit contains.`);
+      const text = await H.git.blobText(e.sha);
+      const lines = text.split('\n');
+      const s = Math.max(1, startLine || 1), en = Math.min(lines.length, endLine || lines.length);
+      return ok({ path, ref, sha: sha.slice(0, 8), blob: e.sha.slice(0, 8), totalLines: lines.length, from: s, to: en, content: H.clamp(lines.slice(s - 1, en).map((l, i) => `${String(s + i).padStart(5)}| ${l}`).join('\n'), 60000) });
+    },
+  });
+  def({
+    name: 'git_file_history', group: gitGroup, risk: 'safe',
+    description: 'The commits that touched one file, newest first, optionally with the change each one made to it.',
+    parameters: obj({ path: str('File path'), max: num('How many commits (default 10)'), patch: bool('Include each commit\'s diff of this file'), ref: str('Start from this ref (default HEAD)') }, ['path']),
+    run: async ({ path, max = 10, patch = false, ref = 'HEAD' }) => {
+      const h = await H.git.log({ ref, path, max });
+      if (!patch) return ok(h);
+      const commits = [];
+      for (const c of h.commits) commits.push({ ...c, files: undefined, changes: await H.git.commitChanges(c.sha, { paths: [path], patch: true }) });
+      return ok(clampDiff({ ...h, commits, files: commits.flatMap(c => c.changes) }));
+    },
+  });
+  def({
+    name: 'git_branches', group: gitGroup, risk: 'safe',
+    description: 'Local branches, remote-tracking branches and tags, each with its tip commit, newest first.',
+    parameters: obj({}),
+    run: async () => ok(await H.git.branches()),
+  });
+  def({
+    name: 'git_blame', group: gitGroup, risk: 'safe',
+    description: 'Who last changed each line of a file, and in which commit. Approximate: it reconstructs attribution from the file\'s history and does not follow renames.',
+    parameters: obj({ path: str('File path'), ref: str('Start from this ref (default HEAD)'), maxRevisions: num('How far back to walk (default 40)'), startLine: num('First line to return'), endLine: num('Last line to return') }, ['path']),
+    run: async ({ path, ref, maxRevisions, startLine, endLine }) => {
+      const r = await H.git.blame(path, { ref, maxRevisions });
+      if (startLine || endLine) r.lines = r.lines.slice(Math.max(0, (startLine || 1) - 1), endLine || undefined);
+      if (r.lines.length > 600) { r.note = `Showing the first 600 of ${r.lines.length} lines; pass startLine/endLine for the rest.`; r.lines = r.lines.slice(0, 600); }
+      return ok(r);
     },
   });
 

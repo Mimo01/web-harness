@@ -72,7 +72,10 @@ H.fs = (() => {
     if (binary) return f;
     return await f.text();
   }
+  /* any change to the workspace invalidates the code index and content cache */
+  const touched = () => { try { H.code.bump(); } catch { } };
   async function writeFile(path, content) {
+    touched();
     if (!root) { virtual.set(norm(path).join('/'), String(content)); return { virtual: true }; }
     await ensure();
     const fh = await fileHandle(path, true);
@@ -83,6 +86,7 @@ H.fs = (() => {
   }
   /* append without reading or rewriting the existing content: keep the file, seek to its end, write the new part */
   async function appendFile(path, content) {
+    touched();
     if (!root) { const k = norm(path).join('/'); virtual.set(k, (virtual.get(k) || '') + String(content)); return { virtual: true }; }
     await ensure();
     const fh = await fileHandle(path, true);
@@ -105,24 +109,29 @@ H.fs = (() => {
     await d.getDirectoryHandle(name);
     return { name, kind: 'directory' };
   }
-  async function list(path = '', { recursive = false, maxEntries = 500 } = {}) {
+  /* skipDir(name, path) decides which directories a recursive walk descends into. H.code passes the
+     repository's .gitignore rules; without one the noise list below is used. */
+  const DEFAULT_SKIP = ['node_modules', '.git', 'dist', 'build', '.venv', '__pycache__'];
+  async function list(path = '', { recursive = false, maxEntries = 500, skipDir = null } = {}) {
     if (!root) { return [...virtual.keys()].filter(k => !path || k.startsWith(norm(path).join('/'))).map(k => ({ path: k, kind: 'file', size: virtual.get(k).length })); }
     await ensure();
     const base = guard(norm(path));
+    const skip = skipDir || ((name) => DEFAULT_SKIP.includes(name));
     const out = [];
     async function walk(d, prefix) {
       for await (const [name, h] of d.entries()) {
         if (out.length >= maxEntries) return;
         const p = prefix ? prefix + '/' + name : name;
         if (h.kind === 'file') { const f = await h.getFile(); out.push({ path: p, kind: 'file', size: f.size, modified: f.lastModified }); }
-        else { out.push({ path: p, kind: 'directory' }); if (recursive && !['node_modules', '.git', 'dist', 'build', '.venv', '__pycache__'].includes(name)) await walk(h, p); }
+        else { out.push({ path: p, kind: 'directory' }); if (recursive && !skip(name, p)) await walk(h, p); }
       }
     }
     await walk(await dirHandle(base), base.join('/'));
     return out;
   }
-  async function mkdir(path) { if (!root) return { virtual: true }; await ensure(); await dirHandle(guard(norm(path)), true); return { ok: true }; }
+  async function mkdir(path) { touched(); if (!root) return { virtual: true }; await ensure(); await dirHandle(guard(norm(path)), true); return { ok: true }; }
   async function remove(path, { recursive = false } = {}) {
+    touched();
     if (!root) { virtual.delete(norm(path).join('/')); return { ok: true }; }
     await ensure();
     const parts = guard(norm(path)); const name = parts.pop();
@@ -136,29 +145,13 @@ H.fs = (() => {
     await remove(from);
     return { ok: true };
   }
-  const isTextLike = (name) => !/\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|7z|exe|dll|so|dylib|woff2?|ttf|otf|mp[34]|mov|avi|bin|class|pyc|wasm)$/i.test(name);
-  async function search({ query, path = '', regex = false, caseSensitive = false, glob = '', maxResults = 200 }) {
-    const files = (await list(path, { recursive: true, maxEntries: 5000 })).filter(e => e.kind === 'file' && isTextLike(e.path) && (!glob || globMatch(glob, e.path)));
-    const re = new RegExp(regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), caseSensitive ? 'g' : 'gi');
-    const hits = [];
-    for (const f of files) {
-      if (f.size > 2_000_000) continue;
-      let text; try { text = await readFile(f.path); } catch { continue; }
-      const lines = text.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (re.test(lines[i])) { hits.push({ file: f.path, line: i + 1, text: lines[i].trim().slice(0, 300) }); re.lastIndex = 0; if (hits.length >= maxResults) return hits; }
-        re.lastIndex = 0;
-      }
-    }
-    return hits;
-  }
+  /* content search runs on H.code's cached, ignore-aware index */
+  const search = (opts) => H.code.search(opts);
   function globMatch(glob, path) {
     const re = new RegExp('^' + glob.split('**').map(seg => seg.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')).join('.*') + '$');
     return re.test(path) || re.test(path.split('/').pop());
   }
-  async function find(glob, path = '') {
-    return (await list(path, { recursive: true, maxEntries: 5000 })).filter(e => globMatch(glob, e.path)).map(e => e.path);
-  }
+  const find = (glob, path = '') => H.code.find(glob, path);
 
   /* CRLF-aware exact replacement; returns { text, count } or throws with a helpful message */
   function replaceText(text, oldStr, newStr, all) {
