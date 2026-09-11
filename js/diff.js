@@ -115,7 +115,10 @@ H.diff = (() => {
     // flatten to per-line ops with line numbers
     const ops = []; let ai = 0, bi = 0;
     for (const p of script) {
-      if (!(p.lines.length === 1 && p.lines[0] === '' && !a.length && !b.length)) {
+      /* an absent or empty side reaches the line differ as a single empty line; that phantom line is not a change,
+         or a created file would open with a "-" of nothing */
+      const phantom = p.lines.length === 1 && p.lines[0] === '' && (p.t === '-' ? !a.length : p.t === '+' ? !b.length : !a.length && !b.length);
+      if (!phantom) {
         for (const l of p.lines) {
           if (p.t === '=') ops.push({ t: ' ', a: ++ai, b: ++bi, text: l });
           else if (p.t === '-') ops.push({ t: '-', a: ++ai, b: null, text: l });

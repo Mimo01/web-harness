@@ -909,10 +909,12 @@ H.ui = (() => {
       el('div', { class: 'modal-head' }, [el('h3', {}, ['Settings']), el('span', { class: 'spacer' }), el('button', { class: 'btn icon ghost', title: 'Close', onclick: close }, [H.icon('x')])]),
       el('div', { class: 'settings-layout' }, [nav, body])])]);
     document.body.append(settingsModal); show(curSection);
-    function close() { settingsModal.remove(); settingsModal = null; settingsRepaint = null; updateModeUI(); updateContextMeter(); }
+    settingsClose = close;
+    function close() { settingsModal.remove(); settingsModal = null; settingsRepaint = null; settingsClose = null; updateModeUI(); updateContextMeter(); }
   }
-  /* set while the dialog is open, so a control can refresh its own panel without re-opening the dialog */
-  let settingsRepaint = null;
+  /* set while the dialog is open, so a control can refresh its own panel without re-opening the dialog,
+     or step out of the dialog entirely and hand the user back to the chat */
+  let settingsRepaint = null, settingsClose = null;
   const sec = (title, desc, children) => el('section', { class: 'sec' }, [el('h4', {}, [title]), desc ? el('p', { class: 'sec-desc' }, [desc]) : null, ...[].concat(children)]);
   /* action = a button that belongs beside the input. It goes on the input's own line, not floated next to the
      whole field, so it lines up with the box rather than with the label above it. */
@@ -1359,12 +1361,14 @@ H.ui = (() => {
     const render = () => {
       wrap.innerHTML = '';
       const all = H.skills.list();
-      wrap.append(sec('Skills', 'Reusable instruction sets you write yourself. Type /name in the chat, or let the model load one via use_skill when a request matches its description.', []));
-      if (!all.length) wrap.append(el('p', { class: 'sec-desc' }, ['No skills yet. Write one below, or import a markdown file with name/description frontmatter.']));
+      wrap.append(sec('Skills', 'Reusable instruction sets. Type /name in the chat, or let the model load one via use_skill when a request matches its description. Write one yourself, draft one with the model in the editor, or ask for one in the chat — the model writes skills with skill_write.', []));
+      if (!all.length) wrap.append(el('p', { class: 'sec-desc' }, ['No skills yet. Write one below, ask the model for one in the chat, or import a markdown file with name/description frontmatter.']));
       for (const s of all) {
+        const prev = H.skills.prevOf(s.name);
         wrap.append(el('div', { class: 'card' }, [
-          el('div', { class: 'row gap' }, [el('h4', {}, ['/' + s.name]), el('span', { class: 'spacer' }),
+          el('div', { class: 'row gap' }, [el('h4', {}, ['/' + s.name]), prev ? el('span', { class: 'chip' }, ['written by the model']) : null, el('span', { class: 'spacer' }),
             el('button', { class: 'btn sm', onclick: () => skillEditor(s, render) }, ['Edit']),
+            prev ? el('button', { class: 'btn sm ghost', title: prev.skill ? 'Put back the version from before the model last wrote this skill' : 'The model created this skill; remove it again', onclick: () => { H.skills.revert(s.name); H.toast(prev.skill ? `/${s.name} put back` : `/${s.name} removed`, 'success'); render(); } }, [H.icon('refresh'), 'Revert']) : null,
             el('button', { class: 'btn sm ghost', onclick: () => H.download(s.name + '.md', H.skills.serialize(s), 'text/markdown') }, ['Export']),
             el('button', { class: 'btn sm danger-outline', onclick: () => { if (confirm('Delete skill ' + s.name + '?')) { H.skills.remove(s.name); render(); } } }, ['Delete'])]),
           el('div', { class: 'small muted' }, [s.description]),
@@ -1372,19 +1376,84 @@ H.ui = (() => {
       }
       wrap.append(el('div', { class: 'row gap wrap', style: 'margin-top:12px' }, [
         el('button', { class: 'btn', onclick: () => skillEditor({ name: '', description: '', content: '' }, render) }, [H.icon('plus'), 'New skill']),
+        el('button', { class: 'btn', onclick: () => { settingsClose?.(); $('#input').value = 'Write me a skill that '; autoresize(); $('#input').focus(); $('#input').setSelectionRange($('#input').value.length, $('#input').value.length); } }, [H.icon('bolt'), 'Ask in the chat']),
         el('button', { class: 'btn', onclick: () => { const i = el('input', { type: 'file', accept: '.md,.txt', multiple: true }); i.onchange = async () => { for (const f of i.files) H.skills.upsert(H.skills.parse(await H.readFileAsText(f), f.name.replace(/\.\w+$/, ''))); render(); }; i.click(); } }, ['Import .md']),
       ]));
     };
-    render(); return wrap;
+    render();
+    /* a skill written from a chat while this dialog is open should appear here, not on the next visit */
+    const off = H.bus.on('skills', () => { if (wrap.isConnected) render(); else off(); });
+    return wrap;
   }
   function skillEditor(s, done) {
     const orig = s.name; s = H.deepClone(s);
     const ov = el('div', { class: 'modal-overlay' });
     const name = el('input', { type: 'text', value: s.name, placeholder: 'kebab-case-name' }), desc = el('input', { type: 'text', value: s.description, placeholder: 'One-line description (shown to the model)' }), body = el('textarea', { rows: 14, class: 'mono' }, [s.content]);
+    const draft = draftRow(orig, { name, desc, body });
     ov.append(el('div', { class: 'modal wide' }, [el('h3', {}, [orig ? 'Edit skill' : 'New skill']),
-      el('label', { class: 'field' }, [el('span', {}, ['Name']), name]), el('label', { class: 'field' }, [el('span', {}, ['Description']), desc]), el('label', { class: 'field' }, [el('span', {}, ['Instructions (markdown)']), body]),
-      el('div', { class: 'row gap' }, [el('button', { class: 'btn primary', onclick: () => { const n = name.value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-'); if (!n) return; if (H.commands.get(n)) return H.toast(`/${n} is a system command; pick another name or the skill could never be reached.`, 'warn', 6000); if (orig && orig !== n) H.skills.remove(orig); H.skills.upsert({ name: n, description: desc.value.trim(), content: body.value }); ov.remove(); done(); } }, ['Save']), el('button', { class: 'btn', onclick: () => ov.remove() }, ['Cancel'])])]));
+      el('label', { class: 'field' }, [el('span', {}, ['Name']), name]), el('label', { class: 'field' }, [el('span', {}, ['Description']), desc]),
+      draft.node,
+      el('label', { class: 'field' }, [el('span', {}, ['Instructions (markdown)']), body]),
+      el('div', { class: 'row gap' }, [el('button', { class: 'btn primary', onclick: () => { const v = H.skills.validate(name.value); if (!v.ok) return H.toast(v.error, 'warn', 6000); if (v.name !== orig && H.skills.get(v.name) && !confirm(`/${v.name} already exists. Replace it?`)) return; draft.stop(); if (orig && orig !== v.name) H.skills.remove(orig); H.skills.upsert({ name: v.name, description: desc.value.trim(), content: body.value }); ov.remove(); done(); } }, ['Save']), el('button', { class: 'btn', onclick: () => { draft.stop(); ov.remove(); } }, ['Cancel'])])]));
     document.body.append(ov);
+  }
+  /* One-shot model call, no tools: describe the skill, the reply streams into the Instructions box.
+     Nothing is saved until the user clicks Save, and the text that was there before is one click away. */
+  const SKILL_AUTHOR_PROMPT = `You write skills for a browser-based LLM harness. A skill is a reusable instruction set the user invokes by typing /name in the chat box, and that the assistant can also load by itself when a request matches the description.
+Reply with the skill file and nothing else: no preamble, no closing remark, and no code fence around the file. The file is:
+---
+name: kebab-case-name
+description: one line saying when to use it
+---
+then the instructions in markdown.
+Address the assistant in the second person. Give concrete, ordered steps, name the tools to call where it matters, and say how to present the result. Keep it tight: a skill is a checklist, not an essay.`;
+  function draftRow(orig, { name, desc, body }) {
+    const prompt = el('input', { type: 'text', placeholder: orig ? 'How should this skill change? e.g. also check the branch name' : 'What should this skill do? e.g. turn my git log into a standup note' });
+    const go = el('button', { class: 'btn', type: 'button' }, [H.icon('bolt'), 'Draft with the model']);
+    const undo = el('button', { class: 'btn ghost hidden', type: 'button', title: 'Put back the instructions from before the draft' }, [H.icon('refresh'), 'Revert draft']);
+    const note = el('div', { class: 'small muted' }, []);
+    let ctrl = null, before = null;
+    const stop = () => { ctrl?.abort(); ctrl = null; };
+    const idle = () => { ctrl = null; go.innerHTML = ''; go.append(H.icon('bolt'), 'Draft with the model'); go.classList.remove('danger-outline'); prompt.disabled = false; };
+    go.onclick = async () => {
+      if (ctrl) return stop();
+      const ask = prompt.value.trim();
+      if (!ask) { prompt.focus(); return; }
+      if (!H.settings.apiKey()) return H.toast('No API key configured (Settings › General).', 'warn', 5000);
+      before = body.value; undo.classList.add('hidden');
+      ctrl = new AbortController(); const signal = ctrl.signal;
+      go.innerHTML = ''; go.append(H.icon('stop'), 'Stop'); go.classList.add('danger-outline'); prompt.disabled = true;
+      note.textContent = 'Drafting…';
+      const current = orig ? `The skill as it stands today:\n\n${H.skills.serialize({ name: name.value.trim() || orig, description: desc.value.trim(), content: body.value })}\n\nRewrite it whole, keeping what still works.\n\n` : '';
+      body.value = '';
+      let text = '', stopped = false;
+      try {
+        await H.llm.chat({
+          messages: [{ role: 'system', content: SKILL_AUTHOR_PROMPT }, { role: 'user', content: current + 'What the skill should do:\n' + ask }],
+          temperature: 0.3, signal,
+          onDelta: (d) => { if (d.content) { text += d.content; body.value = text; body.scrollTop = body.scrollHeight; } },
+        });
+      } catch (e) {
+        if (e.name !== 'AbortError') { body.value = before; note.textContent = ''; idle(); return H.toast(H.explainError(e), 'error', 8000); }
+        stopped = true;
+      }
+      /* nothing arrived: the box goes back to what it held, so a stop or an empty reply costs the user nothing */
+      if (!text.trim()) { body.value = before; note.textContent = stopped ? 'Stopped before anything arrived.' : 'The model returned nothing.'; undo.classList.add('hidden'); return idle(); }
+      /* whatever did arrive — a whole file, or the part that streamed before Stop — is parsed the same way */
+      const parsed = H.skills.parse(text.replace(/^\s*```(?:md|markdown)?\s*\n|\n```\s*$/g, '').trim());
+      body.value = parsed.content;
+      if (parsed.name && parsed.name !== 'skill' && (!name.value.trim() || !orig)) name.value = parsed.name;
+      if (parsed.description && !desc.value.trim()) desc.value = parsed.description;
+      note.textContent = stopped ? 'Stopped part-way. Finish it yourself, or draft again.' : 'Draft written. Read it, change what you like, then Save.';
+      undo.classList.remove('hidden');
+      idle();
+    };
+    undo.onclick = () => { body.value = before ?? ''; undo.classList.add('hidden'); note.textContent = ''; };
+    prompt.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go.click(); } });
+    return {
+      stop,
+      node: el('div', { class: 'field' }, [el('span', {}, [orig ? 'What should change' : 'What it should do']), el('div', { class: 'input-row draft-row' }, [prompt, go, undo]), note]),
+    };
   }
 
   /* ---------- usage ---------- */

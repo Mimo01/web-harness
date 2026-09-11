@@ -46,6 +46,15 @@ http.createServer((req, res) => {
       chunk({ role: 'assistant', content: '' });
       chunk({ tool_calls: [{ index: 0, id: 'call_2', type: 'function', function: { name: 'fs_write', arguments: JSON.stringify({ path: 'hello.txt', content: 'hi' }) } }] });
       chunk({}, 'tool_calls');
+    } else if (/^You write skills/.test(String(msgs[0]?.content || ''))) {
+      /* the skill editor's "Draft with the model" box: a one-shot call that must come back as a skill file */
+      const text = `---\nname: standup\ndescription: Turn today's git log into a standup note\n---\n1. Call git_log for the last day.\n2. Group the commits by area.\n3. Write three lines: done, next, blocked.`;
+      for (const w of text.split(/(?<=\n)/)) chunk({ content: w });
+      chunk({}, 'stop');
+    } else if (last.role === 'user' && /skill/i.test(last.content) && toolNames.includes('skill_write')) {
+      chunk({ role: 'assistant', content: 'Writing that skill. ' });
+      chunk({ tool_calls: [{ index: 0, id: 'call_s', type: 'function', function: { name: 'skill_write', arguments: JSON.stringify({ name: /named copy/i.test(last.content) ? 'copy' : 'standup', description: "Turn today's git log into a standup note", content: '1. Call git_log for the last day.\n2. Group the commits by area.\n3. Write three lines: done, next, blocked.' }) } }] });
+      chunk({}, 'tool_calls');
     } else if (last.role === 'tool') {
       const text = `Tool **${last.tool_call_id}** returned:\n\n\`\`\`json\n${last.content}\n\`\`\`\n\nDone.`;
       for (const w of text.split(/(?<= )/)) chunk({ content: w });

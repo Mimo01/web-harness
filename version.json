@@ -1,6 +1,6 @@
 {
-  "version": "1.20.0",
-  "date": "2026-09-11",
+  "version": "1.21.0",
+  "date": "2026-09-12",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "the ring under the message box opens a panel about the chat you are in: how the context window is filled (system prompt and tool definitions, the conversation, what is left), tokens in and out with the cached share, requests and cost, a line about compaction once the window is 70% full, and a way through to the full usage page — which drops its \"Current chat\" section, since it is the cross-chat view"
+  "notes": "skills the model can write: new skill_write and skill_delete tools let the assistant create, rewrite and remove skills from a normal chat — each one lands behind the permission prompt with the whole body visible and the tool card shows a unified diff; the skill editor in Settings > Skills gains a \"Draft with the model\" box that streams a first draft (or a rewrite of the skill you are editing) straight into the instructions, with Stop and Revert draft; anything the model writes keeps its previous version, so a skill card offers Revert; a skill still cannot be named after a system command, now enforced everywhere; a diff of a newly created file no longer opens with a phantom \"-\" line"
 }

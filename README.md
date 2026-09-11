@@ -108,7 +108,7 @@ Multiple persisted conversations, streaming responses, markdown + syntax highlig
 | Memory | `memory_save`, `memory_get`, `memory_list`, `memory_delete` (persistent across chats) |
 | Interaction | `ask_user` (the question appears in the chat; answer with a click or by typing in the message box), `notify_user`, `clipboard_write` |
 | Utility | `get_datetime`, `sleep`, `browser_info` |
-| Skills | `use_skill`, `list_skills` |
+| Skills | `use_skill`, `list_skills`, `skill_write`, `skill_delete` |
 | Agent | `run_subagent` (fresh context, same tools) |
 
 The **folder button under the message box** names the folder this chat is working in; click it to open one, switch
@@ -244,6 +244,19 @@ description: What it is for (the model sees this)
 ---
 Instructions…
 ```
+
+**Writing one with the model.** Two ways, for two moments:
+
+- **In a chat** — "turn what we just did into a skill", or "add a step to /standup". The model writes it with
+  `skill_write` (and removes one with `skill_delete`). Both are `write`/`danger` tools, so the permission prompt
+  shows the whole skill before it lands, and the tool card shows a unified diff of what changed.
+- **In the editor** — **Settings → Skills → New skill** (or Edit) has a *Draft with the model* box: describe the
+  skill and the reply streams into the instructions. Editing an existing skill sends it along, so the model
+  rewrites rather than starts over. *Stop* cuts a draft short, *Revert draft* puts back what was there. Nothing is
+  saved until you click Save.
+
+Anything the model writes keeps its previous version: the skill card offers **Revert**, which puts back the text
+from before the model's last write — or removes the skill again if the model created it.
 
 ### Plugins (MCP-like)
 Plugins add tools. Two kinds:

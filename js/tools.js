@@ -606,7 +606,7 @@ H.tools = (() => {
   /* ===================== SKILLS ===================== */
   def({
     name: 'use_skill', group: 'Skills', risk: 'safe',
-    description: 'Load a skill (a reusable instruction set / workflow) by name and return its full instructions. Call this when a user request matches an available skill.',
+    description: 'Load a skill (a reusable instruction set / workflow) by name and return its full instructions. Call this when a user request matches an available skill, and before rewriting an existing skill with skill_write.',
     parameters: obj({ name: str('Skill name') }, ['name']),
     run: async ({ name }) => { const s = H.skills.get(name); if (!s) throw new Error('Unknown skill: ' + name + '. Available: ' + H.skills.list().map(x => x.name).join(', ')); return ok({ name: s.name, description: s.description, instructions: s.content }); },
   });
@@ -615,6 +615,41 @@ H.tools = (() => {
     description: 'List available skills with descriptions.',
     parameters: obj({}),
     run: async () => ok({ skills: H.skills.list().map(s => ({ name: s.name, description: s.description })) }),
+  });
+  /* Writing a skill is a small edit to a file the user owns, so it is shaped like one: the permission prompt shows
+     the whole body before it lands, and the result carries a unified diff the tool card renders. */
+  const skillPath = (name) => `skills/${name}.md`;
+  def({
+    name: 'skill_write', group: 'Skills', risk: 'write',
+    description: 'Create a skill, or replace an existing one with the same name. A skill is a reusable instruction set the user invokes by typing /name in the chat box, or that you load later with use_skill. Write the instructions in the second person, as concrete steps. Read an existing skill with use_skill first: this replaces it whole.',
+    parameters: obj({
+      name: str('Short kebab-case name; this is what the user types as /name'),
+      description: str('One line saying what the skill is for; you see this when deciding whether to load it'),
+      content: str('The instructions, in markdown, without frontmatter'),
+    }, ['name', 'description', 'content']),
+    run: async ({ name, description, content }) => {
+      const v = H.skills.validate(name);
+      if (!v.ok) throw new Error(v.error);
+      const old = H.skills.get(v.name);
+      const next = { name: v.name, description: String(description || '').trim(), content: String(content || '').trim() };
+      const path = skillPath(v.name);
+      const patch = H.diff.unified(old ? H.skills.serialize(old) : null, H.skills.serialize(next), { path, context: 3 });
+      H.skills.upsert(next, { by: 'model' });
+      return ok({ name: v.name, [old ? 'updated' : 'created']: true, path, patch, invoke: '/' + v.name, note: 'The user can revert this in Settings > Skills.' });
+    },
+  });
+  def({
+    name: 'skill_delete', group: 'Skills', risk: 'danger',
+    description: 'Delete a skill by name. The user can revert this from Settings > Skills.',
+    parameters: obj({ name: str('Skill name') }, ['name']),
+    run: async ({ name }) => {
+      const s = H.skills.get(name);
+      if (!s) throw new Error('Unknown skill: ' + name + '. Available: ' + (H.skills.list().map(x => x.name).join(', ') || 'none'));
+      const path = skillPath(s.name);
+      const patch = H.diff.unified(H.skills.serialize(s), null, { path, context: 3 });
+      H.skills.remove(s.name, { by: 'model' });
+      return ok({ deleted: s.name, path, patch, note: 'The user can revert this in Settings > Skills.' });
+    },
   });
 
   /* ===================== SUB-AGENT ===================== */
