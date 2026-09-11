@@ -103,7 +103,9 @@ h1, h2, h3, h4 { font-weight: 600; letter-spacing: -.01em; margin: 0; }
 input[type=text], input[type=password], input[type=number], input[type=url], select, textarea { width: 100%; padding: 7px 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-sm); font-size: 13px; line-height: 1.4; transition: border-color .12s, box-shadow .12s; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 input::placeholder, textarea::placeholder { color: var(--muted); }
-select { appearance: none; padding-right: 26px; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b877e' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
+/* every dropdown in the app is a .pick button (see Pills, menus, pickers); a plain <select> keeps the browser's own
+   arrow, which follows color-scheme, instead of a baked-in one that stayed warm grey in the dark theme */
+select { cursor: pointer; }
 textarea { resize: vertical; }
 input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--ink); }
 .chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: var(--r-xs); background: var(--surface-2); border: 1px solid var(--border); font-size: 11px; font-weight: 500; color: var(--fg-2); letter-spacing: .01em; white-space: nowrap; }
@@ -269,30 +271,57 @@ pre code.hljs, .hljs { background: transparent !important; padding: 0 !important
 .tool-card pre.diff .dk { color: var(--accent); }
 .tool-card pre.diff .dh { color: var(--muted); }
 
-/* the folder pill sits with the other per-conversation controls and names what this chat is working on */
+/* ---------- Pills, menus, pickers ----------
+   Everything in the app that offers a choice has the same shape: a quiet trigger, and a floating list of rows that
+   carry a name plus a muted sub-line saying what the choice means. The composer pills (folder, model, mode) are the
+   small end of it, the settings fields the wide end; the rows themselves are one rule, used by both. */
 .pill-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; max-width: 260px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background .12s, color .12s; }
 .pill-btn:hover { background: var(--surface-2); color: var(--fg-2); }
 .pill-btn .ico { width: 14px; height: 14px; }
 .pill-btn .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#ws-btn.primary { color: var(--fg-2); }        /* a folder is open: name it a shade stronger than its neighbours */
+#ws-btn.primary, #model-pick .pick { color: var(--fg-2); }   /* a folder is open / a model is chosen: a shade stronger than its neighbours */
 #ws-btn .ws-git { font-size: 11.5px; font-family: var(--mono); opacity: .72; white-space: nowrap; }
 #ws-btn.needs-grant { color: var(--warn); } #ws-btn.needs-grant .ws-git { color: var(--warn); opacity: 1; }
+body[data-mode="plan"] #mode-pick .pick { color: var(--warn); }
+body[data-mode="auto"] #mode-pick .pick { color: var(--ok); }
 .menu.up { top: auto; bottom: calc(100% + 6px); }
-#ws-menu { right: auto; left: 0; }             /* opens rightwards from the pill, which sits at the left of the strip */
+.menu.left { right: auto; left: 0; }           /* opens rightwards from a trigger that sits at the left of its row */
 
-/* workspace menu: the folders this chat has open, then the ones opened before */
-#ws-menu { min-width: 300px; }
+/* dropdown triggers: pill (composer), field (settings), mini (dense rows) */
+.pick .chev { width: 12px; height: 12px; flex-shrink: 0; opacity: .7; transition: transform .15s; }
+.pick[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.pick.field { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 32px; padding: 0 8px 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--fg); font-size: 13px; text-align: left; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.pick.field:hover { border-color: var(--fg-2); }
+.pick.field[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.pick.field .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick.mini { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 5px 0 8px; border: 1px solid var(--border); border-radius: var(--r-xs); background: var(--raised); color: var(--fg-2); font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background .12s, border-color .12s, color .12s; }
+.pick.mini:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.pick.mini.allow { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+.pick.mini.deny { background: var(--danger-soft); border-color: transparent; color: var(--danger); }
+
+/* the list itself: option rows (name + sub-line), section headings, and a filter once the list gets long */
+.pick-menu { max-height: 340px; overflow-y: auto; overscroll-behavior: contain; }
+.pick-menu:focus, .pick-menu:focus-visible { outline: none; }   /* the list holds the focus, but the highlighted row is what shows it */
+.menu.float { position: fixed; z-index: 60; max-width: calc(100vw - 16px); }   /* placed against its trigger (an absolute menu would be clipped by the scrolling settings body), and above the dialog it may belong to */
 .menu-sec { padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
-.menu button.ws-row { display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; padding: 7px 10px; }
-.ws-row .nm { grid-column: 1; font-weight: 500; color: var(--fg); }
-.ws-row .sub { grid-column: 1; font-size: 11.5px; font-family: var(--mono); color: var(--muted); }
-.ws-row.on .nm::before { content: '●'; margin-right: 6px; font-size: 9px; vertical-align: 1px; color: var(--accent); }
-.ws-row.warn .sub { color: var(--warn); }
-.ws-acts { grid-row: 1 / 3; grid-column: 2; display: flex; align-items: center; gap: 8px; opacity: 0; font-size: 11.5px; color: var(--muted); }
-.ws-row:hover .ws-acts { opacity: 1; }
-.ws-acts .act:hover { color: var(--fg); text-decoration: underline; }
-.ws-acts .act.warn { color: var(--warn); }
-.ws-row.warn .ws-acts { opacity: 1; }          /* a folder that needs access must say so without being hovered */
+.menu-sec:first-child { padding-top: 4px; }
+.menu-filter { position: sticky; top: -4px; z-index: 1; margin: -4px -4px 4px; padding: 6px; background: var(--raised); border-bottom: 1px solid var(--border); }
+.menu-filter input { height: 28px; font-size: 12.5px; }
+.menu-empty { padding: 12px 10px; font-size: 12.5px; color: var(--muted); text-align: center; }
+.menu button.opt { display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; padding: 7px 10px; }
+.opt .nm { grid-column: 1; font-weight: 500; color: var(--fg); }
+.opt .sub { grid-column: 1; font-size: 11.5px; color: var(--muted); }
+.opt .nm.mono, .opt .sub.mono { font-family: var(--mono); }
+.opt .nm.mono { font-size: 12.5px; } .opt .sub.mono { font-size: 11px; }
+.opt.on .nm::before { content: '●'; margin-right: 6px; font-size: 9px; vertical-align: 1px; color: var(--accent); }
+.menu button.opt.cur { background: var(--surface-2); color: var(--fg); }   /* keyboard highlight */
+.opt.warn .sub { color: var(--warn); }
+.opt .acts { grid-row: 1 / 3; grid-column: 2; display: flex; align-items: center; gap: 8px; opacity: 0; font-size: 11.5px; color: var(--muted); }
+.opt:hover .acts, .opt.cur .acts { opacity: 1; }
+.opt .acts .act:hover { color: var(--fg); text-decoration: underline; }
+.opt .acts .act.warn { color: var(--warn); }
+.opt.warn .acts { opacity: 1; }                /* a folder that needs access must say so without being hovered */
+.menu.wide { min-width: 300px; }               /* lists whose rows carry a sub-line need the room */
 
 /* inline question from the model */
 .tool-card.ask { border-color: var(--warn-line); border-top: 1px solid var(--warn-line); }
@@ -334,12 +363,6 @@ body.asking .composer-box { border-color: var(--warn); }
 .composer-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 4px 8px 8px; }
 .composer-bar .hint { display: none; }
 .pill-strip { display: contents; }
-.pill-select { display: inline-flex; align-items: center; gap: 4px; height: 28px; max-width: 240px; padding: 0 2px 0 8px; border-radius: var(--r-sm); color: var(--muted); font-size: 12.5px; cursor: pointer; transition: background .12s, color .12s; }
-.pill-select:hover { background: var(--surface-2); color: var(--fg-2); }
-.pill-select .ico { width: 14px; height: 14px; }
-.pill-select select { width: auto; max-width: 190px; padding: 0 20px 0 3px; border: 0; background-color: transparent; background-position: right 4px center; font-size: 12.5px; font-weight: 500; color: var(--fg-2); box-shadow: none !important; text-overflow: ellipsis; }
-body[data-mode="plan"] #mode-wrap, body[data-mode="plan"] #mode-wrap select { color: var(--warn); }
-body[data-mode="auto"] #mode-wrap, body[data-mode="auto"] #mode-wrap select { color: var(--ok); }
 #ctx-meter { display: inline-flex; align-items: center; gap: 6px; margin: 0 4px 0 2px; font-size: 11.5px; color: var(--muted); cursor: pointer; font-variant-numeric: tabular-nums; }
 #ctx-meter .ring { width: 18px; height: 18px; flex-shrink: 0; transform: rotate(-90deg); }
 #ctx-meter .ring circle { fill: none; stroke-width: 4; } #ctx-meter .ring .bg { stroke: var(--surface-3); }
@@ -377,10 +400,11 @@ body[data-mode="auto"] #mode-wrap, body[data-mode="auto"] #mode-wrap select { co
 .modal.settings .modal-head { height: 52px; margin: 0; padding: 0 12px 0 20px; border-bottom: 1px solid var(--border); }
 .settings-layout { display: flex; flex: 1; min-height: 0; }
 .settings-nav { width: 216px; flex-shrink: 0; display: flex; flex-direction: column; gap: 1px; padding: 10px 8px; border-right: 1px solid var(--border); background: var(--bg); overflow-y: auto; }
-.settings-nav button { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-sm); background: none; color: var(--fg-2); font-size: 13px; font-weight: 500; text-align: left; cursor: pointer; }
+.settings-nav button { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-sm); background: none; color: var(--fg-2); font-size: 13px; font-weight: 500; text-align: left; white-space: nowrap; cursor: pointer; }
+.settings-nav button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }   /* a long label shortens, it never wraps into a second line */
 .settings-nav button:hover { background: var(--surface-3); color: var(--fg); }
 .settings-nav button.active { background: var(--raised); color: var(--fg); box-shadow: 0 0 0 1px var(--border), var(--shadow-sm); }
-.settings-nav button .ico { width: 15px; height: 15px; color: var(--muted); } .settings-nav button.active .ico { color: var(--fg); }
+.settings-nav button .ico { width: 15px; height: 15px; flex-shrink: 0; color: var(--muted); } .settings-nav button.active .ico { color: var(--fg); }
 .settings-body { flex: 1; overflow-y: auto; padding: 6px 28px 32px; }
 .sec { padding: 18px 0 8px; } .sec + .sec { margin-top: 10px; border-top: 1px solid var(--border); }
 .sec h4 { margin: 0 0 4px; font-size: 14px; }
@@ -388,8 +412,8 @@ body[data-mode="auto"] #mode-wrap, body[data-mode="auto"] #mode-wrap select { co
 .sec .row.gap { align-items: flex-start; }
 .help { display: block; margin: -6px 0 10px; font-size: 12px; line-height: 1.45; color: var(--muted); }
 .help-list { margin: 4px 0; padding-left: 18px; font-size: 12.5px; color: var(--fg-2); } .help-list li { margin: 5px 0; }
-label.field { display: block; margin: 12px 0; } label.field > span { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 500; color: var(--fg-2); }
-.row.gap > label.field { flex: 1; min-width: 0; }
+.field { display: block; margin: 12px 0; } .field > span { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 500; color: var(--fg-2); }
+.row.gap > .field, .row.gap > .menu-wrap { flex: 1; min-width: 0; }
 label.check { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 6px 8px; border-radius: var(--r-sm); line-height: 1.4; color: var(--fg); cursor: pointer; }
 label.check:hover { background: var(--surface-2); }
 label.check input[type=checkbox] { flex-shrink: 0; margin-top: 3px; }
@@ -400,7 +424,7 @@ label.check.small { align-items: center; padding: 0; font-size: 12px; color: var
 .group-title { margin: 20px 0 4px; font-size: 12px; font-weight: 600; color: var(--fg-2); } .group-title .count { margin-left: 6px; font-weight: 500; color: var(--muted); }
 .tool-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .tool-row .desc { margin-top: 2px; font-size: 12px; color: var(--muted); } .tool-row code { font-size: 12.5px; color: var(--fg); }
-.tool-row select { width: auto; padding: 3px 24px 3px 8px; font-size: 12px; }
+.tool-row .menu-wrap { display: flex; justify-content: flex-end; }
 .card { margin: 10px 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r); background: var(--raised); }
 .card h4 { margin: 0; font-size: 14px; } .plugin-card h4 { margin-right: 2px; }
 .json-editor { min-height: 260px; font-family: var(--mono); font-size: 12px; white-space: pre; }
@@ -425,7 +449,7 @@ label.check.small { align-items: center; padding: 0; font-size: 12px; color: var
 .modal.setup { width: min(620px, 100%); }
 .step { display: flex; gap: 12px; margin: 10px 0; }
 .step-n { width: 22px; height: 22px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; margin-top: 12px; border-radius: 50%; background: var(--ink); color: var(--on-ink); font-size: 11px; font-weight: 600; }
-.step-body { flex: 1; min-width: 0; } .step-body label.field { margin: 8px 0; }
+.step-body { flex: 1; min-width: 0; } .step-body .field { margin: 8px 0; }
 .setup-result { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface-2); font-size: 12.5px; white-space: pre-wrap; }
 .setup-result.ok { color: var(--ok); border-color: var(--ok-line); background: var(--ok-soft); } .setup-result.err { color: var(--danger); border-color: var(--danger-line); background: var(--danger-soft); }
 .bookmarklet { cursor: grab; } .bookmarklet:active { cursor: grabbing; }
@@ -454,7 +478,6 @@ label.check.small { align-items: center; padding: 0; font-size: 12px; color: var
   #composer { padding: 0 8px 8px; }
   #input { padding: 12px 14px 4px; font-size: 16px; }   /* 16px prevents iOS zoom on focus */
   .composer-bar { gap: 2px; padding: 2px 6px 6px; }
-  .pill-select { max-width: 46vw; } .pill-select select { max-width: 38vw; }
   .pill-btn { max-width: 42vw; padding: 0 6px; }      /* the folder still names itself: that is the point of it */
   .composer-bar #usage { display: none; }
   #preview { position: fixed; inset: 0; z-index: 25; width: auto; min-width: 0; }
@@ -471,8 +494,8 @@ label.check.small { align-items: center; padding: 0; font-size: 12px; color: var
   .settings-nav button { padding: 0 10px; white-space: nowrap; }
   .settings-body { padding: 8px 14px 24px; }
   .mode-cards, .stats { grid-template-columns: 1fr; }
-  .tool-row { grid-template-columns: 1fr; gap: 6px; }
-  .row.gap > label.field { flex-basis: 100%; }
+  .tool-row { grid-template-columns: 1fr; gap: 6px; } .tool-row .menu-wrap { justify-content: flex-start; }
+  .row.gap > .field { flex-basis: 100%; }
   #toasts { left: 8px; right: 8px; bottom: 8px; } .toast { max-width: none; }
   #scroll-bottom { bottom: 10px; }
   /* permission prompt as a bottom sheet */
@@ -503,11 +526,9 @@ label.check.small { align-items: center; padding: 0; font-size: 12px; color: var
   .pill-strip { grid-area: pills; display: flex; align-items: center; gap: 4px; padding: 0 2px; overflow-x: auto; scrollbar-width: none; }
   .pill-strip::-webkit-scrollbar { display: none; }
   .pill-strip .spacer { flex: 1; } .pill-strip #usage { display: none; }
-  .pill-select { height: 24px; max-width: 42vw; flex-shrink: 0; padding: 0 2px 0 6px; font-size: 11.5px; }
-  .pill-select .ico { width: 12px; height: 12px; } .pill-select select { max-width: 34vw; padding-right: 16px; font-size: 11.5px; background-size: 10px; }
-  .pill-btn { height: 24px; max-width: 42vw; flex-shrink: 0; padding: 0 6px; font-size: 11.5px; } .pill-btn .ico { width: 12px; height: 12px; }
-  /* the strip scrolls sideways, so the menu is pinned to the viewport instead of to the pill inside it */
-  #ws-menu { position: fixed; left: 8px; right: 8px; bottom: 58px; min-width: 0; max-height: 58vh; overflow-y: auto; }
+  .pill-btn { height: 24px; max-width: 42vw; flex-shrink: 0; padding: 0 6px; font-size: 11.5px; } .pill-btn .ico { width: 12px; height: 12px; } .pill-btn .chev { width: 10px; height: 10px; }
+  /* the strip scrolls sideways, so the menus are pinned to the viewport instead of to the pill inside it */
+  .pill-strip .menu { position: fixed; left: 8px; right: 8px; bottom: 58px; min-width: 0; max-height: 58vh; overflow-y: auto; }
   #ctx-meter { margin-left: auto; font-size: 11px; } #ctx-meter .ring { width: 16px; height: 16px; }
   body.asking .composer-box { border: 0; } body.asking #input { border-color: var(--warn); }
 }

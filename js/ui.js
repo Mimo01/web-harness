@@ -466,23 +466,163 @@ H.ui = (() => {
   function hideSlash() { $('#slash-menu').classList.add('hidden'); slashIdx = -1; }
   function pickSlash(s) { $('#input').value = '/' + s.name + ' '; hideSlash(); $('#input').focus(); }
 
+  /* ================= MENUS & PICKERS =================
+     Every floating list in the app (the ⋯ menu, the workspace menu, every dropdown) registers itself here, so one
+     outside click or one Escape closes whatever is open, and no two can be open at once. */
+  const openMenus = new Set();
+  const closeMenus = (keep) => { for (const m of [...openMenus]) if (m !== keep) m.close(); };
+  /** wire a button to a menu element that lives next to it (the ⋯ and workspace menus) */
+  function bindMenu(btn, box, onOpen) {
+    const handle = { close() { box.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false'); openMenus.delete(handle); } };
+    btn.setAttribute('aria-haspopup', 'menu'); btn.setAttribute('aria-expanded', 'false');
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      if (openMenus.has(handle)) return handle.close();
+      closeMenus(); onOpen?.();
+      box.classList.remove('hidden'); btn.setAttribute('aria-expanded', 'true'); openMenus.add(handle);
+    };
+    return handle;
+  }
+
+  /* The one dropdown the app uses. A native <select> cannot carry the sub-line that says what a choice means (what a
+     model costs, what a mode does, where a plugin's requests go) and paints its own arrow in its own colours, so the
+     trigger is a button and the list is the same kind of floating panel as the workspace menu. The panel is placed on
+     <body> and positioned against the trigger: inside the scrolling settings body an absolute one would be clipped.
+     cfg: { options:[{value,label,short,sub,group,mono,subMono,title,cls}], value, onpick(value, option),
+            variant:'pill'|'field'|'mini', icon, title, placeholder, search, searchPlaceholder, empty, cls(option) } */
+  function picker(cfg) {
+    const variant = cfg.variant || 'field';
+    const wrap = el('div', { class: 'menu-wrap' });
+    const lbl = el('span', { class: 'lbl' });
+    const btn = el('button', { type: 'button', 'aria-haspopup': 'listbox', 'aria-expanded': 'false' },
+      [cfg.icon ? H.icon(cfg.icon) : null, lbl, H.icon('chev', 'ico chev')]);
+    wrap.append(btn);
+    let opts = cfg.options || [], cur = cfg.value, box = null, rows = [], idx = -1, filter = null, handle = null;
+    const currentOpt = () => opts.find(o => o.value === cur) || null;
+
+    function paint() {
+      const o = currentOpt();
+      lbl.textContent = o ? (o.short ?? o.label) : (cfg.placeholder ?? '—');
+      lbl.classList.toggle('mono', !!(o && o.mono));
+      btn.className = (variant === 'pill' ? 'pill-btn pick' : 'pick ' + variant) + (cfg.cls ? ' ' + (cfg.cls(o) || '') : '');
+      const t = [cfg.title, o?.title || o?.sub].filter(Boolean).join(' · ');
+      if (t) { btn.title = t; btn.setAttribute('aria-label', (cfg.title || '') + ': ' + (o ? o.label : 'none')); } else btn.removeAttribute('title');
+    }
+    function setCur(i) {
+      if (!rows.length) { idx = -1; return; }
+      idx = (i + rows.length) % rows.length;
+      rows.forEach((r, n) => r.classList.toggle('cur', n === idx));
+      rows[idx].scrollIntoView({ block: 'nearest' });
+      (filter || box).setAttribute('aria-activedescendant', rows[idx].id);
+    }
+    function pick(o) { cur = o.value; paint(); close(); btn.focus(); cfg.onpick?.(o.value, o); }
+    function build(q) {
+      const list = box.querySelector('.pick-list'); list.innerHTML = ''; rows = [];
+      let group = null;
+      for (const o of opts) {
+        if (q && !(o.label + ' ' + (o.sub || '') + ' ' + (o.group || '')).toLowerCase().includes(q)) continue;
+        if (o.group && o.group !== group) { group = o.group; list.append(el('div', { class: 'menu-sec' }, [o.group])); }
+        const row = el('button', {
+          type: 'button', role: 'option', tabindex: '-1', id: 'opt-' + H.uid().slice(0, 8), title: o.title || null,
+          class: 'opt' + (o.value === cur ? ' on' : '') + (o.rowCls ? ' ' + o.rowCls : ''), 'aria-selected': o.value === cur ? 'true' : 'false',
+          onclick: (e) => { e.stopPropagation(); pick(o); },
+          onmousemove: () => { const n = rows.indexOf(row); if (n !== idx) setCur(n); },
+        }, [el('span', { class: 'nm' + (o.mono ? ' mono' : '') }, [o.label]), o.sub ? el('span', { class: 'sub' + (o.subMono ? ' mono' : '') }, [o.sub]) : null]);
+        list.append(row); rows.push(row);
+      }
+      if (!rows.length) list.append(el('div', { class: 'menu-empty' }, [cfg.empty || 'Nothing matches']));
+      setCur(Math.max(0, rows.findIndex(r => r.classList.contains('on'))));
+    }
+    function place() {
+      const r = btn.getBoundingClientRect();
+      const narrow = window.matchMedia('(max-width: 560px)').matches;
+      box.style.width = narrow ? 'auto' : (variant === 'field' ? Math.max(r.width, 240) + 'px' : '');
+      const h = box.offsetHeight;
+      const up = r.bottom + h + 8 > window.innerHeight && r.top > h + 8;   // no room below: hang it above the trigger
+      const top = Math.min(Math.max(8, up ? r.top - 6 - h : r.bottom + 6), Math.max(8, window.innerHeight - h - 8));
+      box.style.top = Math.round(top) + 'px'; box.style.bottom = 'auto';
+      if (narrow) { box.style.left = '8px'; box.style.right = '8px'; return; }
+      box.style.right = 'auto';
+      box.style.left = Math.round(Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - box.offsetWidth - 8))) + 'px';
+    }
+    function close() {
+      if (!box) return;
+      box.remove(); box = null; rows = []; filter = null; idx = -1;
+      btn.setAttribute('aria-expanded', 'false');
+      removeEventListener('scroll', place, true); removeEventListener('resize', place);
+      openMenus.delete(handle); handle = null;
+    }
+    function open() {
+      closeMenus();
+      box = el('div', { class: 'menu float pick-menu' + (cfg.wide === false ? '' : ' wide'), role: 'listbox', tabindex: '-1', 'aria-label': cfg.title || cfg.placeholder || 'Options', onclick: (e) => e.stopPropagation() });
+      if (cfg.search === true || (cfg.search !== false && opts.length > 8)) {
+        filter = el('input', { type: 'text', placeholder: cfg.searchPlaceholder || 'Filter…', 'aria-label': cfg.searchPlaceholder || 'Filter', oninput: () => { build(filter.value.trim().toLowerCase()); place(); } });
+        box.append(el('div', { class: 'menu-filter' }, [filter]));
+      }
+      box.append(el('div', { class: 'pick-list' }));
+      box.addEventListener('keydown', onKey);
+      document.body.append(box); build(''); place();
+      btn.setAttribute('aria-expanded', 'true');
+      (filter || box).focus();
+      addEventListener('scroll', place, true); addEventListener('resize', place);
+      handle = { close }; openMenus.add(handle);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); btn.focus(); return; }
+      if (e.key === 'Tab') { close(); return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setCur(idx + 1); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setCur(idx - 1); return; }
+      if (e.key === 'Home') { e.preventDefault(); setCur(0); return; }
+      if (e.key === 'End') { e.preventDefault(); setCur(rows.length - 1); return; }
+      if (e.key === 'Enter' || (e.key === ' ' && !filter)) { e.preventDefault(); rows[idx]?.click(); return; }
+      if (!filter && e.key.length === 1) {   // no filter field: jump to the next row starting with that letter
+        const c = e.key.toLowerCase();
+        const from = idx + 1, n = rows.length;
+        for (let i = 0; i < n; i++) { const r = rows[(from + i) % n]; if (r.textContent.trim().toLowerCase().startsWith(c)) { setCur((from + i) % n); break; } }
+      }
+    }
+    btn.onclick = (e) => { e.stopPropagation(); box ? close() : open(); };
+    btn.addEventListener('keydown', (e) => { if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !box) { e.preventDefault(); open(); } });
+    paint();
+    return {
+      el: wrap, btn,
+      get value() { return cur; },
+      set(v) { cur = v; paint(); },
+      setOptions(list, v) { opts = list; if (v !== undefined) cur = v; if (box) close(); paint(); },
+      close,
+    };
+  }
+
   /* ---------------- topbar ---------------- */
-  function fillModelSelect(sel, models, cur) {
-    sel.innerHTML = '';
-    if (cur && !models.includes(cur)) sel.append(el('option', { value: cur }, [cur + (models.length ? ' (not in list)' : '')]));
-    if (!models.length && !cur) sel.append(el('option', { value: '' }, ['No models loaded']));
-    models.forEach(m => sel.append(el('option', { value: m, selected: m === cur }, [m])));
+  let modelPick = null, modePick = null;
+  /** the model list as picker rows: name, plus what the proxy says it costs and how much it can hold */
+  function modelOptions(models, cur) {
+    const list = (models || []).slice();
+    if (cur && !list.includes(cur)) list.unshift(cur);
+    const known = new Set(models || []);
+    return list.map(m => {
+      const p = H.usage.priceFor(m);
+      const bits = [];
+      if (p.context) bits.push(H.usage.fmtTok(p.context) + ' context');
+      if (p.inPerTok != null) bits.push('$' + (p.inPerTok * 1e6).toFixed(2) + ' / 1M in');
+      if (p.outPerTok != null) bits.push('$' + (p.outPerTok * 1e6).toFixed(2) + ' / 1M out');
+      if (!known.has(m) && known.size) bits.unshift('not in the proxy list');
+      return { value: m, label: m, mono: true, sub: bits.join(' · ') || 'no pricing known' };
+    });
+  }
+  function setModelOptions(models, cur) {
+    modelPick?.setOptions(modelOptions(models, cur), cur);
   }
   async function refreshModels() {
-    const sel = $('#model-select'); const cur = H.settings.get('model');
-    fillModelSelect(sel, H.settings.get('models') || [], cur);
+    const cur = H.settings.get('model');
+    setModelOptions(H.settings.get('models') || [], cur);
     try {
       const models = await H.llm.listModels();
       const patch = { models }; if (!cur && models.length) patch.model = models[0];
       H.settings.set(patch);
-      fillModelSelect(sel, models, patch.model || cur);
+      setModelOptions(models, patch.model || cur);
       setStatus('online', `${models.length} models`);
-      H.usage.refreshModelInfo().then(updateContextMeter);
+      H.usage.refreshModelInfo().then(() => { updateContextMeter(); setModelOptions(H.settings.get('models') || [], H.settings.get('model')); });
       return models;
     } catch (e) { setStatus('error', 'LiteLLM unreachable'); console.warn(e); throw e; }
   }
@@ -519,7 +659,7 @@ H.ui = (() => {
       if (f.mode === 'read') bits.push('read-only');
       if (!f.granted) bits.push('needs access');
       const row = el('button', {
-        class: 'ws-row on' + (f.granted ? '' : ' warn'),
+        class: 'opt on' + (f.granted ? '' : ' warn'),
         title: f.granted ? `File paths are relative to "${f.name}"` : 'Browsers only re-grant folder access from a click',
         onclick: async (e) => {
           e.stopPropagation();
@@ -527,8 +667,8 @@ H.ui = (() => {
           catch (err) { H.toast(err.message, 'error', 6000); }
           renderWorkspaceMenu();
         },
-      }, [el('span', { class: 'nm' }, [f.name]), bits.length ? el('span', { class: 'sub' }, [bits.join(' · ')]) : null]);
-      row.append(el('span', { class: 'ws-acts' }, [
+      }, [el('span', { class: 'nm' }, [f.name]), bits.length ? el('span', { class: 'sub mono' }, [bits.join(' · ')]) : null]);
+      row.append(el('span', { class: 'acts' }, [
         f.granted ? null : el('span', { class: 'act warn' }, ['Grant access']),
         el('span', {
           class: 'act', title: f.mode === 'read' ? 'Allow the assistant to write to this folder' : 'Let the assistant read this folder but not write to it',
@@ -538,14 +678,14 @@ H.ui = (() => {
       ]));
       box.append(row);
     } else {
-      box.append(el('button', { class: 'ws-row', title: 'The file tools have nothing to work with until a folder is open', onclick: (e) => e.stopPropagation() },
+      box.append(el('button', { class: 'opt', title: 'The file tools have nothing to work with until a folder is open', onclick: (e) => e.stopPropagation() },
         [el('span', { class: 'nm muted' }, ['No folder']), el('span', { class: 'sub' }, ['the file tools are idle'])]));
     }
     box.append(el('button', {
       title: f ? `Work in another folder instead of "${f.name}"` : 'Open a folder for this chat to work in',
       onclick: async (e) => {
         e.stopPropagation();
-        try { const name = await H.fs.pick(); H.toast('Working in ' + name, 'success'); box.classList.add('hidden'); }
+        try { const name = await H.fs.pick(); H.toast('Working in ' + name, 'success'); closeMenus(); }
         catch (err) { if (err.name !== 'AbortError') H.toast(err.message, 'error', 6000); }
       },
     }, [H.icon('folder'), f ? 'Work in another folder…' : 'Open folder…']));
@@ -555,10 +695,10 @@ H.ui = (() => {
       box.append(el('div', { class: 'menu-sec' }, ['Recent']));
       for (const r of recent) {
         box.append(el('button', {
-          class: 'ws-row', title: 'Work in this folder again (the browser will ask for access)',
+          class: 'opt', title: 'Work in this folder again (the browser will ask for access)',
           onclick: async (e) => {
             e.stopPropagation();
-            try { await H.fs.open(r.handle, { mode: r.mode || 'readwrite' }); if (!await H.fs.grant()) H.toast(`Access to "${r.name}" was not granted.`, 'warn'); box.classList.add('hidden'); }
+            try { await H.fs.open(r.handle, { mode: r.mode || 'readwrite' }); if (!await H.fs.grant()) H.toast(`Access to "${r.name}" was not granted.`, 'warn'); closeMenus(); }
             catch (err) { H.toast(err.message, 'error', 6000); }
           },
         }, [el('span', { class: 'nm' }, [r.name]), el('span', { class: 'sub' }, [H.relTime(r.lastUsed || Date.now())])]));
@@ -613,12 +753,19 @@ H.ui = (() => {
     };
     await render();
   }
+  /* the three chat modes, named once: the pill under the message box and the cards in Settings say the same thing */
+  const MODES = [
+    { v: 'default', t: 'Default', short: 'reads freely, asks before it writes', d: 'Safe, read-only tools run automatically. Anything that writes, executes or sends data asks you first.' },
+    { v: 'auto', t: 'Allow all', short: 'every tool runs without asking', d: 'Every tool runs without asking (except tools you explicitly denied). Fastest, least safe.' },
+    { v: 'plan', t: 'Plan', short: 'investigate only, then a plan to execute', d: 'The model can only read and investigate. It produces a numbered plan; you then choose to execute it with the permissions you want.' },
+  ];
   function updateModeUI() {
-    const mode = H.perms.effectiveMode(); const sel = $('#mode-select'); sel.value = H.settings.get('chatMode');
+    const mode = H.perms.effectiveMode();
+    modePick?.set(H.settings.get('chatMode'));
     document.body.dataset.mode = mode;
     if (H.agent.pendingQuestion()) { $('#input').placeholder = 'Answer the assistant\'s question…'; $('#send-btn').classList.remove('hidden'); $('#stop-btn').classList.add('hidden'); document.body.classList.add('asking'); return; }
     document.body.classList.remove('asking');
-    $('#mode-wrap').title = { default: 'Default: read-only tools run, writes ask you first', auto: 'Allow all: every tool runs without asking', plan: 'Plan: read-only investigation, then a plan you can execute' }[mode] || 'Chat mode';
+    if (modePick) modePick.btn.title = 'Chat mode · ' + (MODES.find(m => m.v === mode)?.short || mode);
     $('#input').placeholder = mode === 'plan' ? 'Plan mode: describe what you want planned…' : window.matchMedia('(max-width: 560px)').matches ? 'Message…' : 'Message… type / for skills, drop files to attach';
   }
   function updateTitle() { const c = H.agent.current(); $('#chat-title').textContent = c?.title || 'New chat'; }
@@ -631,7 +778,7 @@ H.ui = (() => {
   /* ================= SETTINGS ================= */
   let settingsModal = null;
   const SECTIONS = [
-    ['connection', 'Connection', 'link'], ['model', 'Model & generation', 'cube'], ['modes', 'Chat modes & permissions', 'shield'], ['tools', 'Tools', 'tool'],
+    ['connection', 'Connection', 'link'], ['model', 'Model & generation', 'cube'], ['modes', 'Modes & permissions', 'shield'], ['tools', 'Tools', 'tool'],
     ['plugins', 'Plugins', 'plug'], ['skills', 'Skills', 'bolt'], ['usage', 'Usage & costs', 'chart'], ['security', 'Security & privacy', 'lock'], ['data', 'Data', 'db'], ['about', 'About', 'beer'],
   ];
   function openSettings(section = 'connection') {
@@ -640,7 +787,7 @@ H.ui = (() => {
     const body = el('div', { class: 'settings-body' });
     const builders = { connection: connectionPanel, model: modelPanel, modes: modesPanel, tools: toolsPanel, plugins: pluginsPanel, skills: skillsPanel, usage: usagePanel, security: securityPanel, data: dataPanel, about: aboutPanel };
     const show = (k) => { nav.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.k === k)); body.innerHTML = ''; body.append(builders[k]()); body.scrollTop = 0; };
-    for (const [k, label, ic] of SECTIONS) nav.append(el('button', { 'data-k': k, onclick: () => show(k) }, [H.icon(ic), label]));
+    for (const [k, label, ic] of SECTIONS) nav.append(el('button', { 'data-k': k, onclick: () => show(k) }, [H.icon(ic), el('span', {}, [label])]));
     settingsModal = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === settingsModal) close(); } }, [el('div', { class: 'modal settings' }, [
       el('div', { class: 'modal-head' }, [el('h3', {}, ['Settings']), el('span', { class: 'spacer' }), el('button', { class: 'btn icon ghost', onclick: close }, [H.icon('x')])]),
       el('div', { class: 'settings-layout' }, [nav, body])])]);
@@ -650,7 +797,12 @@ H.ui = (() => {
   const sec = (title, desc, children) => el('section', { class: 'sec' }, [el('h4', {}, [title]), desc ? el('p', { class: 'sec-desc' }, [desc]) : null, ...[].concat(children)]);
   const field = (label, key, type = 'text', extra = {}) => { const s = H.settings.get(); return el('label', { class: 'field' }, [el('span', {}, [label]), el('input', { type, value: s[key] ?? '', ...extra, onchange: (e) => H.settings.set({ [key]: type === 'number' ? +e.target.value : e.target.value }) })]); };
   const check = (label, key, help) => { const s = H.settings.get(); return el('label', { class: 'check' }, [el('input', { type: 'checkbox', checked: !!s[key], onchange: (e) => H.settings.set({ [key]: e.target.checked }) }), el('span', {}, [label, help ? el('span', { class: 'help' }, [help]) : null])]); };
-  const selectField = (label, key, options, onchange) => { const s = H.settings.get(); return el('label', { class: 'field' }, [el('span', {}, [label]), el('select', { onchange: (e) => { H.settings.set({ [key]: e.target.value }); onchange && onchange(e.target.value); } }, options.map(([v, l]) => el('option', { value: v, selected: s[key] === v }, [l])))]); };
+  /* options: [value, label, sub?] — the sub-line says what the choice does, which an <option> could never hold */
+  const selectField = (label, key, options, onchange) => {
+    const s = H.settings.get();
+    const p = picker({ value: s[key], title: label, options: options.map(([v, l, sub]) => ({ value: v, label: l, sub })), onpick: (v) => { H.settings.set({ [key]: v }); onchange && onchange(v); } });
+    return el('div', { class: 'field' }, [el('span', {}, [label]), p.el]);
+  };
 
   function connectionPanel() {
     const status = el('span', { class: 'small muted' });
@@ -664,16 +816,20 @@ H.ui = (() => {
         el('div', { class: 'row gap' }, [el('button', { class: 'btn primary', onclick: async () => { status.textContent = 'Connecting…'; try { const m = await refreshModels(); status.textContent = `Connected · ${m.length} models available`; } catch (e) { status.textContent = 'Failed: ' + e.message; } } }, ['Test connection']), status]),
       ]),
       sec('Interface', null, [
-        selectField('Send message with', 'sendKey', [['enter', 'Enter (Shift+Enter for a new line)'], ['ctrlenter', 'Ctrl / Cmd + Enter']]),
-        selectField('Theme', 'theme', [['system', 'Follow system'], ['dark', 'Dark'], ['light', 'Light']], applyTheme),
+        selectField('Send message with', 'sendKey', [['enter', 'Enter', 'Shift+Enter makes a new line'], ['ctrlenter', 'Ctrl / Cmd + Enter', 'Enter makes a new line']]),
+        selectField('Theme', 'theme', [['system', 'Follow system', 'changes with your OS setting'], ['dark', 'Dark'], ['light', 'Light']], applyTheme),
         el('div', { class: 'check-list' }, [check('Stream responses', 'streaming', 'show the reply while it is being generated'), check('Auto-title new chats', 'autoTitle', 'uses one extra small request per chat')]),
       ]),
     ]);
   }
   function modelPanel() {
     const s = H.settings.get();
-    const sel = el('select', { onchange: (e) => { H.settings.set({ model: e.target.value }); $('#model-select').value = e.target.value; info(); } });
-    fillModelSelect(sel, s.models || [], s.model);
+    const pick = picker({
+      value: s.model, title: 'Default model', options: modelOptions(s.models, s.model), search: true,
+      searchPlaceholder: 'Filter models…', empty: 'No model matches', placeholder: 'No models loaded',
+      onpick: (v) => { H.settings.set({ model: v }); modelPick?.set(v); info(); updateContextMeter(); },
+    });
+    const repaint = (models) => { const m = H.settings.get('model'); pick.setOptions(modelOptions(models ?? H.settings.get('models'), m), m); setModelOptions(models ?? H.settings.get('models'), m); info(); };
     const infoBox = el('div', { class: 'kv-card' });
     const info = () => { const m = H.settings.get('model'); const p = H.usage.priceFor(m); const mi = H.settings.get('modelInfo')?.[m]; infoBox.innerHTML = ''; infoBox.append(el('div', { class: 'kv' }, [
       el('span', {}, ['Context window']), el('b', {}, [p.context ? p.context.toLocaleString() + ' tokens' : 'unknown']),
@@ -682,10 +838,10 @@ H.ui = (() => {
       el('span', {}, ['Source']), el('b', {}, [p.source === 'litellm' ? 'LiteLLM /model/info' : p.source === 'manual' ? 'manual override' : 'not available' + (mi?.provider ? ' · ' + mi.provider : '')]),
     ])); };
     info();
-    const custom = el('input', { type: 'text', placeholder: 'Model name not in the list (advanced)', onchange: (e) => { if (e.target.value.trim()) { H.settings.set({ model: e.target.value.trim() }); fillModelSelect(sel, H.settings.get('models'), e.target.value.trim()); fillModelSelect($('#model-select'), H.settings.get('models'), e.target.value.trim()); info(); e.target.value = ''; } } });
+    const custom = el('input', { type: 'text', placeholder: 'Model name not in the list (advanced)', onchange: (e) => { const v = e.target.value.trim(); if (v) { H.settings.set({ model: v }); repaint(); e.target.value = ''; } } });
     return el('div', {}, [
       sec('Default model', 'Models come from your LiteLLM proxy. Refresh after adding models to the proxy.', [
-        el('div', { class: 'row gap' }, [sel, el('button', { class: 'btn', onclick: async () => { try { const m = await refreshModels(); fillModelSelect(sel, m, H.settings.get('model')); info(); H.toast(`${m.length} models loaded`, 'success'); } catch (e) { H.toast(e.message, 'error'); } } }, [H.icon('refresh'), 'Refresh'])]),
+        el('div', { class: 'row gap' }, [pick.el, el('button', { class: 'btn', onclick: async () => { try { const m = await refreshModels(); repaint(m); H.toast(`${m.length} models loaded`, 'success'); } catch (e) { H.toast(e.message, 'error'); } } }, [H.icon('refresh'), 'Refresh'])]),
         infoBox, custom,
       ]),
       sec('Generation', null, [
@@ -705,16 +861,11 @@ H.ui = (() => {
     ]);
   }
   function modesPanel() {
-    const modes = [
-      ['default', 'Default', 'Safe, read-only tools run automatically. Anything that writes, executes or sends data asks you first.'],
-      ['auto', 'Allow all', 'Every tool runs without asking (except tools you explicitly denied). Fastest, least safe.'],
-      ['plan', 'Plan', 'The model can only read and investigate. It produces a numbered plan; you then choose to execute it with the permissions you want.'],
-    ];
     const cur = H.settings.get('chatMode');
     return el('div', {}, [
-      sec('Chat mode', 'Also switchable from the top bar. The mode applies to new tool calls immediately.', [
-        el('div', { class: 'mode-cards' }, modes.map(([v, t, d]) => el('label', { class: 'mode-card' + (cur === v ? ' active' : '') }, [el('input', { type: 'radio', name: 'mode', value: v, checked: cur === v, onchange: () => { H.settings.set({ chatMode: v }); updateModeUI(); openSettings('modes'); } }), el('b', {}, [t]), el('span', { class: 'small muted' }, [d])]))),
-        selectField('When executing a plan, use', 'planExecuteMode', [['default', 'Default permissions (ask for writes)'], ['auto', 'Allow all (no prompts)']]),
+      sec('Chat mode', 'Also switchable from the pill under the message box. The mode applies to new tool calls immediately.', [
+        el('div', { class: 'mode-cards' }, MODES.map(({ v, t, d }) => el('label', { class: 'mode-card' + (cur === v ? ' active' : '') }, [el('input', { type: 'radio', name: 'mode', value: v, checked: cur === v, onchange: () => { H.settings.set({ chatMode: v }); updateModeUI(); openSettings('modes'); } }), el('b', {}, [t]), el('span', { class: 'small muted' }, [d])]))),
+        selectField('When executing a plan, use', 'planExecuteMode', [['default', 'Default permissions', 'writes and anything risky ask first'], ['auto', 'Allow all', 'the plan runs without prompts']]),
         check('Always ask, even for safe tools', 'alwaysAsk', 'strict mode; applies to Default and Plan'),
       ]),
       sec('How permissions work', null, [el('ul', { class: 'help-list' }, [
@@ -752,9 +903,17 @@ H.ui = (() => {
         wrap.append(el('div', { class: 'tool-row', 'data-k': (t.name + ' ' + t.description + ' ' + g).toLowerCase() }, [
           el('div', {}, [el('div', { class: 'row gap' }, [el('code', {}, [t.name]), el('span', { class: 'chip risk-' + t.risk }, [t.risk]), t.rerun ? el('span', { class: 'chip', title: 'You can re-run this tool from its card in the chat' }, ['re-runnable']) : null]), el('div', { class: 'desc' }, [t.description])]),
           el('label', { class: 'check small' }, [el('input', { type: 'checkbox', checked: !disabled.has(t.name), onchange: (e) => { const d = new Set(H.settings.get('disabledTools')); e.target.checked ? d.delete(t.name) : d.add(t.name); H.settings.set({ disabledTools: [...d] }); } }), 'enabled']),
-          el('select', { onchange: (e) => H.perms.setRule(t.name, e.target.value) }, [
-            el('option', { value: 'default', selected: rule === 'default' }, [`mode default (${H.perms.defaultFor(t)})`]),
-            el('option', { value: 'allow', selected: rule === 'allow' }, ['always allow']), el('option', { value: 'ask', selected: rule === 'ask' }, ['always ask']), el('option', { value: 'deny', selected: rule === 'deny' }, ['deny'])]),
+          picker({
+            variant: 'mini', value: rule, title: 'Policy for ' + t.name, search: false, wide: false,
+            cls: (o) => o?.value === 'allow' ? 'allow' : o?.value === 'deny' ? 'deny' : '',
+            options: [
+              { value: 'default', label: 'mode default', short: `mode default (${H.perms.defaultFor(t)})`, sub: `follows the chat mode · ${H.perms.defaultFor(t)} for a ${t.risk} tool` },
+              { value: 'allow', label: 'always allow', sub: 'runs silently in every mode' },
+              { value: 'ask', label: 'always ask', sub: 'asks every time, even in Allow all' },
+              { value: 'deny', label: 'deny', sub: 'never runs; deny always wins' },
+            ],
+            onpick: (v) => H.perms.setRule(t.name, v),
+          }).el,
         ]));
       }
     }
@@ -794,7 +953,15 @@ H.ui = (() => {
         el('button', { class: 'btn', onclick: () => pluginJsonEditor({ ...H.deepClone(H.plugins.templates.mcp), id: 'mcp-' + H.uid().slice(0, 4) }, render) }, [H.icon('plus'), 'MCP server']),
         el('button', { class: 'btn', onclick: () => pluginJsonEditor({ id: 'api-' + H.uid().slice(0, 4), name: 'My API', kind: 'rest', enabled: false, baseUrl: 'https://api.example.com', auth: { type: 'bearer', token: '' }, headers: {}, tools: [{ name: 'ping', risk: 'safe', description: 'Example GET', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] }, request: { method: 'GET', path: '/items/{{id}}' } }] }, render) }, [H.icon('plus'), 'REST plugin']),
         el('span', { class: 'spacer' }),
-        el('select', { onchange: (e) => { if (!e.target.value) return; H.plugins.upsert(H.deepClone(H.plugins.templates[e.target.value])); render(); } }, [el('option', { value: '' }, ['Re-add template…']), el('option', { value: 'jira' }, ['Jira Cloud (API v3)']), el('option', { value: 'jira2' }, ['Jira Server / DC (API v2)']), el('option', { value: 'git' }, ['GitHub']), el('option', { value: 'gitlab' }, ['GitLab']), el('option', { value: 'litellmMcp' }, ['LiteLLM MCP gateway'])]),
+        picker({
+          variant: 'mini', value: '', placeholder: 'Re-add template…', title: 'Add one of the built-in plugins back', search: false,
+          options: [
+            { value: 'jira', label: 'Jira Cloud', sub: 'REST API v3' }, { value: 'jira2', label: 'Jira Server / DC', sub: 'REST API v2' },
+            { value: 'git', label: 'GitHub', sub: 'issues, pull requests, repositories' }, { value: 'gitlab', label: 'GitLab', sub: 'issues, merge requests, projects' },
+            { value: 'litellmMcp', label: 'LiteLLM MCP gateway', sub: 'MCP servers your proxy exposes' },
+          ],
+          onpick: (v) => { H.plugins.upsert(H.deepClone(H.plugins.templates[v])); render(); },
+        }).el,
         el('button', { class: 'btn', onclick: () => { const i = el('input', { type: 'file', accept: '.json' }); i.onchange = async () => { try { H.plugins.importJSON(await H.readFileAsText(i.files[0])); render(); H.toast('Imported', 'success'); } catch (e) { H.toast(e.message, 'error'); } }; i.click(); } }, ['Import JSON']),
       ]));
     };
@@ -808,19 +975,20 @@ H.ui = (() => {
     const ov = el('div', { class: 'modal-overlay' });
     const urlKey = p.kind === 'mcp' ? 'url' : 'baseUrl';
     const url = el('input', { type: 'url', value: /your-domain|your-company|example\.com/.test(p[urlKey] || '') && !/api\.github\.com/.test(p[urlKey]) ? '' : (p[urlKey] || ''), placeholder: setup.urlPlaceholder || '', autocomplete: 'off' });
-    const authSel = el('select', {}, setup.auth.map((a, i) => el('option', { value: i, selected: p.auth?.type === a.type }, [a.label])));
+    const authIdx = Math.max(0, setup.auth.findIndex(a => a.type === p.auth?.type));
+    const authPick = picker({ value: authIdx, title: 'Authentication', search: false, options: setup.auth.map((a, i) => ({ value: i, label: a.label })), onpick: () => renderCreds() });
     const credBox = el('div', {});
     const result = el('div', { class: 'setup-result hidden' });
     let curAuth = setup.auth.find(a => a.type === p.auth?.type) || setup.auth[0];
     const renderCreds = () => {
-      curAuth = setup.auth[+authSel.value] || setup.auth[0]; credBox.innerHTML = '';
+      curAuth = setup.auth[+authPick.value] || setup.auth[0]; credBox.innerHTML = '';
       if (curAuth.help || curAuth.link) credBox.append(el('p', { class: 'help' }, [curAuth.help || '', ' ', curAuth.link ? el('a', { href: curAuth.link.replace('{{baseUrl}}', url.value.replace(/\/+$/, '')), target: '_blank', rel: 'noopener' }, ['Open token page ', H.icon('external')]) : null]));
       for (const f of curAuth.fields) {
         const existing = p.kind === 'mcp' ? (p.headers?.Authorization || '') : (p.auth?.[f.key] || '');
         credBox.append(el('label', { class: 'field' }, [el('span', {}, [f.label]), el('input', { type: f.secret ? 'password' : 'text', 'data-key': f.key, value: /^<.*>$/.test(existing) ? '' : existing, autocomplete: 'off' })]));
       }
     };
-    authSel.onchange = renderCreds; renderCreds();
+    renderCreds();
     /* connection route */
     const route = p.route || { type: 'direct' };
     const litellmBase = H.settings.get('baseUrl').replace(/\/+$/, '');
@@ -828,13 +996,13 @@ H.ui = (() => {
     const rProxy = el('input', { type: 'url', value: route.proxyUrl || '', placeholder: 'https://proxy.example.com/?url={url}' });
     const snippet = el('pre', { class: 'perm-args small' });
     const routeDetail = el('div', {});
-    const routeSel = el('select', {}, [
-      el('option', { value: 'bridge', selected: route.type === 'bridge' }, ['Browser session bridge (bookmarklet in a logged-in tab) — recommended']),
-      el('option', { value: 'direct', selected: route.type === 'direct' }, ['Direct from the browser (only if the API allows CORS)']),
-      el('option', { value: 'extension', selected: route.type === 'extension' }, [`Connector extension${H.ext.available() ? ' (installed ✓)' : ' (only if you may load extensions)'}`]),
-      el('option', { value: 'litellm', selected: route.type === 'litellm' }, ['Through a LiteLLM pass-through endpoint (needs proxy admin)']),
-      el('option', { value: 'proxy', selected: route.type === 'proxy' }, ['Through a CORS proxy URL I trust']),
-    ]);
+    const routeSel = picker({ value: route.type || 'direct', title: 'Connection route', search: false, onpick: () => renderRoute(), options: [
+      { value: 'bridge', label: 'Browser session bridge', sub: 'a bookmarklet in a logged-in tab — recommended' },
+      { value: 'direct', label: 'Direct from the browser', sub: 'only if the API allows CORS' },
+      { value: 'extension', label: 'Connector extension', sub: H.ext.available() ? 'installed ✓' : 'only if you may load extensions' },
+      { value: 'litellm', label: 'LiteLLM pass-through endpoint', sub: 'needs a proxy admin to add it' },
+      { value: 'proxy', label: 'A CORS proxy I trust', sub: 'the proxy sees the whole request' },
+    ] });
     const renderRoute = () => {
       routeDetail.innerHTML = '';
       if (routeSel.value === 'litellm') {
@@ -885,7 +1053,7 @@ H.ui = (() => {
         routeDetail.append(el('label', { class: 'field' }, [el('span', {}, ['Proxy URL ({url} = encoded target, or a prefix)']), rProxy]), el('p', { class: 'help' }, ['The proxy sees the full request including credentials. Only use one you or your company operates.']));
       } else routeDetail.append(el('p', { class: 'help' }, [`Works for APIs that send CORS headers for this page's origin (${!/^https?:/.test(location.origin) ? 'none: file:// pages have origin "null"' : location.origin}): GitHub, GitLab, and Jira Server / Data Center once its admin allowlists the origin. Jira Cloud never does.`]));
     };
-    routeSel.onchange = renderRoute; rPath.oninput = renderRoute; url.addEventListener('input', renderRoute);
+    rPath.oninput = renderRoute; url.addEventListener('input', renderRoute);
     const collect = () => {
       p[urlKey] = url.value.trim().replace(/\/+$/, '');
       p.route = routeSel.value === 'direct' ? { type: 'direct' } : routeSel.value === 'extension' ? { type: 'extension' } : routeSel.value === 'bridge' ? { type: 'bridge' } : routeSel.value === 'litellm' ? { type: 'litellm', path: rPath.value.trim().replace(/^\/+|\/+$/g, '') || p.id } : { type: 'proxy', proxyUrl: rProxy.value.trim() };
@@ -904,8 +1072,8 @@ H.ui = (() => {
       el('p', { class: 'small muted' }, [p.description || '']),
       setup.warning ? el('div', { class: 'note' }, [setup.warning]) : null,
       el('div', { class: 'step' }, [el('div', { class: 'step-n' }, ['1']), el('div', { class: 'step-body' }, [el('label', { class: 'field' }, [el('span', {}, [setup.urlLabel || 'URL']), url]), setup.urlHelp ? el('p', { class: 'help' }, [setup.urlHelp]) : null])]),
-      el('div', { class: 'step' }, [el('div', { class: 'step-n' }, ['2']), el('div', { class: 'step-body' }, [el('label', { class: 'field' }, [el('span', {}, ['Authentication']), authSel]), credBox, el('p', { class: 'help' }, ['Credentials are stored as a secret in this browser only and sent solely to the URL above.'])])]),
-      el('div', { class: 'step' }, [el('div', { class: 'step-n' }, ['3']), el('div', { class: 'step-body' }, [el('label', { class: 'field' }, [el('span', {}, ['Connection route']), routeSel]), routeDetail])]),
+      el('div', { class: 'step' }, [el('div', { class: 'step-n' }, ['2']), el('div', { class: 'step-body' }, [el('div', { class: 'field' }, [el('span', {}, ['Authentication']), authPick.el]), credBox, el('p', { class: 'help' }, ['Credentials are stored as a secret in this browser only and sent solely to the URL above.'])])]),
+      el('div', { class: 'step' }, [el('div', { class: 'step-n' }, ['3']), el('div', { class: 'step-body' }, [el('div', { class: 'field' }, [el('span', {}, ['Connection route']), routeSel.el]), routeDetail])]),
       el('div', { class: 'step' }, [el('div', { class: 'step-n' }, ['4']), el('div', { class: 'step-body' }, [el('div', { class: 'row gap' }, [testBtn]), result])]),
       el('div', { class: 'row gap', style: 'margin-top:14px' }, [el('button', { class: 'btn primary', onclick: () => save(true) }, ['Save & enable']), el('button', { class: 'btn', onclick: () => save(false) }, ['Save only']), el('span', { class: 'spacer' }), el('button', { class: 'btn ghost', onclick: () => ov.remove() }, ['Cancel'])]),
     ]));
@@ -1144,7 +1312,8 @@ H.ui = (() => {
     new MutationObserver((muts) => {
       for (const m of muts) {
         for (const n of m.addedNodes) { if (n.nodeType !== 1) continue; if (n.classList.contains('modal-overlay')) setupDialog(n); labelButtons(n); }
-        for (const n of m.removedNodes) { if (n.nodeType === 1 && n.classList?.contains('modal-overlay') && n._returnFocus && document.contains(n._returnFocus)) { try { n._returnFocus.focus(); } catch { } } }
+        for (const n of m.removedNodes) { if (n.nodeType !== 1 || !n.classList?.contains('modal-overlay')) continue; closeMenus();   /* a dropdown opened from the dialog must not outlive it */
+          if (n._returnFocus && document.contains(n._returnFocus)) { try { n._returnFocus.focus(); } catch { } } }
       }
     }).observe(document.body, { childList: true, subtree: true });
     H.bus.on('run-state', (running, chatId) => { if (chatId === H.agent.current()?.id) announce(running ? 'Assistant is responding.' : 'Assistant finished.'); });
@@ -1185,11 +1354,23 @@ H.ui = (() => {
     $('#chat-list').addEventListener('click', (e) => { if (narrow() && e.target.closest('.chat-item') && !e.target.closest('button')) openDrawer(false); });
     $('#new-chat').addEventListener('click', () => { if (narrow()) openDrawer(false); });
     window.addEventListener('resize', () => { if (!narrow()) openDrawer(false); });
-    $('#ws-btn').onclick = (e) => { e.stopPropagation(); const m = $('#ws-menu'); const show = m.classList.contains('hidden'); if (show) renderWorkspaceMenu(); m.classList.toggle('hidden', !show); };
-    $('#model-select').onchange = (e) => { H.settings.set({ model: e.target.value }); updateContextMeter(); };
-    $('#mode-select').onchange = (e) => { H.settings.set({ chatMode: e.target.value }); updateModeUI(); };
-    $('#more-btn').onclick = (e) => { e.stopPropagation(); $('#more-menu').classList.toggle('hidden'); };
-    document.addEventListener('click', () => { $('#more-menu').classList.add('hidden'); $('#ws-menu').classList.add('hidden'); });
+    bindMenu($('#ws-btn'), $('#ws-menu'), renderWorkspaceMenu);
+    bindMenu($('#more-btn'), $('#more-menu'));
+    modelPick = picker({
+      variant: 'pill', icon: 'cube', title: 'Model', search: true, searchPlaceholder: 'Filter models…',
+      empty: 'No model matches', placeholder: 'No model', value: H.settings.get('model'),
+      options: modelOptions(H.settings.get('models'), H.settings.get('model')),
+      onpick: (v) => { H.settings.set({ model: v }); updateContextMeter(); },
+    });
+    modelPick.el.id = 'model-pick'; $('#model-pick').replaceWith(modelPick.el);
+    modePick = picker({
+      variant: 'pill', icon: 'shield', title: 'Chat mode', search: false, value: H.settings.get('chatMode'),
+      options: MODES.map(m => ({ value: m.v, label: m.t, sub: m.short })),
+      onpick: (v) => { H.settings.set({ chatMode: v }); updateModeUI(); },
+    });
+    modePick.el.id = 'mode-pick'; $('#mode-pick').replaceWith(modePick.el);
+    document.addEventListener('click', () => closeMenus());
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openMenus.size) { e.stopPropagation(); closeMenus(); } });
     $('#usage-btn').onclick = () => openSettings('usage');
     $('#changes-btn').onclick = () => changesPanel();
     $('#compact-btn').onclick = () => H.agent.compact(H.agent.current(), { manual: true });
@@ -1212,7 +1393,6 @@ H.ui = (() => {
     $('#messages').addEventListener('scroll', () => { const b = $('#messages'); stick = b.scrollHeight - b.scrollTop - b.clientHeight < 80; updateScrollBtn(); });
     $('#scroll-bottom').onclick = () => { stick = true; scrollBottom(true); };
     $('#chat-search').addEventListener('input', () => renderChatList());
-    fillModelSelect($('#model-select'), H.settings.get('models') || [], H.settings.get('model'));
     updateModeUI(); updateTitle();
 
     let shownChatId = null;
@@ -1246,7 +1426,7 @@ H.ui = (() => {
     H.bus.on('workspace', (n) => { updateWorkspaceBtn(n); if (!$('#ws-menu').classList.contains('hidden')) renderWorkspaceMenu(); });
     H.bus.on('git-state', () => updateWorkspaceBtn());
     H.bus.on('preview', showPreview);
-    H.bus.on('settings', (s) => { if ($('#mode-select').value !== s.chatMode) updateModeUI(); if ($('#model-select').value !== s.model) fillModelSelect($('#model-select'), s.models || [], s.model); });
+    H.bus.on('settings', (s) => { if (modePick?.value !== s.chatMode) updateModeUI(); if (modelPick?.value !== s.model) setModelOptions(s.models || [], s.model); });
     H.bus.on('perm-prompt', () => { try { if (document.hidden && Notification.permission === 'granted') new Notification('Permission needed', { body: 'The assistant is waiting for your approval.' }); } catch { } });
   }
 

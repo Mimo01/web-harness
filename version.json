@@ -1,6 +1,6 @@
 {
-  "version": "1.16.0",
+  "version": "1.17.0",
   "date": "2026-09-11",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "a folder per chat: a new chat starts with no folder and keeps the one you pick, shown on the folder button next to the message box, with folders you have opened before one click away; read-only folders; a file index and git reader cached per folder; 'Files changed in this chat' with per-file diffs, revert and patch export; fixes: added/deleted files were diffed as binary, and '**' in a glob could not match zero directories"
+  "notes": "one dropdown for the whole app: model, chat mode, settings fields, per-tool policies and the plugin setup wizard all use the same picker as the folder menu - rows carry a sub-line (a model's context window and price, what a mode or connection route actually does), long lists get a filter field, and the keyboard drives all of it (arrows, type-ahead, Enter, Escape); one outside click or Escape closes whatever menu is open; fixes: the settings nav item 'Chat modes & permissions' wrapped onto a second line (now 'Modes & permissions', and no nav label can wrap again), and the dropdown arrow no longer stays warm grey in the dark theme"
 }
