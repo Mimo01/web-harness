@@ -27,10 +27,13 @@ H.journal = (() => {
     catch (e) { return { text: null, note: 'it could not be read (' + e.message + ')' }; }
   }
 
-  /** called by H.fs before it changes anything; never throws — a failed recording must not block the write */
-  async function capture(path, op) {
+  /** called by H.fs before it changes anything; never throws — a failed recording must not block the write.
+      `forChat` is the chat whose run is writing. It has to be passed in: a chat keeps running when you switch
+      away from it, so the chat on screen is not necessarily the one making the change, and filing a write under
+      the wrong chat puts it in the wrong "Files changed" list — where Revert would restore it. */
+  async function capture(path, op, forChat) {
     if (suspended || !enabled()) return;
-    const chat = chatId(), f = H.fs.folder();
+    const chat = forChat || chatId(), f = H.fs.folder();
     if (!chat || !f) return;
     try {
       if (op === 'delete') {

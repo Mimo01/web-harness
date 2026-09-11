@@ -88,16 +88,16 @@ H.tools = (() => {
     name: 'fs_write', group: 'Files', risk: 'write',
     description: 'Create or overwrite a text file in the workspace. Parent directories are created automatically.',
     parameters: obj({ path: str('File path'), content: str('Full file content') }, ['path', 'content']),
-    run: async ({ path, content }) => ok({ path, ...(await H.fs.writeFile(path, content)) }),
+    run: async ({ path, content }, ctx) => ok({ path, ...(await H.fs.writeFile(path, content, { chatId: ctx?.chatId })) }),
   });
   def({
     name: 'fs_edit', group: 'Files', risk: 'write',
     description: 'Edit a file by replacing an exact string with another. old_string must occur exactly once unless replace_all is true.',
     parameters: obj({ path: str('File path'), old_string: str('Exact text to replace'), new_string: str('Replacement text'), replace_all: bool('Replace all occurrences') }, ['path', 'old_string', 'new_string']),
-    run: async ({ path, old_string, new_string, replace_all }) => {
+    run: async ({ path, old_string, new_string, replace_all }, ctx) => {
       const text = await H.fs.readFile(path);
       const r = H.fs.replaceText(text, old_string, new_string, !!replace_all);
-      await H.fs.writeFile(path, r.text);
+      await H.fs.writeFile(path, r.text, { chatId: ctx?.chatId });
       return ok({ path, replacements: r.count });
     },
   });
@@ -105,7 +105,7 @@ H.tools = (() => {
     name: 'fs_append', group: 'Files', risk: 'write',
     description: 'Append text to a file (creates it if missing).',
     parameters: obj({ path: str('File path'), content: str('Text to append') }, ['path', 'content']),
-    run: async ({ path, content }) => ok({ path, ...(await H.fs.appendFile(path, content)) }),
+    run: async ({ path, content }, ctx) => ok({ path, ...(await H.fs.appendFile(path, content, { chatId: ctx?.chatId })) }),
   });
   def({
     name: 'fs_mkdir', group: 'Files', risk: 'write',
@@ -117,13 +117,13 @@ H.tools = (() => {
     name: 'fs_delete', group: 'Files', risk: 'danger',
     description: 'Delete a file or directory from the workspace.',
     parameters: obj({ path: str('Path to delete'), recursive: bool('Required to delete non-empty directories') }, ['path']),
-    run: async ({ path, recursive }) => ok(await H.fs.remove(path, { recursive })),
+    run: async ({ path, recursive }, ctx) => ok(await H.fs.remove(path, { recursive, chatId: ctx?.chatId })),
   });
   def({
     name: 'fs_move', group: 'Files', risk: 'write',
     description: 'Move or rename a file.',
-    parameters: obj({ from: str('Source path'), to: str('Destination path') }, ['from', 'to']),
-    run: async ({ from, to }) => ok(await H.fs.move(from, to)),
+    parameters: obj({ from: str('Source path'), to: str('Destination path'), overwrite: bool('Replace the destination if a file is already there (default false)') }, ['from', 'to']),
+    run: async ({ from, to, overwrite }, ctx) => ok(await H.fs.move(from, to, { overwrite: !!overwrite, chatId: ctx?.chatId })),
   });
   def({
     name: 'fs_stat', group: 'Files', risk: 'safe',
@@ -674,7 +674,7 @@ H.tools = (() => {
     description: 'Delegate a self-contained task to a fresh sub-agent (same model, same tools) with its own context window. Returns its final answer. Useful for long research or big file exploration.',
     parameters: obj({ task: str('Complete task description with all needed context'), maxIterations: num('Max tool iterations (default 15)') }, ['task']),
     run: async ({ task, maxIterations = 15 }, ctx) => {
-      const res = await H.agent.runOnce({ task, maxIterations, onStatus: ctx.onStatus, signal: ctx.signal, runFolder: ctx.runFolder });
+      const res = await H.agent.runOnce({ task, maxIterations, onStatus: ctx.onStatus, signal: ctx.signal, runFolder: ctx.runFolder, chatId: ctx.chatId });
       return ok({ answer: res });
     },
   });

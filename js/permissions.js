@@ -31,7 +31,11 @@ H.perms = (() => {
      Tools may also declare mustAsk(args) -> { key, note } to force a confirmation regardless of mode or rules
      (used when a request would go through the user's logged-in browser tab). */
   const scopeKey = (tool, args) => { if (!tool.scope) return null; try { const s = tool.scope(args); return s ? tool.name + '@' + s : null; } catch { return null; } };
-  const denied = (decision) => ({ ok: false, reason: 'User denied this tool call.' + (decision && decision.startsWith('msg:') ? ' Message: ' + decision.slice(4) : '') });
+  /* A prompt closed by Stop resolves like a denial, but saying "the user denied this" would be a lie the model
+     then explains to them — so a cancelled run is reported as what it is. */
+  const denied = (decision, ctx) => ctx?.signal?.aborted
+    ? { ok: false, reason: 'The run was stopped by the user before this call was approved.' }
+    : { ok: false, reason: 'User denied this tool call.' + (decision && decision.startsWith('msg:') ? ' Message: ' + decision.slice(4) : '') };
 
   /** true when check() would show a prompt for these arguments (keeps prompting calls out of parallel batches) */
   function willPrompt(tool, args) {
@@ -51,7 +55,7 @@ H.perms = (() => {
       if (session.has(forced.key)) return { ok: true };
       const sc = scopeKey(tool, args); const d = await prompt(tool, args, ctx, { scope: sc ? sc.slice(tool.name.length + 1) : null, note: forced.note, noAlways: true });
       if (d === 'session') session.add(forced.key);
-      else if (d !== 'once') return denied(d);
+      else if (d !== 'once') return denied(d, ctx);
       return { ok: true };
     }
     // 2) policy by tool
@@ -69,12 +73,15 @@ H.perms = (() => {
     if (decision === 'session') { session.add(key); return { ok: true }; }
     if (decision === 'always') { rules[key] = 'allow'; save(); return { ok: true }; }
     if (decision === 'never') { rules[key] = 'deny'; save(); return { ok: false, reason: 'User denied and set policy to deny' + (scope ? ' for ' + scope : '') + '.' }; }
-    return denied(decision);
+    return denied(decision, ctx);
   }
 
-  /* Modal prompt; resolves to 'once' | 'session' | 'always' | 'deny' | 'never' | 'msg:<text>' */
+  /* Modal prompt; resolves to 'once' | 'session' | 'always' | 'deny' | 'never' | 'msg:<text>'.
+     Stop has to reach it: a run cancelled while this is open would otherwise wait forever for an answer to a
+     call that is no longer going to happen, leaving the chat wedged behind a modal nobody wants to read. */
   function prompt(tool, args, ctx, { scope, note, noAlways } = {}) {
     return new Promise((resolve) => {
+      if (ctx?.signal?.aborted) return resolve('deny');
       const argStr = JSON.stringify(args, null, 2);
       const overlay = H.el('div', { class: 'modal-overlay perm' });
       const box = H.el('div', { class: 'modal perm-modal' }, [
@@ -94,11 +101,18 @@ H.perms = (() => {
         ]),
       ]);
       overlay.append(box); document.body.append(overlay);
+      let settled = false;
       const done = (d) => {
+        if (settled) return; settled = true;
         const msg = box.querySelector('.perm-msg').value.trim();
+        ctx?.signal?.removeEventListener('abort', onAbort);
         overlay.remove();
         resolve(d === 'deny' && msg ? 'msg:' + msg : d);
       };
+      /* Escape is the same answer as Deny, without a message: a decision is still required, but it can be "no" */
+      overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done('deny'); } });
+      const onAbort = () => done('deny');
+      ctx?.signal?.addEventListener('abort', onAbort, { once: true });
       H.bus.emit('perm-prompt', { tool, args });
     });
   }

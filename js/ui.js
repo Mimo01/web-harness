@@ -169,7 +169,7 @@ H.ui = (() => {
     const node = el('div', { class: 'msg user' + (m.meta?.planExec ? ' plan-exec' : '') + (m.meta?.system ? ' system' : '') + (m.meta?.compacted ? ' compacted' : '') }, [el('div', { class: 'body' }, [
       el('div', { class: 'role' }, [el('span', { class: 'actions' }, [
         el('button', { class: 'btn sm ghost', title: 'Copy', onclick: () => { navigator.clipboard.writeText(m.display || (typeof m.content === 'string' ? m.content : '')); H.toast('Copied', 'success', 1200); } }, ['Copy']),
-        el('button', { class: 'btn sm ghost icon', title: 'Delete', onclick: () => H.agent.deleteMessage(idx) }, [H.icon('x')])]), el('span', { class: 'muted small ts', title: H.fmtTime(m.ts) }, [H.fmtClock(m.ts)])]),
+        el('button', { class: 'btn sm ghost icon', title: 'Delete', disabled: idx < 0 || null, onclick: () => H.agent.deleteMessage(idx) }, [H.icon('x')])]), el('span', { class: 'muted small ts', title: H.fmtTime(m.ts) }, [H.fmtClock(m.ts)])]),
       el('div', { class: 'text' }, [m.display || (typeof m.content === 'string' ? m.content : '')]),
       m.attachments?.length ? el('div', { class: 'attachments' }, m.attachments.map(a => el('span', { class: 'chip' + (a.empty ? ' risk-danger' : ''), title: a.empty ? 'No text could be extracted from this file; the model cannot read it. ' + (a.note || '') : (a.chars ? `${a.chars.toLocaleString()} characters of text were sent to the model` : '') }, [H.icon('clip'), `${a.name} (${H.fmtBytes(a.size || 0)})`, a.empty ? ' · no text!' : '']))) : null,
     ])]);
@@ -236,6 +236,8 @@ H.ui = (() => {
     const es = node.querySelector('.err-slot'); es.innerHTML = '';
     if (m.meta?.error) es.append(el('div', { class: 'error-box row gap wrap' }, [el('span', { style: 'flex:1' }, ['Error: ' + m.meta.error]), el('button', { class: 'btn sm', onclick: () => H.agent.regenerate() }, [H.icon('refresh'), 'Retry'])]));
     if (m.meta?.aborted) es.append(el('div', { class: 'muted small' }, ['(stopped)']));
+    /* a reply cut off while it was still writing a tool call: say which call was dropped, or the turn just ends */
+    if (m.meta?.abandonedCalls?.length && !m.meta.streaming) es.append(el('div', { class: 'muted small' }, [`It was about to call ${m.meta.abandonedCalls.join(', ')}; that call was dropped.`]));
     if (m.meta?.interrupted) es.append(el('div', { class: 'row gap wrap truncated-box' }, [el('span', { class: 'muted small', style: 'flex:1' }, ['This reply was still being written when the tab was closed.']), el('button', { class: 'btn sm', onclick: () => H.agent.regenerate() }, [H.icon('refresh'), 'Retry'])]));
     if (m.meta?.truncated && !m.meta.streaming) es.append(el('div', { class: 'row gap wrap truncated-box' }, [el('span', { class: 'muted small', style: 'flex:1' }, ['The reply was cut off at the output limit.']), el('button', { class: 'btn sm primary', onclick: () => H.agent.continueRun() }, ['Continue'])]));
     const turn = turnOf.get(node); if (turn) updateTurnStats(turn);
@@ -351,7 +353,8 @@ H.ui = (() => {
     if (chatId && chatId !== H.agent.current()?.id) { renderChatList(); return; }   // belongs to a chat running in the background
     const wrap = $('#messages .msg-wrap'); const empty = $('#empty'); if (empty) empty.remove();
     for (const [msg, node] of nodeFor) if (msg.role === 'assistant' && msg.meta?.plan) updateAssistant(node, msg);   // earlier plan bars go stale
-    placeMessage(wrap, m, H.agent.current()?.messages.indexOf(m) ?? 0); scrollBottom(); updateContextMeter();
+    const at = H.agent.current()?.messages.indexOf(m) ?? -1;   // indexOf gives -1, which ?? would happily pass on
+    placeMessage(wrap, m, at); scrollBottom(); updateContextMeter();
   }
   /* streaming deltas arrive many times per second: coalesce them into one render per animation frame */
   const dirty = new Set(); let raf = 0;

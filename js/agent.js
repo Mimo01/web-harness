@@ -140,7 +140,7 @@ When you have enough information, write a concrete, numbered implementation plan
   }
 
   const chatIdOf = (messages) => { for (const c of live.values()) if (c.messages === messages) return c.id; return chat?.id; };
-  async function loop(messages, { onEvent, signal, maxIterations, onUsage, mode, subagent = false, runFolder = null }) {
+  async function loop(messages, { onEvent, signal, maxIterations, onUsage, mode, subagent = false, runFolder = null, chatId = null }) {
     const tools = H.tools.openaiSpecs();
     const model = H.settings.get('model');
     let finalText = '';
@@ -165,6 +165,11 @@ When you have enough information, write a concrete, numbered implementation plan
         });
       } catch (e) {
         assistant.meta.streaming = false;
+        /* The calls streamed so far are half-built (an id may still be empty) and no tool message will ever
+           answer them. An assistant message carrying tool_calls with no matching tool results is rejected by
+           every OpenAI-compatible proxy, so leaving them behind would break every later message in this chat.
+           Keep the names for the card, drop the calls themselves. */
+        if (assistant.tool_calls.length) { assistant.meta.abandonedCalls = assistant.tool_calls.map(t => t.function?.name).filter(Boolean); assistant.tool_calls = []; }
         if (e.name === 'AbortError') { assistant.meta.aborted = true; onEvent?.('assistant-end', assistant); break; }
         assistant.meta.error = e.message; assistant.content ||= '';
         onEvent?.('assistant-end', assistant);
@@ -190,7 +195,7 @@ When you have enough information, write a concrete, numbered implementation plan
       });
       const execOne = async ({ tc, toolMsg, sig }) => {
         if (signal?.aborted) { toolMsg.meta.running = false; toolMsg.content = JSON.stringify({ error: 'Cancelled by the user.' }); onEvent?.('tool-end', toolMsg); return; }
-        const ctx = { signal, finishReason: res.finish_reason, images, chatId: chatIdOf(messages), toolMsg, subagent, runFolder, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
+        const ctx = { signal, finishReason: res.finish_reason, images, chatId: chatId || chatIdOf(messages), toolMsg, subagent, runFolder, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
         const prev = seen.get(sig);
         let out;
         if (prev && prev.count >= 3) {
@@ -219,7 +224,7 @@ When you have enough information, write a concrete, numbered implementation plan
       if (stalled) {
         messages.push({ role: 'user', content: '[system] Repeated identical tool calls were blocked by the loop guard. Summarize what you found, explain what is blocking you, and ask the user how to proceed. Do not call tools in this reply.', ts: Date.now(), meta: { system: true } });
         onEvent?.('user-added', messages.at(-1));
-        return await loop(messages, { onEvent, signal, maxIterations: 1, onUsage, mode, subagent, runFolder });
+        return await loop(messages, { onEvent, signal, maxIterations: 1, onUsage, mode, subagent, runFolder, chatId });
       }
       if (images.length) {   // images requested by tools are delivered as a user message with vision content
         const um = { role: 'user', content: `[Images requested via view_image: ${images.map(i => i.name).join(', ')}]`, display: `🖼 ${images.map(i => i.name).join(', ')} shown to the model`, ts: Date.now(), meta: { system: true }, apiContent: [{ type: 'text', text: `Here are the images you asked for: ${images.map(i => i.name).join(', ')}` }, ...images.map(i => ({ type: 'image_url', image_url: { url: i.content } }))] };
@@ -385,9 +390,23 @@ When you have enough information, write a concrete, numbered implementation plan
      renders its result at all — so a chat read back from storage while nothing is running is settled here. */
   function settleInterrupted(c) {
     if (!c || runs.has(c.id)) return c;
-    for (const m of c.messages || []) {
+    const msgs = c.messages || [];
+    for (const m of msgs) {
       if (!m.meta?.running && !m.meta?.streaming) continue;
       m.meta = { ...m.meta, running: false, streaming: false, interrupted: true };
+    }
+    /* A reply cut off mid tool-call (tab closed, or a run stopped by an older version of the app) can carry
+       tool_calls that no tool message ever answered. The API refuses such a pair, which would make every
+       later message in this chat fail — so the unanswered calls are dropped on the way back in. */
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i];
+      if (m.role !== 'assistant' || !m.tool_calls?.length) continue;
+      const answered = new Set();
+      for (let j = i + 1; j < msgs.length && msgs[j].role === 'tool'; j++) answered.add(msgs[j].tool_call_id);
+      const orphans = m.tool_calls.filter(t => !t.id || !answered.has(t.id));
+      if (!orphans.length) continue;
+      m.meta = { ...(m.meta || {}), abandonedCalls: orphans.map(t => t.function?.name).filter(Boolean) };
+      m.tool_calls = m.tool_calls.filter(t => t.id && answered.has(t.id));
     }
     return c;
   }
@@ -418,15 +437,19 @@ When you have enough information, write a concrete, numbered implementation plan
     }
   }
   async function rename(title) { if (chat) { chat.title = title; await persist(chat, { now: true }); } }
-  async function deleteMessage(idx) { if (!chat || runs.has(chat.id)) return; chat.messages.splice(idx, 1); H.bus.emit('chat-loaded', chat); await persist(); }
+  /* the index comes from the rendered list, so it is checked here rather than trusted: a negative one would
+     splice from the end and delete a message nobody pointed at */
+  async function deleteMessage(idx) { if (!chat || runs.has(chat.id) || !(idx >= 0 && idx < chat.messages.length)) return; chat.messages.splice(idx, 1); H.bus.emit('chat-loaded', chat); await persist(); }
   const isRunning = (id) => runs.has(id || chat?.id);
   /** the folder a running chat is bound to, or null — the sidebar warns when it is not the one that is open */
   const runFolderOf = (id) => runs.get(id || chat?.id)?.folder || null;
 
-  async function runOnce({ task, maxIterations = 15, onStatus, signal, runFolder = null }) {
+  /* `chatId` is the parent chat: the sub-agent's own message list is not in `live`, so without it the file
+     history would fall back to whichever chat happens to be on screen. */
+  async function runOnce({ task, maxIterations = 15, onStatus, signal, runFolder = null, chatId = null }) {
     const msgs = [{ role: 'user', content: task }];
     let steps = 0;
-    const text = await loop(msgs, { signal, maxIterations, subagent: true, runFolder, mode: H.perms.effectiveMode() === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
+    const text = await loop(msgs, { signal, maxIterations, subagent: true, runFolder, chatId, mode: H.perms.effectiveMode() === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
     return text || '(sub-agent produced no final text)';
   }
 

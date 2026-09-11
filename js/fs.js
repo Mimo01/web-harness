@@ -132,10 +132,12 @@ H.fs = (() => {
   }
   /* a change invalidates this folder's file index and content cache */
   const touched = () => { try { H.code.bump(); } catch { } };
-  async function writeFile(path, content) {
+  /* `opts.chatId` names the chat this write belongs to. H.fs is global and a chat keeps running when you switch
+     away from it, so the file history cannot ask "which chat is on screen?" — the caller has to say. */
+  async function writeFile(path, content, opts = {}) {
     const { parts, path: rel } = resolve(path);
     await ensure(true);
-    await H.journal?.capture(rel, 'write');
+    await H.journal?.capture(rel, 'write', opts.chatId);
     touched();
     const w = await (await fileHandle(parts, true)).createWritable();
     await w.write(content);
@@ -143,10 +145,10 @@ H.fs = (() => {
     return { bytes: typeof content === 'string' ? new Blob([content]).size : content.size ?? content.byteLength };
   }
   /* append without reading or rewriting the existing content: keep the file, seek to its end, write the new part */
-  async function appendFile(path, content) {
+  async function appendFile(path, content, opts = {}) {
     const { parts, path: rel } = resolve(path);
     await ensure(true);
-    await H.journal?.capture(rel, 'append');
+    await H.journal?.capture(rel, 'append', opts.chatId);
     touched();
     const fh = await fileHandle(parts, true);
     const size = (await fh.getFile()).size;
@@ -193,21 +195,25 @@ H.fs = (() => {
     await dirHandle(parts, true);
     return { ok: true };
   }
-  async function remove(path, { recursive = false } = {}) {
+  async function remove(path, { recursive = false, chatId } = {}) {
     const { parts, path: rel } = resolve(path);
     await ensure(true);
-    await H.journal?.capture(rel, 'delete');
+    await H.journal?.capture(rel, 'delete', chatId);
     touched();
     const name = parts[parts.length - 1];
     const d = await dirHandle(parts.slice(0, -1));
     await d.removeEntry(name, { recursive });
     return { ok: true };
   }
-  async function move(from, to) {
+  /* A move that lands on an existing file would silently destroy it, and the model has no way to notice.
+     `overwrite: true` is the deliberate way to say that is what was meant. */
+  async function move(from, to, { overwrite = false, chatId } = {}) {
+    const { path: dest } = resolve(to);
+    if (!overwrite && await exists(dest)) throw new Error(`"${dest}" already exists. Pass overwrite: true to replace it, or move to a different name.`);
     const content = await readFile(from, { binary: true });
-    await writeFile(to, content);
-    await remove(from);
-    return { ok: true };
+    await writeFile(to, content, { chatId });
+    await remove(from, { chatId });
+    return { ok: true, from: resolve(from).path, to: dest, overwritten: overwrite };
   }
   /* glob -> regex. "**\/" spans any number of directories *including none*, so "src/**\/*.js" matches "src/a.js"
      as well as "src/deep/a.js"; a lone "*" stops at a slash. Falls back to matching the bare file name, so "*.md"
