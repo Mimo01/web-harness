@@ -42,7 +42,7 @@ with a **Download** button (Settings → About → *Check for updates* does it o
 
 **To update**: download the zip again, unzip it **over your existing folder** (replace all files), reload the tab.
 Your chats, settings, skills, plugins and credentials live in the browser, not in the folder, so nothing is lost.
-Don't want the check? Turn it off in Settings → Security & privacy; it only ever fetches a public `version.json`.
+Don't want the check? Turn it off in Settings → Web access; it only ever fetches a public `version.json`.
 
 ## ✨ What you get
 
@@ -134,8 +134,8 @@ outside the folder you picked.
 Git here is read-only by design, so undo comes from the filesystem layer instead: before every write, edit, append or
 delete, the file's previous contents are stored in the browser, per chat. The top-bar menu → **Files changed in this
 chat** lists every file the conversation touched with the diff against what it found, and restores any of them — or
-all of them — with one click. The same list exports as a `.patch` file. Turn the recording off in Settings → Security
-& privacy; it is pruned as it grows and deleted with the chat.
+all of them — with one click. The same list exports as a `.patch` file. Turn the recording off in Settings →
+Workspace; it is pruned as it grows and deleted with the chat.
 
 ### Code projects & git
 Open a project folder and the assistant treats it as a codebase rather than a pile of files.
@@ -162,7 +162,7 @@ Open a project folder and the assistant treats it as a codebase rather than a pi
   everything you just changed" in a folder extracted from a zip.
 - **Project instructions.** An `AGENTS.md`, `CLAUDE.md`, `.harness/context.md` or `HARNESS.md` in the workspace root is
   loaded into the system prompt as your standing instructions for that project (a toast tells you when it happens;
-  turn it off in Settings → Security & privacy → *Workspace & code*).
+  turn it off in Settings → Workspace).
 - **In the interface.** The folder button under the message box shows the folder, its branch and, once something has
   run `git_status`, how many files differ. Tool results that carry a diff — `git_diff`, `git_show`, `workspace_changes`, and `fs_edit` — are rendered as
   a real diff instead of raw JSON.
@@ -195,7 +195,7 @@ The model also receives a short usage guide for each enabled plugin (issue-key f
 which, how to handle errors), and a loop guard blocks a tool call repeated with identical arguments and outcome
 more than three times in one turn, then asks the model to report instead.
 
-Per tool (Settings → Tools) you can disable it, or force `always allow` / `always ask` / `deny`. "Always ask, even for
+Per tool (Settings → Permissions) you can disable it, or force `always allow` / `always ask` / `deny`. "Always ask, even for
 safe tools" turns on strict mode. When prompted you can *Allow once*, *Allow for session*, *Always allow*, *Deny*
 (optionally with a message the model sees) or *Never allow*.
 
@@ -209,7 +209,7 @@ because the result would only be shown to you and never reach the model.
 Long chats stay within the model's window and costs stay roughly linear:
 - **Tool result stubs**: tool outputs older than the last 2 user turns are sent as a short stub ("…truncated, re-run
   the tool for the full result"); the model is told it can re-fetch them.
-- **Compaction**: when the context passes 70% of the window (both configurable in Settings → Model & generation), the
+- **Compaction**: when the context passes 70% of the window (both configurable in Settings → Model), the
   older part of the conversation is summarised by the model and replaced, for the model, by that summary; the last 3
   turns stay verbatim. The chat itself keeps every message: compacted ones are greyed and a "compacted" card shows the
   summary. Run it by hand by typing `/compact`.
@@ -303,7 +303,7 @@ credentials live in the browser and there is no CORS issue.
 - **Storage.** Settings, policies, skills and plugin manifests: `localStorage`. Chats, memories, usage and workspace
   snapshots: IndexedDB.
   API key and plugin credentials: a separate secret store, either `localStorage` (remembered) or `sessionStorage`
-  (cleared when the tab closes) — toggle in Security & privacy. Exports never contain secrets. Plugin manifests are
+  (cleared when the tab closes) — toggle in Privacy & data. Exports never contain secrets. Plugin manifests are
   saved with credentials stripped.
 - **Content Security Policy** in `index.html`: scripts only from the page itself and the two CDNs (with integrity
   hashes), the two inline bootstrap scripts allowed by hash (kept current by the release script), no plugins/objects,
@@ -336,8 +336,8 @@ credentials live in the browser and there is no CORS issue.
   are click-to-load placeholders, never fetched on render. Use Plan mode when exploring untrusted content, and review
   the arguments in every permission prompt. One deliberate exception: a project context file (`AGENTS.md`,
   `CLAUDE.md`, …) in the workspace root is treated as *your* instructions, not as untrusted data — that is the point of
-  it. A toast names the file whenever one is loaded, and the switch is in Settings → Security & privacy → *Workspace &
-  code*; turn it off before opening a repository you did not write.
+  it. A toast names the file whenever one is loaded, and the switch is in Settings → Workspace → *Load
+  AGENTS.md / CLAUDE.md as project instructions*; turn it off before opening a repository you did not write.
 - **Git is read-only.** The git tools parse `.git` and never write to it, so nothing the model does can rewrite,
   corrupt or lose history; there is no commit, push, checkout or stage. Reading a repository does execute the
   harness's own object parsers over files from that repository, so the usual rule applies: only open folders you

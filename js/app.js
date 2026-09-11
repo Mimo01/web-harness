@@ -8,7 +8,7 @@
   const recent = await H.db.recentChat();   // one index record via cursor: never reads message bodies at startup
   if (recent) await H.agent.load(recent.id); else await H.agent.reset();   // reopen the most recent chat; create one only when there is none
   H.ui.renderChatList();
-  if (H.settings.apiKey()) { H.ui.refreshModels().catch(() => { }); H.usage.refreshModelInfo(); } else { H.ui.setStatus('', 'not configured'); H.ui.openSettings('connection'); }
+  if (H.settings.apiKey()) { H.ui.refreshModels().catch(() => { }); H.usage.refreshModelInfo(); } else { H.ui.setStatus('', 'not configured'); H.ui.openSettings('general'); }
   H.plugins.connectEnabledMcp();
   H.update.start();
   // one harness tab per browser profile: two tabs would overwrite each other's settings and usage totals
@@ -21,6 +21,6 @@
   if (!H.fs.supported()) H.toast('This browser lacks the File System Access API, so local folders cannot be opened and the file tools will not work. Use Chrome or Edge.', 'warn', 8000);
   window.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); H.agent.reset(); H.$('#input').focus(); }
-    if ((e.metaKey || e.ctrlKey) && e.key === '/') { e.preventDefault(); H.ui.openSettings('connection'); }
+    if ((e.metaKey || e.ctrlKey) && e.key === '/') { e.preventDefault(); H.ui.openSettings('general'); }
   });
 })();

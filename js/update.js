@@ -1,5 +1,5 @@
 /* Update check: compares H.ABOUT.version with version.json in the GitHub repository (raw.githubusercontent.com allows CORS).
-   Runs on startup and every hour; can be disabled in Settings > Security & privacy. Nothing but a GET of a public file is sent. */
+   Runs on startup and every hour; can be disabled in Settings > Web access. Nothing but a GET of a public file is sent. */
 H.update = (() => {
   const KEY = 'harness.update.lastCheck';
   const cmp = (a, b) => { const pa = String(a).split('.').map(n => parseInt(n, 10) || 0), pb = String(b).split('.').map(n => parseInt(n, 10) || 0); for (let i = 0; i < Math.max(pa.length, pb.length); i++) { if ((pa[i] || 0) > (pb[i] || 0)) return 1; if ((pa[i] || 0) < (pb[i] || 0)) return -1; } return 0; };

@@ -125,7 +125,7 @@ H.extract = (() => {
   }
   async function transcript(file, onStatus) {
     const model = H.settings.get('transcriptionModel');
-    if (!model) return { text: '', note: 'Audio not transcribed: no transcription model configured (Settings → Model & generation → Transcription model, e.g. whisper-1 on your LiteLLM proxy).' };
+    if (!model) return { text: '', note: 'Audio not transcribed: no transcription model configured (Settings → Model → Transcription model, e.g. whisper-1 on your LiteLLM proxy).' };
     onStatus?.(`Transcribing with ${model}…`);
     try { const t = await H.llm.transcribe(file, model); return { text: t, note: '' }; }
     catch (e) { return { text: '', note: 'Transcription failed: ' + e.message }; }

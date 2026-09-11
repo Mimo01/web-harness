@@ -432,7 +432,7 @@ H.ui = (() => {
     if (H.commands.run(text)) { t.value = ''; autoresize(); hideSlash(); return; }
     if (H.agent.pendingQuestion()) { H.agent.answerQuestion(H.agent.current().id, text); t.value = ''; autoresize(); return; }   // answer, not a new message
     if (H.agent.isRunning()) return;
-    if (!H.settings.apiKey() && !confirm('No API key configured. Send anyway?')) { openSettings('connection'); return; }
+    if (!H.settings.apiKey() && !confirm('No API key configured. Send anyway?')) { openSettings('general'); return; }
     const att = attachments; attachments = []; renderAttachments();
     t.value = ''; autoresize(); hideSlash(); drafts.delete(H.agent.current()?.id);
     await H.agent.send(text, att);
@@ -518,7 +518,7 @@ H.ui = (() => {
       const o = currentOpt();
       lbl.textContent = o ? (o.short ?? o.label) : (cfg.placeholder ?? '—');
       lbl.classList.toggle('mono', !!(o && o.mono));
-      btn.className = (variant === 'pill' ? 'pill-btn pick' : 'pick ' + variant) + (cfg.cls ? ' ' + (cfg.cls(o) || '') : '');
+      btn.className = (variant === 'pill' ? 'pill-btn pick' : 'pick pick-' + variant) + (cfg.cls ? ' ' + (cfg.cls(o) || '') : '');
       const t = [cfg.title, o?.title || o?.sub].filter(Boolean).join(' · ');
       if (t) { btn.title = t; btn.setAttribute('aria-label', (cfg.title || '') + ': ' + (o ? o.label : 'none')); } else btn.removeAttribute('title');
     }
@@ -734,7 +734,7 @@ H.ui = (() => {
       if (!rows.length) {
         body.append(el('p', { class: 'muted' }, [H.journal.enabled()
           ? 'Nothing yet. Every file this chat writes, edits or deletes is recorded here with its previous contents, so you can put it back.'
-          : 'File history is turned off in Settings → Security & privacy, so changes are not recorded.']));
+          : 'File history is turned off in Settings → Workspace, so changes are not recorded.']));
         return;
       }
       const live = rows.filter(r => !r.unchanged && !r.elsewhere);
@@ -789,50 +789,168 @@ H.ui = (() => {
     window.open(`${H.ABOUT.repoUrl}/issues/new?title=${encodeURIComponent('Bug: ')}&body=${encodeURIComponent(body)}`, '_blank', 'noopener');
   }
 
-  /* ================= SETTINGS ================= */
+  /* ================= SETTINGS =================
+     Ten sections, each with one job. Every control carries its settings key as id="set-<key>", so anything that
+     needs to point at one setting — a deep link, a future jump-to — has a stable handle for it. */
   let settingsModal = null;
   const SECTIONS = [
-    ['connection', 'Connection', 'link'], ['model', 'Model & generation', 'cube'], ['modes', 'Modes & permissions', 'shield'], ['tools', 'Tools', 'tool'],
-    ['plugins', 'Plugins', 'plug'], ['skills', 'Skills', 'bolt'], ['usage', 'Usage & costs', 'chart'], ['security', 'Security & privacy', 'lock'], ['data', 'Data', 'db'], ['about', 'About', 'beer'],
+    ['general', 'General', 'link'], ['model', 'Model', 'cube'], ['permissions', 'Permissions', 'shield'],
+    ['workspace', 'Workspace', 'folder'], ['plugins', 'Plugins', 'plug'], ['skills', 'Skills', 'bolt'],
+    ['web', 'Web access', 'globe'], ['usage', 'Usage & costs', 'chart'], ['privacy', 'Privacy & data', 'lock'], ['about', 'About', 'beer'],
   ];
-  function openSettings(section = 'connection') {
+  /* older section names still used by deep links elsewhere in the app */
+  const SECTION_ALIAS = { connection: 'general', interface: 'general', modes: 'permissions', tools: 'permissions', security: 'privacy', data: 'privacy' };
+  function openSettings(section = 'general') {
     if (settingsModal) settingsModal.remove();
     const nav = el('nav', { class: 'settings-nav' });
     const body = el('div', { class: 'settings-body' });
-    const builders = { connection: connectionPanel, model: modelPanel, modes: modesPanel, tools: toolsPanel, plugins: pluginsPanel, skills: skillsPanel, usage: usagePanel, security: securityPanel, data: dataPanel, about: aboutPanel };
-    const show = (k) => { nav.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.k === k)); body.innerHTML = ''; body.append(builders[k]()); body.scrollTop = 0; };
+    const builders = { general: generalPanel, model: modelPanel, permissions: permissionsPanel, workspace: workspacePanel, plugins: pluginsPanel, skills: skillsPanel, web: webPanel, usage: usagePanel, privacy: privacyPanel, about: aboutPanel };
+    let curSection = SECTION_ALIAS[section] || section;
+    if (!builders[curSection]) curSection = 'general';
+
+    const show = (k) => {
+      curSection = k;
+      nav.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.k === k));
+      body.innerHTML = ''; body.append(builders[k]()); body.scrollTop = 0;
+    };
+    /* rebuild the current section in place: a setting that changes what its own panel shows must not throw the
+       reader back to the top of the page (which re-opening the whole dialog used to do) */
+    const repaint = () => { const y = body.scrollTop; body.innerHTML = ''; body.append(builders[curSection]()); body.scrollTop = y; };
+    settingsRepaint = repaint;
+
     for (const [k, label, ic] of SECTIONS) nav.append(el('button', { 'data-k': k, onclick: () => show(k) }, [H.icon(ic), el('span', {}, [label])]));
+
     settingsModal = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === settingsModal) close(); } }, [el('div', { class: 'modal settings' }, [
-      el('div', { class: 'modal-head' }, [el('h3', {}, ['Settings']), el('span', { class: 'spacer' }), el('button', { class: 'btn icon ghost', onclick: close }, [H.icon('x')])]),
+      el('div', { class: 'modal-head' }, [el('h3', {}, ['Settings']), el('span', { class: 'spacer' }), el('button', { class: 'btn icon ghost', title: 'Close', onclick: close }, [H.icon('x')])]),
       el('div', { class: 'settings-layout' }, [nav, body])])]);
-    document.body.append(settingsModal); show(section);
-    function close() { settingsModal.remove(); settingsModal = null; updateModeUI(); updateContextMeter(); }
+    document.body.append(settingsModal); show(curSection);
+    function close() { settingsModal.remove(); settingsModal = null; settingsRepaint = null; updateModeUI(); updateContextMeter(); }
   }
+  /* set while the dialog is open, so a control can refresh its own panel without re-opening the dialog */
+  let settingsRepaint = null;
   const sec = (title, desc, children) => el('section', { class: 'sec' }, [el('h4', {}, [title]), desc ? el('p', { class: 'sec-desc' }, [desc]) : null, ...[].concat(children)]);
-  const field = (label, key, type = 'text', extra = {}) => { const s = H.settings.get(); return el('label', { class: 'field' }, [el('span', {}, [label]), el('input', { type, value: s[key] ?? '', ...extra, onchange: (e) => H.settings.set({ [key]: type === 'number' ? +e.target.value : e.target.value }) })]); };
-  const check = (label, key, help) => { const s = H.settings.get(); return el('label', { class: 'check' }, [el('input', { type: 'checkbox', checked: !!s[key], onchange: (e) => H.settings.set({ [key]: e.target.checked }) }), el('span', {}, [label, help ? el('span', { class: 'help' }, [help]) : null])]); };
+  /* action = a button that belongs beside the input. It goes on the input's own line, not floated next to the
+     whole field, so it lines up with the box rather than with the label above it. */
+  const field = (label, key, type = 'text', extra = {}, action = null) => {
+    const s = H.settings.get();
+    const input = el('input', { type, value: s[key] ?? '', ...extra, onchange: (e) => H.settings.set({ [key]: type === 'number' ? +e.target.value : e.target.value }) });
+    return el('label', { class: 'field', id: 'set-' + key }, [el('span', {}, [label]), action ? el('div', { class: 'input-row' }, [input, action]) : input]);
+  };
   /* options: [value, label, sub?] — the sub-line says what the choice does, which an <option> could never hold */
   const selectField = (label, key, options, onchange) => {
     const s = H.settings.get();
     const p = picker({ value: s[key], title: label, options: options.map(([v, l, sub]) => ({ value: v, label: l, sub })), onpick: (v) => { H.settings.set({ [key]: v }); onchange && onchange(v); } });
-    return el('div', { class: 'field' }, [el('span', {}, [label]), p.el]);
+    return el('div', { class: 'field', id: 'set-' + key }, [el('span', {}, [label]), p.el]);
   };
 
-  function connectionPanel() {
-    const status = el('span', { class: 'small muted' });
-    const keyInput = el('input', { type: 'password', value: H.settings.apiKey(), placeholder: 'sk-…', autocomplete: 'off', onchange: (e) => H.settings.setApiKey(e.target.value.trim()) });
+  /* ---------- settings controls ----------
+     One shape per kind of value: a switch for on/off, a slider for a position on a range, a stepper for a
+     counted amount, a revealable box for a secret. Each says what it does now, not only what it is called. */
+
+  /** on/off, as a switch with the consequence spelled out. opts.state(v) -> the line under the label. */
+  const toggle = (label, key, help, opts = {}) => {
+    const get = opts.get || (() => !!H.settings.get(key));
+    const line = el('span', { class: 'set-help' });
+    const input = el('input', { type: 'checkbox', role: 'switch', checked: get(), onchange: (e) => { (opts.set || ((v) => H.settings.set({ [key]: v })))(e.target.checked); paint(); opts.onchange?.(e.target.checked); } });
+    const paint = () => { line.textContent = (opts.state ? opts.state(input.checked) : help) || ''; line.classList.toggle('hidden', !line.textContent); };
+    paint();
+    return el('label', { class: 'set-row' + (opts.sub ? ' sub' : ''), id: 'set-' + key }, [
+      el('span', { class: 'set-text' }, [el('span', { class: 'set-label' }, [label]), line]),
+      el('span', { class: 'switch' }, [input, el('span', { class: 'track' }, [el('span', { class: 'knob' })])]),
+    ]);
+  };
+  /** a position on a range, with the live value next to the label and a word at each end
+      opts: { min, max, step, ends:[left,right], format(v), toStored(v), fromStored(v), onchange(v) } */
+  const slider = (label, key, opts = {}) => {
+    const from = opts.fromStored || ((v) => v), to = opts.toStored || ((v) => v);
+    const fmt = opts.format || ((v) => String(v));
+    const val = el('b', { class: 'set-value' });
+    const input = el('input', {
+      type: 'range', min: opts.min, max: opts.max, step: opts.step ?? 1, value: from(H.settings.get(key) ?? opts.min),
+      oninput: () => { val.textContent = fmt(+input.value); },
+      onchange: () => { H.settings.set({ [key]: to(+input.value) }); opts.onchange?.(to(+input.value)); },
+    });
+    val.textContent = fmt(+input.value);
+    return el('div', { class: 'field slider-field', id: 'set-' + key }, [
+      el('span', {}, [label, val]), input,
+      opts.ends ? el('span', { class: 'ends' }, [el('i', {}, [opts.ends[0]]), el('i', {}, [opts.ends[1]])]) : null,
+    ]);
+  };
+  /** a counted amount: −/+ either side of the number, unit spelled out, clamped on the way in
+      opts: { min, max, step, unit, help } */
+  const stepper = (label, key, opts = {}) => {
+    const min = opts.min ?? 0, max = opts.max ?? Infinity, step = opts.step || 1;
+    const input = el('input', { type: 'number', value: H.settings.get(key) ?? min, min, max: max === Infinity ? null : max, step, onchange: () => commit(+input.value) });
+    /* a typed number is kept as typed (only clamped); the −/+ buttons are what snap to the step, so someone who
+       knows they want 8192 tokens does not get 8000 */
+    const commit = (v, snap) => { v = isNaN(v) ? min : v; if (snap) v = Math.round(v / step) * step; v = Math.min(max, Math.max(min, v)); input.value = v; H.settings.set({ [key]: v }); opts.onchange?.(v); };
+    const bump = (d) => commit((+input.value || 0) + d * step, true);
+    return el('div', { class: 'field', id: 'set-' + key }, [
+      el('span', {}, [label]),
+      el('div', { class: 'stepper' }, [
+        el('button', { class: 'btn icon ghost', type: 'button', title: 'Less', 'aria-label': 'Decrease ' + label, onclick: () => bump(-1) }, ['−']),
+        input, opts.unit ? el('span', { class: 'unit' }, [opts.unit]) : null,
+        el('button', { class: 'btn icon ghost', type: 'button', title: 'More', 'aria-label': 'Increase ' + label, onclick: () => bump(1) }, ['+']),
+      ]),
+      opts.help ? el('span', { class: 'help' }, [opts.help]) : null,
+    ]);
+  };
+  /** a secret: hidden by default, revealable, and honest about where it is kept */
+  const secretField = (label, get, set, anchorKey, placeholder = 'sk-…') => {
+    const input = el('input', { type: 'password', value: get(), placeholder, autocomplete: 'off', spellcheck: 'false', onchange: (e) => { set(e.target.value.trim()); paintWhere(); } });
+    const where = el('span', { class: 'help' });
+    const paintWhere = () => { where.textContent = !input.value ? 'Not set.' : H.secrets.persist() ? 'Stored on this device. Privacy & data → Secrets keeps it for this session only instead.' : 'Kept for this browser session only (Privacy & data → Secrets).'; };
+    paintWhere();
+    const eye = el('button', { class: 'btn ghost', type: 'button', onclick: () => { const on = input.type === 'password'; input.type = on ? 'text' : 'password'; eye.textContent = on ? 'Hide' : 'Show'; } }, ['Show']);
+    return el('div', { class: 'field', id: 'set-' + anchorKey }, [
+      el('span', {}, [label]),
+      el('div', { class: 'input-row secret-field' }, [input, eye, el('button', { class: 'btn ghost', type: 'button', title: 'Clear this value', onclick: () => { input.value = ''; set(''); paintWhere(); } }, ['Clear'])]),
+      where,
+    ]);
+  };
+  /** a URL that says so when it is not one yet — one help line, never a stack of them:
+      a problem replaces the explanation, and is the only thing that ever turns the line amber */
+  const urlField = (label, key, opts = {}) => {
+    const out = el('span', { class: 'help' });
+    const input = el('input', { type: 'text', value: H.settings.get(key) ?? '', placeholder: opts.placeholder || '', spellcheck: 'false', autocomplete: 'off', oninput: paint, onchange: (e) => { H.settings.set({ [key]: e.target.value.trim() }); opts.onchange?.(e.target.value.trim()); } });
+    function paint() {
+      const v = input.value.trim();
+      const say = (txt, warn) => { out.textContent = txt || ''; out.className = 'help' + (warn ? ' warn-text' : ''); };
+      if (!v) return say(opts.empty || opts.help);
+      try { new URL(v.replace('{url}', 'x').replace('{q}', 'x')); say(opts.help); }
+      catch { say('That is not a URL yet — it needs to start with https:// or http://', true); }
+    }
+    paint();
+    return el('label', { class: 'field', id: opts.id === false ? null : 'set-' + key }, [el('span', {}, [label]), input, out]);
+  };
+  /** the knobs almost nobody touches, one click away instead of in the way. The contents go in their own box so
+      the indent is the box's, not each child's — a list keeps the padding its bullets need. */
+  const advanced = (children, label = 'Advanced') => {
+    const k = 'harness.adv.' + label;
+    return el('details', { class: 'adv', open: sessionStorage.getItem(k) === '1' || null, ontoggle: (e) => sessionStorage.setItem(k, e.target.open ? '1' : '0') },
+      [el('summary', {}, [H.icon('chev'), label]), el('div', { class: 'adv-body' }, [].concat(children).filter(Boolean))]);
+  };
+
+  function generalPanel() {
+    const status = el('span', { class: 'chip hidden' });
+    const test = el('button', { class: 'btn primary', onclick: async () => {
+      status.className = 'chip'; status.textContent = 'Connecting…'; test.disabled = true;
+      try { const m = await refreshModels(); status.className = 'chip ok'; status.textContent = `Connected · ${m.length} models`; }
+      catch (e) { status.className = 'chip danger'; status.textContent = 'Failed: ' + e.message; }
+      finally { test.disabled = false; }
+    } }, ['Test connection']);
     return el('div', {}, [
       sec('LiteLLM proxy', 'The app talks to your LiteLLM proxy directly from this browser tab. Nothing else sits in between.', [
-        field('Base URL', 'baseUrl', 'url', { placeholder: 'https://litellm.example.com' }),
-        el('p', { class: 'help' }, ['Root of the proxy, without /v1. The proxy must allow this page\'s origin (LiteLLM allows all origins by default).']),
-        el('label', { class: 'field' }, [el('span', {}, ['API key']), keyInput]),
-        el('p', { class: 'help' }, [H.secrets.persist() ? 'Stored on this device (browser storage). Change in Security & privacy to keep it only for this session.' : 'Kept for this browser session only (Security & privacy).']),
-        el('div', { class: 'row gap' }, [el('button', { class: 'btn primary', onclick: async () => { status.textContent = 'Connecting…'; try { const m = await refreshModels(); status.textContent = `Connected · ${m.length} models available`; } catch (e) { status.textContent = 'Failed: ' + e.message; } } }, ['Test connection']), status]),
+        urlField('Base URL', 'baseUrl', { placeholder: 'https://litellm.example.com', help: 'The root of the proxy, without /v1. The proxy has to allow this page\'s origin (LiteLLM allows all origins by default).' }),
+        secretField('API key', () => H.settings.apiKey(), (v) => H.settings.setApiKey(v), 'apiKey'),
+        el('div', { class: 'row gap' }, [test, status]),
       ]),
-      sec('Interface', null, [
-        selectField('Send message with', 'sendKey', [['enter', 'Enter', 'Shift+Enter makes a new line'], ['ctrlenter', 'Ctrl / Cmd + Enter', 'Enter makes a new line']]),
+      sec('Appearance & behaviour', null, [
         selectField('Theme', 'theme', [['system', 'Follow system', 'changes with your OS setting'], ['dark', 'Dark'], ['light', 'Light']], applyTheme),
-        el('div', { class: 'check-list' }, [check('Stream responses', 'streaming', 'show the reply while it is being generated'), check('Auto-title new chats', 'autoTitle', 'uses one extra small request per chat')]),
+        selectField('Send message with', 'sendKey', [['enter', 'Enter', 'Shift+Enter makes a new line'], ['ctrlenter', 'Ctrl / Cmd + Enter', 'Enter makes a new line']]),
+        toggle('Stream responses', 'streaming', null, { state: (v) => v ? 'The reply appears as it is written.' : 'The reply appears all at once, when it is finished.' }),
+        toggle('Auto-title new chats', 'autoTitle', null, { state: (v) => v ? 'A small extra request names each new chat after the first message.' : 'New chats keep the name "New chat" until you rename them.' }),
+        toggle('Show cost', 'showCost', null, { state: (v) => v ? 'Money spent is shown under the message box and on each reply.' : 'Only token counts are shown; prices stay hidden.', onchange: () => updateContextMeter() }),
       ]),
     ]);
   }
@@ -852,63 +970,84 @@ H.ui = (() => {
       el('span', {}, ['Source']), el('b', {}, [p.source === 'litellm' ? 'LiteLLM /model/info' : p.source === 'manual' ? 'manual override' : 'not available' + (mi?.provider ? ' · ' + mi.provider : '')]),
     ])); };
     info();
-    const custom = el('input', { type: 'text', placeholder: 'Model name not in the list (advanced)', onchange: (e) => { const v = e.target.value.trim(); if (v) { H.settings.set({ model: v }); repaint(); e.target.value = ''; } } });
+    const custom = el('input', { type: 'text', placeholder: 'e.g. my-private-deployment', onchange: (e) => { const v = e.target.value.trim(); if (v) { H.settings.set({ model: v }); repaint(); e.target.value = ''; } } });
+    /* the compaction knobs only do anything while it is on, and say so by going quiet */
+    const compactBox = el('div', { class: 'indent' });
+    const paintCompact = () => compactBox.classList.toggle('off', !H.settings.get('autoCompact'));
+    compactBox.append(
+      slider('Compact when the chat reaches', 'compactAt', {
+        min: 50, max: 95, step: 5, ends: ['sooner, cheaper', 'later, fuller'],
+        fromStored: (v) => Math.round(v * 100), toStored: (v) => v / 100, format: (v) => v + '% of the window',
+        onchange: () => updateContextMeter(),
+      }),
+      stepper('Turns kept word for word', 'compactKeepTurns', { min: 1, max: 20, unit: 'user turns', help: 'The most recent part of the chat is never summarised.' }),
+    );
+    paintCompact();
     return el('div', {}, [
-      sec('Default model', 'Models come from your LiteLLM proxy. Refresh after adding models to the proxy.', [
-        el('div', { class: 'row gap' }, [pick.el, el('button', { class: 'btn', onclick: async () => { try { const m = await refreshModels(); repaint(m); H.toast(`${m.length} models loaded`, 'success'); } catch (e) { H.toast(e.message, 'error'); } } }, [H.icon('refresh'), 'Refresh'])]),
-        infoBox, custom,
+      sec('Default model', 'The model new chats start with. The list comes from your LiteLLM proxy; the pill under the message box switches model for one chat.', [
+        el('div', { class: 'row gap', id: 'set-model' }, [pick.el, el('button', { class: 'btn', onclick: async () => { try { const m = await refreshModels(); repaint(m); H.toast(`${m.length} models loaded`, 'success'); } catch (e) { H.toast(e.message, 'error'); } } }, [H.icon('refresh'), 'Refresh'])]),
+        infoBox,
       ]),
       sec('Generation', null, [
-        el('div', { class: 'row gap' }, [field('Temperature', 'temperature', 'number', { step: 0.1, min: 0, max: 2 }), field('Max output tokens', 'maxTokens', 'number', { step: 1 }), field('Max tool calls per turn', 'maxToolIterations', 'number', { step: 1 })]),
-        el('label', { class: 'field' }, [el('span', {}, ['Custom system prompt (prepended to the built-in one)']), el('textarea', { rows: 5, onchange: (e) => H.settings.set({ systemPrompt: e.target.value }) }, [s.systemPrompt])]),
+        slider('Temperature', 'temperature', { min: 0, max: 2, step: 0.1, ends: ['precise, repeatable', 'varied, creative'], format: (v) => v.toFixed(1) }),
+        stepper('Max output tokens', 'maxTokens', { min: 256, max: 200000, step: 1000, unit: 'tokens', help: 'The longest single reply. Too low and long answers get cut off mid-sentence.' }),
+        stepper('Max tool calls per turn', 'maxToolIterations', { min: 1, max: 100, unit: 'calls', help: 'A stop so a confused model cannot loop forever. It is told when it runs out.' }),
+        el('label', { class: 'field', id: 'set-systemPrompt' }, [el('span', {}, ['Custom system prompt']), el('textarea', { rows: 5, placeholder: 'Anything here is added in front of the built-in instructions — house style, your name, standing rules.', onchange: (e) => H.settings.set({ systemPrompt: e.target.value }) }, [s.systemPrompt])]),
       ]),
-      sec('Context management', 'Keeps long chats within the model\'s window and keeps costs linear.', [
-        el('div', { class: 'check-list' }, [check('Compact automatically', 'autoCompact', 'when the context passes the threshold, the older part of the chat is summarised by the model and replaced by that summary; the last turns stay verbatim')]),
-        el('div', { class: 'row gap' }, [field('Compact when context is above (0.5–0.95)', 'compactAt', 'number', { step: 0.05, min: 0.3, max: 0.95 }), field('Keep the last N user turns verbatim', 'compactKeepTurns', 'number', { step: 1, min: 1 })]),
-        el('div', { class: 'row gap' }, [field('Send full tool results for the last N turns', 'keepToolTurns', 'number', { step: 1, min: 0 }), field('Older tool results are cut to (chars)', 'toolStubChars', 'number', { step: 40, min: 80 })]),
-        el('p', { class: 'help' }, ['Older tool outputs become short stubs the model can re-fetch by calling the tool again. Compaction can also be run by hand from the ⋯ menu.']),
+      sec('Long chats', 'A chat that fills the model\'s context window cannot continue. Compaction replaces the older part with a summary the model writes, so the chat keeps going and the cost stays flat.', [
+        toggle('Compact automatically', 'autoCompact', null, { onchange: paintCompact, state: (v) => v ? 'Happens on its own once the chat gets big enough.' : 'Never happens on its own — run /compact in the message box when a chat gets long.' }),
+        compactBox,
+        advanced([
+          el('p', { class: 'help' }, ['Separately from compaction, the app shortens old tool output: results from earlier turns are sent as a short stub the model can refresh by calling the tool again. This is what keeps a long file-reading session affordable.']),
+          stepper('Full tool results for the last', 'keepToolTurns', { min: 0, max: 20, unit: 'user turns' }),
+          stepper('Older tool results shortened to', 'toolStubChars', { min: 80, max: 4000, step: 40, unit: 'characters' }),
+        ]),
       ]),
-      sec('Media', 'Images are resized in the browser before sending. Videos are turned into a few sampled frames plus a transcript; audio into a transcript. Transcription needs a speech-to-text model on your proxy.', [
-        el('div', { class: 'row gap' }, [field('Transcription model (empty = off)', 'transcriptionModel', 'text', { placeholder: 'whisper-1' }), el('button', { class: 'btn', style: 'margin-top:9px', onclick: () => { const w = (H.settings.get('models') || []).filter(m => /whisper|transcri|speech|stt/i.test(m)); H.toast(w.length ? 'Speech models on your proxy: ' + w.join(', ') : 'No obvious speech-to-text model in the model list; ask your LiteLLM admin.', w.length ? 'success' : 'warn', 8000); } }, ['Find'])]),
-        el('p', { class: 'help' }, ['Vision (images, video frames) requires a multimodal chat model; otherwise the proxy rejects the request with an error you will see in the chat.']),
+      sec('Media', 'Images are resized in this browser before they are sent. Video becomes a few sampled frames plus a transcript, audio becomes a transcript — both need a speech-to-text model on your proxy.', [
+        field('Transcription model', 'transcriptionModel', 'text', { placeholder: 'whisper-1 — empty turns transcription off' },
+          el('button', { class: 'btn', type: 'button', title: 'Look for a speech-to-text model in the proxy\'s list', onclick: () => { const w = (H.settings.get('models') || []).filter(m => /whisper|transcri|speech|stt/i.test(m)); H.toast(w.length ? 'Speech models on your proxy: ' + w.join(', ') : 'No obvious speech-to-text model in the model list; ask your LiteLLM admin.', w.length ? 'success' : 'warn', 8000); } }, ['Find'])),
+        el('p', { class: 'help' }, ['Images and video frames also need a multimodal chat model; without one the proxy rejects the request and the error shows up in the chat.']),
+      ]),
+      advanced([
+        el('label', { class: 'field' }, [el('span', {}, ['Use a model name that is not in the list']), custom, el('span', { class: 'help' }, ['For a deployment your proxy serves but does not advertise. It is used exactly as typed.'])]),
+        stepper('Fallback context window', 'defaultContext', { min: 4000, max: 2000000, step: 1000, unit: 'tokens', help: 'Assumed for models whose real window the proxy does not report — it is what the ring under the message box fills up against.', onchange: () => updateContextMeter() }),
       ]),
     ]);
   }
-  function modesPanel() {
-    const cur = H.settings.get('chatMode');
-    return el('div', {}, [
-      sec('Chat mode', 'Also switchable from the pill under the message box. The mode applies to new tool calls immediately.', [
-        el('div', { class: 'mode-cards' }, MODES.map(({ v, t, d }) => el('label', { class: 'mode-card' + (cur === v ? ' active' : '') }, [el('input', { type: 'radio', name: 'mode', value: v, checked: cur === v, onchange: () => { H.settings.set({ chatMode: v }); updateModeUI(); openSettings('modes'); } }), el('b', {}, [t]), el('span', { class: 'small muted' }, [d])]))),
-        selectField('When executing a plan, use', 'planExecuteMode', [['default', 'Default permissions', 'writes and anything risky ask first'], ['auto', 'Allow all', 'the plan runs without prompts']]),
-        check('Always ask, even for safe tools', 'alwaysAsk', 'strict mode; applies to Default and Plan'),
-      ]),
-      sec('How permissions work', null, [el('ul', { class: 'help-list' }, [
-        el('li', {}, [el('span', { class: 'chip risk-safe' }, ['safe']), ' read-only tools (list, read, search, fetch). Auto-allowed in Default mode.']),
-        el('li', {}, [el('span', { class: 'chip risk-write' }, ['write']), ' tools that change files, run code, send requests or copy to your clipboard. Ask by default.']),
-        el('li', {}, [el('span', { class: 'chip risk-danger' }, ['danger']), ' destructive tools (delete, merge). Ask by default; consider denying.']),
-        el('li', {}, ['Per-tool overrides (allow / ask / deny) live in the Tools section. "Deny" always wins, in every mode.']),
-      ])]),
-    ]);
-  }
-  function toolsPanel() {
+  /* One page, read top to bottom: the mode sets the rule for everything, a per-tool override beats the mode,
+     and a site answer beats both for the two tools that reach the open web. */
+  function permissionsPanel() {
     const s = H.settings.get();
     const wrap = el('div', {});
+    const cur = s.chatMode;
     const groups = H.tools.groups();
     const disabled = new Set(s.disabledTools || []);
     const total = Object.values(groups).flat().length;
     const filter = el('input', { type: 'text', placeholder: `Filter ${total} tools…`, oninput: () => { const q = filter.value.toLowerCase(); wrap.querySelectorAll('.tool-row').forEach(r => r.classList.toggle('hidden', !!q && !r.dataset.k.includes(q))); wrap.querySelectorAll('.group-title').forEach(g => { let n = g.nextElementSibling, any = false; while (n && n.classList.contains('tool-row')) { if (!n.classList.contains('hidden')) any = true; n = n.nextElementSibling; } g.classList.toggle('hidden', !any); }); } });
-    const bulk = (fn) => { for (const t of Object.values(groups).flat()) fn(t); openSettings('tools'); };
-    wrap.append(sec('Tools', 'Enabled controls whether the model can see a tool. Policy overrides the chat mode for that tool: allow (silent), ask, deny.', [
-      el('div', { class: 'row gap wrap toolbar' }, [filter,
-        el('button', { class: 'btn sm', onclick: () => bulk(t => { if (t.risk === 'safe' && !t.scope) H.perms.setRule(t.name, 'allow'); }) }, ['Allow all safe']),
-        el('button', { class: 'btn sm', onclick: () => bulk(t => H.perms.setRule(t.name, 'default')) }, ['Reset policies']),
-        el('button', { class: 'btn sm', onclick: () => { H.settings.set({ disabledTools: [] }); openSettings('tools'); } }, ['Enable all']),
-        el('button', { class: 'btn sm', onclick: () => { H.perms.clearSession(); H.toast('Session grants cleared'); } }, ['Clear session grants'])]),
+    const bulk = (fn) => { for (const t of Object.values(groups).flat()) fn(t); settingsRepaint?.(); };
+
+    wrap.append(sec('Chat mode', 'What the assistant may do without asking. The same pill sits under the message box; a change applies to the next tool call straight away.', [
+      el('div', { class: 'mode-cards', id: 'set-chatMode' }, MODES.map(({ v, t, d }) => el('label', { class: 'mode-card' + (cur === v ? ' active' : '') }, [el('input', { type: 'radio', name: 'mode', value: v, checked: cur === v, onchange: () => { H.settings.set({ chatMode: v }); updateModeUI(); settingsRepaint?.(); } }), el('b', {}, [t]), el('span', { class: 'small muted' }, [d])]))),
+      el('div', { class: 'risk-legend' }, [
+        el('span', {}, [el('span', { class: 'chip risk-safe' }, ['safe']), 'reads only: list, read, search, fetch']),
+        el('span', {}, [el('span', { class: 'chip risk-write' }, ['write']), 'changes files, runs code, sends requests']),
+        el('span', {}, [el('span', { class: 'chip risk-danger' }, ['danger']), 'destroys things: delete, merge']),
+      ]),
+      selectField('When executing a plan, use', 'planExecuteMode', [['default', 'Default permissions', 'writes and anything risky ask first'], ['auto', 'Allow all', 'the plan runs without prompts']]),
+      toggle('Always ask, even for safe tools', 'alwaysAsk', null, { state: (v) => v ? 'Every single tool call waits for you. Thorough, and slow.' : 'Safe, read-only tools run without interrupting you.' }),
+    ]));
+
+    wrap.append(sec('Per-tool overrides', 'A tool the model cannot see is never called at all. A policy here beats the chat mode for that one tool — and "deny" wins everywhere, in every mode.', [
+      el('div', { class: 'row gap wrap toolbar', id: 'set-disabledTools' }, [filter,
+        el('button', { class: 'btn', type: 'button', onclick: () => bulk(t => { if (t.risk === 'safe' && !t.scope) H.perms.setRule(t.name, 'allow'); }) }, ['Allow all safe']),
+        el('button', { class: 'btn', type: 'button', onclick: () => bulk(t => H.perms.setRule(t.name, 'default')) }, ['Reset policies']),
+        el('button', { class: 'btn', type: 'button', onclick: () => { H.settings.set({ disabledTools: [] }); settingsRepaint?.(); } }, ['Enable all']),
+        el('button', { class: 'btn', type: 'button', onclick: () => { H.perms.clearSession(); H.toast('Session grants cleared'); } }, ['Clear session grants'])]),
     ]));
     const siteRules = Object.entries(H.perms.rules()).filter(([k]) => k.includes('@'));
-    wrap.append(sec('Site rules', 'web_fetch and http_request ask once per site. Answers you chose to keep ("Always" / "Never allow this site") are listed here.', [
-      siteRules.length ? el('table', { class: 'table' }, [el('tbody', {}, siteRules.map(([k, v]) => { const [tool, origin] = [k.slice(0, k.indexOf('@')), k.slice(k.indexOf('@') + 1)]; return el('tr', {}, [el('td', { class: 'mono small' }, [tool]), el('td', { class: 'mono small' }, [origin]), el('td', {}, [el('span', { class: 'chip ' + (v === 'allow' ? 'ok' : 'danger') }, [v])]), el('td', {}, [el('button', { class: 'btn sm ghost', onclick: () => { H.perms.setRule(k, 'default'); openSettings('tools'); } }, ['Remove'])])]); }))])
-        : el('p', { class: 'help' }, ['No site rules yet. Session-only grants are cleared when you start a new chat or reload.']),
+    wrap.append(sec('Site rules', 'web_fetch and http_request ask once per site. The answers you chose to keep — "Always allow this site", "Never allow this site" — are listed here.', [
+      siteRules.length ? el('table', { class: 'table' }, [el('tbody', {}, siteRules.map(([k, v]) => { const [tool, origin] = [k.slice(0, k.indexOf('@')), k.slice(k.indexOf('@') + 1)]; return el('tr', {}, [el('td', { class: 'mono small' }, [tool]), el('td', { class: 'mono small' }, [origin]), el('td', {}, [el('span', { class: 'chip ' + (v === 'allow' ? 'ok' : 'danger') }, [v])]), el('td', {}, [el('button', { class: 'btn sm ghost', onclick: () => { H.perms.setRule(k, 'default'); settingsRepaint?.(); } }, ['Remove'])])]); }))])
+        : el('p', { class: 'help' }, ['No site rules kept yet. Answers you give for one session only are forgotten when you start a new chat or reload.']),
     ]));
     for (const [g, tools] of Object.entries(groups)) {
       wrap.append(el('div', { class: 'group-title' }, [g, el('span', { class: 'count' }, [String(tools.length)])]));
@@ -932,6 +1071,31 @@ H.ui = (() => {
       }
     }
     return wrap;
+  }
+
+  /* ---------- workspace ----------
+     How the assistant reads and remembers the folder a chat is working in. Nothing here sends anything anywhere. */
+  function workspacePanel() {
+    const f = H.fs.folder();
+    return el('div', {}, [
+      sec('The folder a chat works in', null, [
+        el('p', { class: 'sec-desc', style: 'margin:0 0 12px' }, [f
+          ? `This chat is working in "${f.name}". The folder button under the message box switches it.`
+          : 'No folder is open, so the file tools have nothing to work with. The folder button under the message box opens one.']),
+        toggle('Follow the project\'s .gitignore', 'respectGitignore', null, {
+          state: (v) => v ? 'Ignored files stay out of listings, searches and the code index — the same files git hides.' : 'Only the usual noise folders (node_modules, dist, build…) are skipped; everything else is fair game.',
+        }),
+        toggle('Load AGENTS.md / CLAUDE.md as project instructions', 'projectContextFile', null, {
+          state: (v) => v ? 'A file with either name in the folder root becomes part of the system prompt. Turn this off for folders you do not trust.' : 'Instruction files in the folder are ignored, even if they are there.',
+        }),
+        toggle('Keep the previous contents of files the assistant changes', 'fileHistory', null, {
+          state: (v) => v ? 'Every write is recorded so it can be undone from "Files changed in this chat" in the ⋯ menu. Kept in this browser and pruned as it grows.' : 'Writes cannot be undone — git here is read-only, so this is the only undo there is.',
+        }),
+      ]),
+      advanced([
+        stepper('Files in the search index', 'maxIndexFiles', { min: 1000, max: 200000, step: 1000, unit: 'files', help: 'An upper bound so a huge repository cannot fill this browser\'s memory. Files past the limit are simply not indexed; raise it for a very large monorepo.' }),
+      ]),
+    ]);
   }
 
   /* ---------- plugins ---------- */
@@ -1162,16 +1326,61 @@ H.ui = (() => {
       const days = Object.entries(t.byDay).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 14);
       if (days.length) { const max = Math.max(...days.map(([, v]) => v.prompt + v.completion)); totalBox.append(el('div', { class: 'bars' }, days.reverse().map(([d, v]) => el('div', { class: 'bar', title: `${d}: ${(v.prompt + v.completion).toLocaleString()} tokens · ${H.usage.fmtCost(v.cost)}` }, [el('div', { class: 'bar-fill', style: `height:${Math.max(3, (v.prompt + v.completion) / max * 60)}px` }), el('span', {}, [d.slice(5)])])))); }
       if (agg.top.length) totalBox.append(el('table', { class: 'table' }, [el('thead', {}, [el('tr', {}, ['Most expensive chats', 'Tokens', 'Cost'].map(h => el('th', {}, [h])))]), el('tbody', {}, agg.top.map(c => el('tr', {}, [el('td', {}, [el('a', { href: '#', onclick: (e) => { e.preventDefault(); settingsModal?.remove(); settingsModal = null; H.agent.load(c.id); } }, [c.title])]), el('td', {}, [H.usage.fmtTok(c.tokens)]), el('td', {}, [H.usage.fmtCost(c.cost)])])))]));
-      totalBox.append(el('div', { class: 'row gap', style: 'margin-top:10px' }, [el('button', { class: 'btn sm danger-outline', onclick: async () => { if (confirm('Reset all-time usage counters?')) { await H.usage.resetTotal(); openSettings('usage'); } } }, ['Reset counters'])]));
+      totalBox.append(el('div', { class: 'row gap', style: 'margin-top:10px' }, [el('button', { class: 'btn sm danger-outline', onclick: async () => { if (confirm('Reset all-time usage counters?')) { await H.usage.resetTotal(); settingsRepaint?.(); } } }, ['Reset counters'])]));
     })();
-    const pricing = H.settings.get('pricing') || {};
-    const pr = el('textarea', { rows: 5, class: 'mono', placeholder: '{ "gpt-4o": { "in": 2.5, "out": 10, "cached": 1.25, "context": 128000 } }', onchange: (e) => { try { H.settings.set({ pricing: e.target.value.trim() ? JSON.parse(e.target.value) : {} }); H.toast('Pricing saved', 'success'); updateContextMeter(); } catch (err) { H.toast('Invalid JSON: ' + err.message, 'error'); } } }, [Object.keys(pricing).length ? JSON.stringify(pricing, null, 2) : '']);
-    wrap.append(sec('Pricing & context windows', `Prices are read from LiteLLM's /model/info when available (current model: ${p.source === 'litellm' ? 'found' : p.source === 'manual' ? 'manual' : 'not found'}). Override or add models here as USD per 1M tokens.`, [pr, el('div', { class: 'row gap' }, [field('Fallback context window (tokens)', 'defaultContext', 'number', { step: 1000 }), el('button', { class: 'btn', style: 'margin-top:9px', onclick: async () => { const i = await H.usage.refreshModelInfo(); H.toast(i ? `Model info loaded for ${Object.keys(i).length} models` : 'No /model/info endpoint available', i ? 'success' : 'warn'); openSettings('usage'); } }, ['Refresh from LiteLLM'])]), check('Show cost in the top bar and messages', 'showCost')]));
+    wrap.append(sec('Model prices', `Prices come from your proxy's /model/info where it offers them — for the model you are using now, they were ${p.source === 'litellm' ? 'found there' : p.source === 'manual' ? 'set by hand below' : 'not found, so no cost can be shown'}. Fill in a row for any model your proxy does not price.`, [
+      priceEditor(),
+      el('div', { class: 'row gap', style: 'margin-top:10px' }, [el('button', { class: 'btn', onclick: async () => { const i = await H.usage.refreshModelInfo(); H.toast(i ? `Model info loaded for ${Object.keys(i).length} models` : 'No /model/info endpoint available', i ? 'success' : 'warn'); settingsRepaint?.(); } }, [H.icon('refresh'), 'Refresh from LiteLLM'])]),
+    ]));
     return wrap;
   }
+  /* Prices used to be a raw JSON textarea. Same stored shape ({ model: { in, out, cached, context } }, USD per
+     1M tokens), now as rows you can fill in — with the textarea kept under Advanced for pasting a whole block. */
+  function priceEditor() {
+    const box = el('div', { id: 'set-pricing' });
+    const render = () => {
+      const pricing = { ...(H.settings.get('pricing') || {}) };
+      const rows = Object.entries(pricing);
+      box.innerHTML = '';
+      const save = (v) => { H.settings.set({ pricing: v }); updateContextMeter(); };
+      /* every handler re-reads what is stored: filling in three cells of one row must not have each edit
+         overwrite the last one from a snapshot taken when the table was drawn */
+      const cur = () => ({ ...(H.settings.get('pricing') || {}) });
+      const setNum = (m, k, nv) => { const p = cur(); const e = { ...(p[m] || {}) }; if (nv === '') delete e[k]; else e[k] = +nv; p[m] = e; save(p); };
+      const cell = (val, ph, on) => el('input', { type: 'text', inputmode: 'decimal', value: val ?? '', placeholder: ph, onchange: (e) => on(e.target.value.trim()) });
+      const table = el('table', { class: 'table price-table' }, [
+        el('thead', {}, [el('tr', {}, ['Model', '$ / 1M in', '$ / 1M out', '$ / 1M cached', 'Context', ''].map(h => el('th', {}, [h])))]),
+        el('tbody', {}, rows.map(([m, v]) => el('tr', {}, [
+          el('td', {}, [cell(m, 'model name', (nv) => { if (!nv || nv === m) return render(); const p = cur(); p[nv] = p[m] || {}; delete p[m]; save(p); render(); })]),
+          ...['in', 'out', 'cached'].map(k => el('td', {}, [cell(v[k], '—', (nv) => setNum(m, k, nv))])),
+          el('td', {}, [cell(v.context, 'tokens', (nv) => setNum(m, 'context', nv))]),
+          el('td', {}, [el('button', { class: 'btn sm ghost', title: 'Remove this model', onclick: () => { const p = cur(); delete p[m]; save(p); render(); } }, ['Remove'])]),
+        ]))),
+      ]);
+      box.append(rows.length ? table : el('p', { class: 'help' }, ['No prices set by hand. Everything is priced from the proxy, or not priced at all.']));
+      const add = el('input', { type: 'text', class: 'price-add', placeholder: 'Model name…', onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); addRow(); } } });
+      const addRow = () => { const n = add.value.trim(); if (!n) return; save({ ...pricing, [n]: {} }); render(); };
+      box.append(el('div', { class: 'input-row', style: 'margin-top:10px' }, [add, el('button', { class: 'btn', type: 'button', onclick: addRow }, [H.icon('plus'), 'Add model'])]));
+      box.append(advanced([
+        el('p', { class: 'help' }, ['The same prices as JSON, for pasting a whole block at once. USD per 1M tokens.']),
+        el('textarea', { rows: 5, class: 'mono', placeholder: '{ "gpt-4o": { "in": 2.5, "out": 10, "cached": 1.25, "context": 128000 } }', onchange: (e) => { try { save(e.target.value.trim() ? JSON.parse(e.target.value) : {}); H.toast('Prices saved', 'success'); render(); } catch (err) { H.toast('That is not valid JSON: ' + err.message, 'error'); } } }, [rows.length ? JSON.stringify(pricing, null, 2) : '']),
+      ], 'Paste as JSON'));
+    };
+    render();
+    return box;
+  }
 
-  /* ---------- security ---------- */
-  function securityPanel() {
+  /* ---------- web access ----------
+     Everything that makes this browser talk to a host other than your proxy. The table of who that is right now
+     comes first, because it is the evidence for the switches underneath it. */
+  /* presets for the search template: web_search stays off until one of these is filled in */
+  const SEARCH_PRESETS = [
+    { value: 'off', label: 'Off', sub: 'web_search is not offered to the model' },
+    { value: 'searxng', label: 'SearXNG (self-hosted)', sub: 'queries stay on your own instance', tpl: 'https://your-searxng.example.com/search?q={q}&format=json', header: '' },
+    { value: 'brave', label: 'Brave Search API', sub: 'a third party receives every query', tpl: 'https://api.search.brave.com/res/v1/web/search?q={q}', header: 'X-Subscription-Token' },
+    { value: 'custom', label: 'Something else', sub: 'any endpoint that answers with JSON' },
+  ];
+  function webPanel() {
     const s = H.settings.get();
     const endpoints = [
       ['LiteLLM proxy', s.baseUrl, 'all chat requests and model lists'],
@@ -1184,53 +1393,90 @@ H.ui = (() => {
       ['fonts.googleapis.com', 'https://fonts.googleapis.com', 'Instrument Sans, Instrument Serif and JetBrains Mono fonts loaded at startup; no data is sent'],
       ...(s.allowPyodideCdn ? [['Pyodide (jsDelivr)', s.pyodideUrl, 'downloaded only when Python is first used (code and data stay in the browser)']] : []),
     ];
-    const persistToggle = el('input', { type: 'checkbox', checked: H.secrets.persist(), onchange: (e) => { H.secrets.setPersist(e.target.checked); H.toast(e.target.checked ? 'Secrets are remembered on this device' : 'Secrets now live in this tab session only', 'success'); } });
+    /* web search: pick who answers, then fill in only what that choice needs */
+    const searchBox = el('div', { class: 'indent' });
+    const guess = !s.searchTemplate ? 'off' : /searx/i.test(s.searchTemplate) ? 'searxng' : /brave/i.test(s.searchTemplate) ? 'brave' : 'custom';
+    let preset = guess;
+    const searchPick = picker({
+      value: preset, title: 'Web search', search: false, options: SEARCH_PRESETS,
+      onpick: (v) => {
+        preset = v;
+        const p = SEARCH_PRESETS.find(x => x.value === v);
+        if (v === 'off') H.settings.set({ searchTemplate: '', searchKeyHeader: '' });
+        else if (p.tpl && !H.settings.get('searchTemplate')) H.settings.set({ searchTemplate: p.tpl, searchKeyHeader: p.header || '' });
+        paintSearch();
+      },
+    });
+    function paintSearch() {
+      searchBox.innerHTML = '';
+      if (preset === 'off') { searchBox.append(el('p', { class: 'help' }, ['The model has no web_search tool. It can still read a page you give it a link to.'])); return; }
+      searchBox.append(
+        urlField('Search URL', 'searchTemplate', { id: false, placeholder: 'https://…/search?q={q}&format=json', help: '{q} is where the query goes. The endpoint has to answer with JSON and allow requests from this page.' }),
+        field('API key header', 'searchKeyHeader', 'text', { placeholder: 'e.g. X-Subscription-Token — leave empty if the endpoint needs no key' }),
+        secretField('API key value', () => H.settings.get('searchKeyValue') || '', (v) => H.settings.set({ searchKeyValue: v }), 'searchKeyValue', 'the token for that header'),
+      );
+    }
+    paintSearch();
     return el('div', {}, [
-      sec('Where your data lives', 'Everything stays in this browser profile. There is no server component, no analytics, no telemetry.', [el('table', { class: 'table' }, [el('tbody', {}, [
-        ['Settings, tool policies, skills, plugin manifests', 'localStorage'], ['API key and plugin credentials', H.secrets.persist() ? 'localStorage (remembered)' : 'sessionStorage (this tab only)'], ['Chats, memories, usage counters', 'IndexedDB'], ['Workspace files', 'your local folder, accessed via the File System Access API only after you pick it'],
+      sec('Who this app talks to, right now', 'These hosts and no others. The list changes as you switch things on below — pages the model fetches are requested straight from your browser, not through anyone.', [
+        el('table', { class: 'table net-table' }, [el('tbody', {}, endpoints.map(([n, u, w]) => el('tr', {}, [el('td', {}, [n]), el('td', { class: 'mono small' }, [u]), el('td', { class: 'small muted' }, [w])])))]),
+      ]),
+      sec('Web search', 'Searching needs someone to answer the query, and this app does not pick one for you — so web_search stays off until you name an endpoint.', [
+        el('div', { class: 'field', id: 'set-searchTemplate' }, [el('span', {}, ['Search is answered by']), searchPick.el]),
+        searchBox,
+      ]),
+      sec('Fetching pages', 'The browser fetches pages directly. A site that refuses cross-origin requests simply fails, and the model is told to offer you the link instead. Both options below hand the URL to somebody else.', [
+        toggle('Use r.jina.ai when a page cannot be fetched', 'jinaFallback', null, {
+          state: (v) => v ? 'Every URL the model cannot reach directly is sent to jina.ai, a third party, which fetches it instead.' : 'Nothing is sent to jina.ai. Pages that block the browser stay unread.',
+        }),
+        urlField('CORS proxy', 'corsProxy', { placeholder: 'https://proxy.example.com/?url={url}', empty: 'Not set — no proxy is used.', help: 'A proxy sees the whole request, credentials included, so only use one you or your company runs. {url} is where the target goes.' }),
+      ]),
+      sec('Updates', null, [
+        toggle('Check GitHub for a newer version', 'checkUpdates', null, {
+          state: (v) => v ? 'A public version file is fetched at startup and every hour. Nothing about you is sent with it.' : 'No update check. You will not hear about new versions.',
+        }),
+      ]),
+      advanced([
+        toggle('Download Pyodide when Python is first used', 'allowPyodideCdn', null, {
+          state: (v) => v ? 'The Python runtime is fetched from the address below the first time run_python is called. Your code and data stay in the browser.' : 'run_python cannot start: the runtime is never downloaded.',
+        }),
+        urlField('Pyodide URL', 'pyodideUrl', { help: 'Point this at your own copy to keep the download in-house.' }),
+      ], 'Advanced: Python runtime'),
+    ]);
+  }
+
+  /* ---------- privacy & data ---------- */
+  function privacyPanel() {
+    return el('div', {}, [
+      sec('Where your data lives', 'All of it stays in this browser profile. There is no server, no account, no analytics and no telemetry.', [el('table', { class: 'table' }, [el('tbody', {}, [
+        ['Settings, tool policies, skills, plugin manifests', 'localStorage'], ['API key and plugin credentials', H.secrets.persist() ? 'localStorage (remembered)' : 'sessionStorage (this tab only)'], ['Chats, memories, usage counters', 'IndexedDB'], ['Workspace files', 'your local folder, reached through the File System Access API only after you pick it'],
       ].map(([a, b]) => el('tr', {}, [el('td', {}, [a]), el('td', { class: 'mono small' }, [b])])))])]),
       sec('Secrets', null, [
-        el('label', { class: 'check' }, [persistToggle, el('span', {}, ['Remember API key and plugin credentials on this device', el('span', { class: 'help' }, ['Off = you re-enter them each time you open the app; they are cleared when the tab closes.'])])]),
-        el('div', { class: 'row gap', style: 'margin-top:8px' }, [el('button', { class: 'btn sm danger-outline', onclick: () => { if (confirm('Forget the API key and all plugin credentials?')) { H.secrets.wipe(); H.toast('Secrets wiped', 'success'); openSettings('security'); } } }, ['Forget all secrets'])]),
-        el('p', { class: 'help', style: 'margin-top:10px' }, ['Exports never include secrets. Anyone with access to this browser profile (or a malicious extension) could read stored secrets, as with any web app.']),
+        toggle('Remember the API key and plugin credentials', 'persistSecrets', null, {
+          get: () => H.secrets.persist(),
+          set: (v) => { H.secrets.setPersist(v); H.toast(v ? 'Secrets are remembered on this device' : 'Secrets now live in this tab session only', 'success'); },
+          state: (v) => v ? 'Kept on this device until you clear them, so you do not retype them every time.' : 'Cleared when this tab closes — you enter them again next time you open the app.',
+        }),
+        el('div', { class: 'row gap', style: 'margin-top:8px' }, [el('button', { class: 'btn sm danger-outline', onclick: () => { if (confirm('Forget the API key and all plugin credentials?')) { H.secrets.wipe(); H.toast('Secrets wiped', 'success'); settingsRepaint?.(); } } }, ['Forget all secrets'])]),
+        el('p', { class: 'help', style: 'margin-top:10px' }, ['Exports never contain secrets. Anyone who can use this browser profile — or a malicious extension in it — can read what is stored, as with any web app.']),
       ]),
-      sec('Network: who this app talks to', 'Right now, requests can go to these hosts and nowhere else. Web pages the model fetches are requested directly from your browser.', [
-        el('table', { class: 'table' }, [el('tbody', {}, endpoints.map(([n, u, w]) => el('tr', {}, [el('td', {}, [n]), el('td', { class: 'mono small' }, [u]), el('td', { class: 'small muted' }, [w])])))]),
+      sec('Backup', 'An export holds settings (without secrets), tool policies, plugins (without credentials), skills, chats and memories. It cannot hold the folders you have opened — a folder handle means nothing on another machine — or the file history kept for undo.', [
+        el('div', { class: 'row gap wrap', id: 'set-export' }, [el('button', { class: 'btn', onclick: exportAll }, [H.icon('download'), 'Export everything']), el('button', { class: 'btn', onclick: importAll }, ['Import'])]),
       ]),
-      sec('Web access', 'By default the browser fetches pages directly; sites that block cross-origin requests simply fail and the model is told to use open_url instead. Enabling any option below sends URLs or queries to a third party.', [
-        field('CORS proxy (optional). Only use one you host yourself. Format: https://proxy/?url={url}', 'corsProxy', 'text'),
-        check('Use r.jina.ai as a fallback reader (third party)', 'jinaFallback', 'sends fetched URLs to jina.ai'),
-        field('Web search URL template ({q} = query). Leave empty to keep web_search disabled.', 'searchTemplate', 'text', { placeholder: 'e.g. https://your-searxng/search?q={q}&format=json' }),
-        el('div', { class: 'row gap' }, [field('Search API key header (optional)', 'searchKeyHeader'), field('Search API key value', 'searchKeyValue', 'password')]),
-        el('p', { class: 'help', style: 'margin-top:4px' }, ['Self-hosted options that keep queries in-house: a SearXNG instance, or an internal proxy. Keyed commercial APIs (Brave, Bing) also work but are third parties.']),
-      ]),
-      sec('Code execution & rendering', null, [el('ul', { class: 'help-list' }, [
+      sec('Running the model\'s code and showing its output', 'Everything the model produces is treated as untrusted: it runs walled off from this page and from your folder.', [advanced([el('ul', { class: 'help-list' }, [
         el('li', {}, ['JavaScript runs in a Web Worker with no DOM or workspace access; Python runs in Pyodide (WebAssembly) in a Worker. Both can make network requests, so run_* tools ask for permission by default. calculate, json_query and plugin expressions run in a Worker with all network APIs removed.']),
         el('li', {}, ['HTML previews render in a sandboxed iframe (unique origin) with an injected Content Security Policy: no fetch/XHR/WebSocket, no form posts, no remote images; scripts only inline or from the two CDNs the app itself uses.']),
         el('li', {}, ['Markdown from the model is sanitized with DOMPurify; images are shown as click-to-load placeholders so a reply can never trigger a request on its own.']),
         el('li', {}, ['web_fetch and http_request ask once per site (origin) in Default and Plan mode; "Allow this site for session" / "Always allow this site" remember the answer. A request routed through a connected browser tab (your login session) always asks, in every mode.']),
         el('li', {}, ['Tool output is treated as untrusted; the system prompt tells the model not to follow instructions embedded in fetched content. Review permission prompts for http_request and plugin write calls, which could exfiltrate data if the model is manipulated.']),
-      ])]),
-      sec('Workspace & code', 'How the assistant reads the folder you open. Nothing here sends anything anywhere.', [
-        check('Follow the project\'s .gitignore when listing and searching files', 'respectGitignore', 'off = only the usual noise folders (node_modules, dist, build…) are skipped'),
-        check('Load AGENTS.md / CLAUDE.md from the workspace root as project instructions', 'projectContextFile', 'the file becomes part of the system prompt; turn this off for folders you do not trust'),
-        check('Keep the previous contents of files the assistant changes, so they can be reverted', 'fileHistory', 'stored in this browser, per chat, and pruned as it grows; "Files changed in this chat" in the top-bar menu shows and restores them'),
-      ]),
-      sec('Update checks', null, [check('Check GitHub for a newer version (startup and every hour)', 'checkUpdates', 'only a public version file is fetched; no data about you is sent')]),
-      sec('Python runtime', null, [check('Allow downloading Pyodide from the configured URL when Python is first used', 'allowPyodideCdn'), field('Pyodide URL', 'pyodideUrl')]),
-    ]);
-  }
-  function dataPanel() {
-    return el('div', {}, [
-      sec('Backup', 'Exports contain settings (without secrets), tool policies, plugins (without credentials), skills, chats, memories. Not included: the folders you have opened (a folder cannot be handed to another machine) or the file history kept for undo.', [el('div', { class: 'row gap wrap' }, [el('button', { class: 'btn', onclick: exportAll }, [H.icon('download'), 'Export everything']), el('button', { class: 'btn', onclick: importAll }, ['Import'])])]),
-      sec('Danger zone', null, [el('div', { class: 'row gap wrap' }, [
+      ])], 'How exactly')]),
+      sec('Danger zone', null, [el('div', { class: 'row gap wrap', id: 'set-wipe' }, [
         el('button', { class: 'btn danger-outline', onclick: async () => { if (confirm('Delete ALL chats, and the file history kept for them?')) { await H.db.clearChats(); await H.journal.clearAll(); H.agent.reset(); renderChatList(); } } }, ['Delete all chats']),
-        el('button', { class: 'btn danger-outline', onclick: () => { if (confirm('Reset settings to defaults? (API key is kept)')) { H.settings.reset(); openSettings('connection'); } } }, ['Reset settings']),
+        el('button', { class: 'btn danger-outline', onclick: () => { if (confirm('Reset settings to defaults? (API key is kept)')) { H.settings.reset(); openSettings('general'); } } }, ['Reset settings']),
         el('button', { class: 'btn danger', onclick: async () => { if (confirm('Wipe EVERYTHING stored by this app in this browser (chats, settings, secrets, plugins, skills, the list of folders you have opened and the file history kept for undo)? Your folders themselves are not touched.')) { await H.db.clearChats(); H.secrets.wipe(); localStorage.clear(); sessionStorage.clear(); indexedDB.deleteDatabase('llm-harness'); location.reload(); } } }, ['Wipe all local data']),
       ])]),
     ]);
   }
-
   function aboutPanel() {
     const a = H.ABOUT;
     const beer = el('div', { class: 'note', style: 'color:var(--fg-2);background:var(--accent-soft)' }, [H.icon('beer'), ` No links, no donations: if this saved you time, buy ${a.author} a beer in person. 🍻`]);
@@ -1239,7 +1485,7 @@ H.ui = (() => {
       sec('Updates', null, [el('div', { class: 'row gap wrap' }, [
         el('button', { class: 'btn', onclick: () => H.update.check({ manual: true }) }, [H.icon('refresh'), 'Check for updates']),
         el('a', { class: 'btn ghost', href: a.repoUrl, target: '_blank', rel: 'noopener' }, [H.icon('external'), 'GitHub repository']),
-      ]), el('p', { class: 'help', style: 'margin-top:8px' }, ['Checks fetch a small version file from GitHub on startup and every hour; nothing else is sent. Turn it off in Security & privacy. Updating = download the newer folder and replace this one; your data stays in the browser.'])]),
+      ]), el('p', { class: 'help', style: 'margin-top:8px' }, ['Checks fetch a small version file from GitHub on startup and every hour; nothing else is sent. Turn it off in Web access. Updating = download the newer folder and replace this one; your data stays in the browser.'])]),
       sec('What it is', null, [el('p', { class: 'sec-desc', style: 'margin:0' }, ['A browser-only harness for LLMs: chats, tools, skills, plugins, plan mode and a browser-session bridge, talking straight to your LiteLLM proxy. No installation, no backend, nothing leaves your browser except the requests you configure.'])]),
       sec('Disclaimer', null, [el('div', { class: 'note' }, [`This software is provided "as is", without warranty of any kind. ${a.author} is not responsible for anything the assistant does with your accounts, files, tickets, repositories or systems, nor for any data loss, costs, or damage arising from its use. You are the operator: review permission prompts, use Plan mode for anything sensitive, and keep your credentials to yourself. Use at your own risk.`])]),
       sec('Found it useful?', null, [beer]),
@@ -1359,7 +1605,7 @@ H.ui = (() => {
     $('#stop-btn').onclick = () => H.agent.stop();
     $('#attach-btn').onclick = () => { const i = el('input', { type: 'file', multiple: true }); i.onchange = () => addFiles([...i.files]); i.click(); };
     $('#new-chat').onclick = () => H.agent.reset();
-    $('#settings-btn').onclick = () => openSettings('connection');
+    $('#settings-btn').onclick = () => openSettings('general');
     $('#usage').onclick = () => openSettings('usage'); $('#ctx-meter').onclick = () => openSettings('usage');
     $('#sidebar-bug-btn').onclick = bugReport;
     const narrow = () => window.matchMedia('(max-width: 900px)').matches;

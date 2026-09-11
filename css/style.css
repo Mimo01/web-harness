@@ -290,14 +290,16 @@ body[data-mode="auto"] #mode-pick .pick { color: var(--ok); }
 /* dropdown triggers: pill (composer), field (settings), mini (dense rows) */
 .pick .chev { width: 12px; height: 12px; flex-shrink: 0; opacity: .7; transition: transform .15s; }
 .pick[aria-expanded="true"] .chev { transform: rotate(180deg); }
-.pick.field { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 32px; padding: 0 8px 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--fg); font-size: 13px; text-align: left; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
-.pick.field:hover { border-color: var(--fg-2); }
-.pick.field[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.pick.field .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pick.mini { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 5px 0 8px; border: 1px solid var(--border); border-radius: var(--r-xs); background: var(--raised); color: var(--fg-2); font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background .12s, border-color .12s, color .12s; }
-.pick.mini:hover { background: var(--surface-2); border-color: var(--border-strong); }
-.pick.mini.allow { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
-.pick.mini.deny { background: var(--danger-soft); border-color: transparent; color: var(--danger); }
+.pick.pick-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 32px; padding: 0 8px 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--fg); font-size: 13px; text-align: left; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.pick.pick-field:hover { border-color: var(--fg-2); }
+.pick.pick-field[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.pick.pick-field .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick.pick-mini { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 5px 0 8px; border: 1px solid var(--border); border-radius: var(--r-xs); background: var(--raised); color: var(--fg-2); font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background .12s, border-color .12s, color .12s; }
+.pick.pick-mini:hover { background: var(--surface-2); border-color: var(--border-strong); }
+/* the mini trigger is sized for the dense tool rows; standing in a row of buttons it takes their height */
+.row.gap > .menu-wrap > .pick.pick-mini { height: 32px; padding: 0 8px 0 12px; border-radius: var(--r-sm); border-color: var(--border-strong); font-size: 13px; box-shadow: var(--shadow-sm); }
+.pick.pick-mini.allow { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+.pick.pick-mini.deny { background: var(--danger-soft); border-color: transparent; color: var(--danger); }
 
 /* the list itself: option rows (name + sub-line), section headings, and a filter once the list gets long */
 .pick-menu { max-height: 340px; overflow-y: auto; overscroll-behavior: contain; }
@@ -412,17 +414,105 @@ body.asking .composer-box { border-color: var(--warn); }
 .sec .row.gap { align-items: flex-start; }
 .help { display: block; margin: -6px 0 10px; font-size: 12px; line-height: 1.45; color: var(--muted); }
 .help-list { margin: 4px 0; padding-left: 18px; font-size: 12.5px; color: var(--fg-2); } .help-list li { margin: 5px 0; }
-.field { display: block; margin: 12px 0; } .field > span { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 500; color: var(--fg-2); }
+.field { display: block; margin: 14px 0; }
+.field > span { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 500; color: var(--fg-2); }
+/* a field's own label is that first span; the explanation under the control is a .help and must stay muted,
+   which needs saying here because .field > span would otherwise out-specify .help */
+.field > span.help { margin: 6px 0 0; font-weight: 400; color: var(--muted); }
 .row.gap > .field, .row.gap > .menu-wrap { flex: 1; min-width: 0; }
-label.check { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 6px 8px; border-radius: var(--r-sm); line-height: 1.4; color: var(--fg); cursor: pointer; }
-label.check:hover { background: var(--surface-2); }
-label.check input[type=checkbox] { flex-shrink: 0; margin-top: 3px; }
-label.check > span { display: flex; flex-direction: column; gap: 1px; } label.check .help { margin: 0; }
-label.check.small { align-items: center; padding: 0; font-size: 12px; color: var(--fg-2); white-space: nowrap; } label.check.small:hover { background: transparent; } label.check.small input { margin-top: 0; }
-.check-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 6px; }
-.toolbar { margin: 4px 0 6px; } .toolbar input { flex: 1; min-width: 180px; }
+/* the dense inline checkbox inside a tool or plugin row, where a full switch row would not fit */
+label.check.small { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 12px; line-height: 1.4; color: var(--fg-2); white-space: nowrap; cursor: pointer; }
+label.check.small input[type=checkbox] { flex-shrink: 0; }
+/* a filter box beside a set of buttons: they stretch to the input's height, so the row is one band rather than
+   short buttons floating against a taller box */
+.row.gap.toolbar { align-items: stretch; margin: 4px 0 6px; }
+.toolbar input { flex: 1; min-width: 180px; }
+/* auto height so they match the filter box on its line; a floor so a wrapped line with no input on it does not
+   collapse the buttons to their text height */
+.toolbar > .btn { height: auto; min-height: 32px; }
+
+/* ---------- Settings controls ----------
+   One shape per kind of value, so the control itself says what sort of thing it holds: a switch for on/off, a
+   slider for a position on a range, a stepper for a counted amount, a revealable box for a secret. Each carries
+   a line underneath saying what the current value means — not what the setting is called again. */
+/* the row spans the content column exactly, like every heading and field above it; the hover tint is inset so
+   it reads as one band without breaking that edge */
+.set-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 11px 0; cursor: pointer; }
+.set-row + .set-row { border-top: 1px solid var(--border); }
+.set-row:hover .set-label { color: var(--fg); }
+.set-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.set-label { font-size: 13px; font-weight: 500; line-height: 1.35; color: var(--fg); }
+.set-help { font-size: 12px; line-height: 1.5; color: var(--muted); }
+/* the track is the whole control: no stray line-height, and its centre lines up with the label's first line */
+.switch { position: relative; flex-shrink: 0; width: 34px; height: 20px; margin-top: -1px; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+/* the track centres the knob itself: a margin on the knob collapses through the track and pins it to the top */
+.switch .track { display: flex; align-items: center; width: 34px; height: 20px; padding: 0 2px; border-radius: 10px; background: var(--surface-3); transition: background .15s; }
+.switch .knob { width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-sm); transition: transform .15s; }
+.switch input:checked + .track { background: var(--accent); }
+.switch input:checked + .track .knob { transform: translateX(14px); }
+.switch input:focus-visible + .track { box-shadow: 0 0 0 3px var(--accent-soft); }
+/* a group of controls that only does anything while the switch above it is on */
+.indent { margin: 2px 0 6px; padding-left: 16px; border-left: 2px solid var(--border); }
+.indent.off { opacity: .45; pointer-events: none; }
+.indent > .field:first-child { margin-top: 10px; } .indent > .help:first-child { margin-top: 8px; }
+
+/* a slider does not get wider just because the column is: past ~380px the extra width buys no precision and
+   the label and its value drift so far apart they stop reading as one control */
+.slider-field { max-width: 380px; }
+.slider-field > span:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.slider-field .set-value { font-weight: 600; font-size: 13px; color: var(--fg); font-variant-numeric: tabular-nums; }
+.slider-field input[type=range] { display: block; width: 100%; height: 18px; margin: 2px 0 0; padding: 0; background: none; -webkit-appearance: none; appearance: none; cursor: pointer; }
+.slider-field input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--surface-3); }
+.slider-field input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--surface-3); }
+.slider-field input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border: 0; border-radius: 50%; background: var(--ink); box-shadow: var(--shadow-sm); }
+.slider-field input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border: 0; border-radius: 50%; background: var(--ink); box-shadow: var(--shadow-sm); }
+.slider-field input[type=range]:focus-visible { outline: none; } .slider-field input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-soft); }
+.slider-field > span.ends { display: flex; justify-content: space-between; gap: 12px; margin: 3px 0 0; font-size: 11.5px; font-weight: 400; color: var(--muted); }
+.slider-field .ends i { font-style: normal; }
+
+.stepper { display: flex; align-items: center; gap: 2px; width: fit-content; max-width: 100%; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); }
+.stepper input { width: 68px; height: 26px; border: 0; background: none; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }   /* the −/+ buttons replace the browser's own spinners */
+.stepper input:focus { outline: none; }
+.stepper:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.stepper .unit { padding: 0 6px 0 2px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.stepper .btn.icon { width: 26px; height: 26px; font-size: 15px; line-height: 1; }
+
+/* an input with a button beside it: the pair shares one line and one height, so neither floats against the
+   other's middle */
+.input-row { display: flex; align-items: stretch; gap: 6px; }
+.input-row > input { flex: 1; min-width: 0; }
+.input-row > .btn { flex: 0 0 auto; height: auto; align-self: stretch; padding: 0 12px; }
+.secret-field > input { font-family: var(--mono); font-size: 12.5px; }
+.warn-text { color: var(--warn); }
+
+details.adv { margin: 14px 0 4px; }
+details.adv > summary { display: flex; align-items: center; gap: 6px; width: fit-content; padding: 5px 10px 5px 6px; border: 1px solid var(--border); border-radius: var(--r-sm); list-style: none; font-size: 12.5px; font-weight: 500; color: var(--muted); cursor: pointer; }
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary:hover { background: var(--surface-2); border-color: var(--border-strong); color: var(--fg-2); }
+details.adv > summary .ico { width: 13px; height: 13px; transition: transform .15s; }
+details.adv[open] > summary { margin-bottom: 4px; } details.adv[open] > summary .ico { transform: rotate(180deg); }
+/* what the disclosure opened is set in from the column, so it reads as belonging to it rather than to the
+   section above */
+.adv-body { margin-left: 2px; padding-left: 16px; border-left: 2px solid var(--border); }
+.adv-body > :first-child { margin-top: 0; } .adv-body > :last-child { margin-bottom: 0; }
+
+.risk-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 14px; font-size: 12px; color: var(--muted); }
+.risk-legend > span { display: flex; align-items: center; gap: 7px; }
+.price-table input { height: 28px; padding: 0 6px; font-size: 12.5px; } .price-table td:first-child input { font-family: var(--mono); font-size: 12px; }
+.price-table th { white-space: nowrap; }
+.input-row:has(> .price-add) { max-width: 340px; }   /* the add box has no reason to span the whole table */
+/* "who this app talks to": without fixed columns one long CDN URL takes half the table and squeezes the
+   explanation — the column that actually needs the room — into a five-line ribbon */
+.net-table { table-layout: fixed; }
+.net-table td:nth-child(1) { width: 22%; }
+.net-table td:nth-child(2) { width: 36%; word-break: break-all; }
+.net-table td:nth-child(3) { width: 42%; }
 .group-title { margin: 20px 0 4px; font-size: 12px; font-weight: 600; color: var(--fg-2); } .group-title .count { margin-left: 6px; font-weight: 500; color: var(--muted); }
-.tool-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); }
+/* fixed columns, not auto: every row is its own grid, so "auto" lets the enabled box wander left and right as
+   the policy label beside it changes length */
+.tool-row { display: grid; grid-template-columns: 1fr 70px 150px; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .tool-row .desc { margin-top: 2px; font-size: 12px; color: var(--muted); } .tool-row code { font-size: 12.5px; color: var(--fg); }
 .tool-row .menu-wrap { display: flex; justify-content: flex-end; }
 .card { margin: 10px 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r); background: var(--raised); }
@@ -496,6 +586,10 @@ label.check.small { align-items: center; padding: 0; font-size: 12px; color: var
   .mode-cards, .stats { grid-template-columns: 1fr; }
   .tool-row { grid-template-columns: 1fr; gap: 6px; } .tool-row .menu-wrap { justify-content: flex-start; }
   .row.gap > .field { flex-basis: 100%; }
+  /* the switch keeps its side of the row even when the label wraps to two lines */
+  .set-row { gap: 12px; } .stepper input { width: 72px; }
+  .indent { margin-left: 0; padding-left: 12px; }
+  .price-table { display: block; overflow-x: auto; }
   #toasts { left: 8px; right: 8px; bottom: 8px; } .toast { max-width: none; }
   #scroll-bottom { bottom: 10px; }
   /* permission prompt as a bottom sheet */

@@ -91,7 +91,7 @@ H.runtime = (() => {
       if (m.type === 'status') { if (m.text === 'Pyodide ready') pyReady = true; p?.onStatus?.(m.text); return; }
       if (m.type === 'result' && p) { clearTimeout(p.timer); pyPending.delete(m.id); p.resolve({ stdout: m.stdout, stderr: m.stderr, result: m.result, error: m.error }); }
     };
-    pyWorker.onerror = (e) => { for (const [id, p] of pyPending) { clearTimeout(p.timer); pyPending.delete(id); p.resolve({ error: 'Python worker error: ' + (e.message || 'unknown') + '. If Pyodide failed to load, check the network / Pyodide URL in Settings > Security & privacy.', stdout: '', stderr: '' }); } pyWorker = null; pyReady = false; };
+    pyWorker.onerror = (e) => { for (const [id, p] of pyPending) { clearTimeout(p.timer); pyPending.delete(id); p.resolve({ error: 'Python worker error: ' + (e.message || 'unknown') + '. If Pyodide failed to load, check the network / Pyodide URL in Settings > Web access.', stdout: '', stderr: '' }); } pyWorker = null; pyReady = false; };
   }
   function pyKill(reason) {
     if (!pyWorker) return;
@@ -101,7 +101,7 @@ H.runtime = (() => {
   }
   function runPython(code, { packages = [], files = {}, timeout = 60000, onStatus, signal } = {}) {
     if (signal?.aborted) return Promise.resolve({ error: 'Cancelled by the user (Stop).', stdout: '', stderr: '' });
-    if (!H.settings.get('allowPyodideCdn')) return Promise.resolve({ error: 'Python is disabled: downloading the Pyodide runtime is turned off in Settings > Security & privacy. Ask the user to enable it, or use run_javascript instead.', stdout: '', stderr: '' });
+    if (!H.settings.get('allowPyodideCdn')) return Promise.resolve({ error: 'Python is disabled: downloading the Pyodide runtime is turned off in Settings > Web access. Ask the user to enable it, or use run_javascript instead.', stdout: '', stderr: '' });
     if (!pyWorker) pyStart();
     const id = ++pyId;
     const url = H.settings.get('pyodideUrl'); const indexURL = url.replace(/pyodide\.js$/, '');
