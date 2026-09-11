@@ -58,7 +58,8 @@ Don't want the check? Turn it off in Settings → Web access; it only ever fetch
   folder and it will still show you everything that changed.
 - **A folder per chat**: each conversation owns the folder it works in and reopens with it, so a chat from last
   month never points at today's project. Every path is relative to that folder — no prefixes, no absolute paths,
-  nothing outside it.
+  nothing outside it. A chat that keeps running while you switch away stays bound to the folder it started in: if
+  another one is open, its file tools stop rather than write to the wrong project, and the sidebar says so.
 - **Undo, even though git is read-only**: the previous contents of every file the assistant writes, edits or deletes
   are kept, so *Files changed in this chat* shows the diff against what the chat found and puts any of it back.
 - **50+ built-in tools**: files, code intelligence, git, code execution (Python via Pyodide, JavaScript in a sandbox),
@@ -315,9 +316,10 @@ credentials live in the browser and there is no CORS issue.
   sent to them.
 - **Storage.** Settings, policies, skills and plugin manifests: `localStorage`. Chats, memories, usage and workspace
   snapshots: IndexedDB.
-  API key and plugin credentials: a separate secret store, either `localStorage` (remembered) or `sessionStorage`
-  (cleared when the tab closes) — toggle in Privacy & data. Exports never contain secrets. Plugin manifests are
-  saved with credentials stripped.
+  API key, plugin credentials and the web-search API key: a separate secret store, either `localStorage`
+  (remembered) or `sessionStorage` (cleared when the tab closes) — toggle in Privacy & data, and *Forget all
+  secrets* clears all of them. Exports never contain secrets, and an import never restores one. Plugin manifests
+  are saved with credentials stripped.
 - **Content Security Policy** in `index.html`: scripts only from the page itself and the two CDNs (with integrity
   hashes), the two inline bootstrap scripts allowed by hash (kept current by the release script), no plugins/objects,
   no form submission. Model markdown is rendered only when the sanitizer is present; otherwise it is shown as text.

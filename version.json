@@ -1,6 +1,6 @@
 {
-  "version": "1.21.0",
-  "date": "2026-09-12",
+  "version": "1.22.0",
+  "date": "2026-09-11",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "skills the model can write: new skill_write and skill_delete tools let the assistant create, rewrite and remove skills from a normal chat — each one lands behind the permission prompt with the whole body visible and the tool card shows a unified diff; the skill editor in Settings > Skills gains a \"Draft with the model\" box that streams a first draft (or a rewrite of the skill you are editing) straight into the instructions, with Stop and Revert draft; anything the model writes keeps its previous version, so a skill card offers Revert; a skill still cannot be named after a system command, now enforced everywhere; a diff of a newly created file no longer opens with a phantom \"-\" line"
+  "notes": "audit pass: a file attached while answering the assistant's question now actually reaches the model instead of being stranded in the composer; tool cards left behind by a tab closed mid-run read as interrupted rather than spinning forever and hiding their result; the undo history keeps the state a chat first found a file in, so Revert can no longer put back a half-way version once old records are pruned; a chat that keeps running in the background stays bound to the folder it started in and refuses file tools rather than write into whatever project is open now; open_url takes http(s) only, so a blob: or javascript: URL can no longer be opened on the harness's own origin; the web-search API key moved into the secret store, where the remember-secrets switch and Forget all secrets actually reach it; importing a backup now asks about plugin code expressions the way importing a plugin always did; local storage writes survive a full quota, model-written regexes cannot freeze the tab, and the diff engine has a memory ceiling; plus a round of dead code removed"
 }

@@ -13,6 +13,29 @@ H.relTime = (t) => { const d = (Date.now() - t) / 1000; if (d < 60) return 'just
 H.dateBucket = (t) => { const d = new Date(t), n = new Date(); const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(); const diff = (day(n) - day(d)) / 86400000; if (diff <= 0) return 'Today'; if (diff === 1) return 'Yesterday'; if (diff < 7) return 'Previous 7 days'; if (diff < 30) return 'Previous 30 days'; return 'Older'; };
 H.tryJSON = (s, fb) => { if (s == null) return fb; try { const v = JSON.parse(s); return v === null ? fb : v; } catch { return fb; } };
 H.deepClone = (o) => JSON.parse(JSON.stringify(o));
+
+/* Every localStorage write in the app goes through here. A full quota — or a browser that blocks storage
+   altogether — must not throw out of a setter and take down whatever called it: it becomes one clear message
+   and a `false` the caller can ignore. Returns whether the value actually landed. */
+H.store = (() => {
+  let lastToast = 0;
+  return {
+    write(key, value) {
+      try { localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value)); return true; }
+      catch (e) {
+        const full = /quota|exceed/i.test((e?.name || '') + ' ' + (e?.message || ''));
+        console.warn('localStorage write failed', key, e);
+        if (Date.now() - lastToast > 10000) {   // a burst of failed writes is one problem, not twenty toasts
+          lastToast = Date.now();
+          H.toast(full
+            ? 'This browser profile is out of local storage, so the last change could not be saved. Free space in Settings › Privacy & data, or export and wipe old data.'
+            : 'Could not save to local storage: ' + (e?.message || e), 'error', 10000);
+        }
+        return false;
+      }
+    },
+  };
+})();
 H.$ = (sel, root = document) => root.querySelector(sel);
 H.$$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 H.el = (tag, attrs = {}, children = []) => {
@@ -197,3 +220,16 @@ H.parseArgs = (s) => {
 
 /* Approximate token count */
 H.estTokens = (s) => Math.ceil(String(s ?? '').length / 4);
+
+/* A pattern the model wrote runs on the UI thread (fs_search, regex_extract), so one that backtracks
+   catastrophically freezes the tab with no way to stop it. Nested quantifiers over a group are the shape that
+   does it — (a+)+, (\w*)* — and refusing them costs nothing the model cannot express another way.
+   Returns the pattern so it can be used inline; throws an explanation the model can act on. */
+H.safeRegex = (pattern) => {
+  const p = String(pattern);
+  if (p.length > 1000) throw new Error('The regular expression is unreasonably long (over 1000 characters). Simplify it.');
+  if (/\([^)]*[+*]\s*\)\s*[+*]|\([^)]*\{\d+,\}\s*\)\s*[+*{]/.test(p)) {
+    throw new Error('This pattern nests a quantifier inside a quantified group (like "(a+)+"), which can take exponential time and would freeze the page. Rewrite it — usually the inner or the outer quantifier is redundant — or search for a plain substring instead.');
+  }
+  return p;
+};

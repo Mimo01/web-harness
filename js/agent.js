@@ -96,10 +96,25 @@ When you have enough information, write a concrete, numbered implementation plan
     });
   }
 
+  /* H.fs speaks for whichever folder is open right now, and a chat keeps running when you switch away from it.
+     A run therefore remembers the folder it started in, and any tool that could touch the file system is refused
+     while a different one is open — otherwise a background chat's writes land in the foreground chat's project. */
+  const TOUCHES_FILES = /^(fs_|git_|code_|project_overview|workspace_|run_file|view_image)/;
+  function folderMismatch(tool, ctx) {
+    if (!ctx?.runFolder || !TOUCHES_FILES.test(tool.name)) return null;
+    const open = H.fs.folderId();
+    if (open === ctx.runFolder.id) return null;
+    return `This chat was working in the folder "${ctx.runFolder.name}", but ${open ? `"${H.fs.name()}" is open now` : 'no folder is open now'}. `
+      + `The file tools always speak for the folder that is open, so running ${tool.name} here would read or write the wrong project. `
+      + `Stop and tell the user to reopen "${ctx.runFolder.name}" (the folder button under the message box) before continuing.`;
+  }
+
   async function executeToolCall(tc, ctx) {
     const name = tc.function.name;
     const tool = H.tools.get(name);
     if (!tool) return { error: `Unknown tool: ${name}` };
+    const wrongFolder = folderMismatch(tool, ctx);
+    if (wrongFolder) return { error: wrongFolder, denied: true };
     const parsed = H.parseArgs(tc.function.arguments || '{}');
     if (parsed.error) {
       const raw = tc.function.arguments || '';
@@ -125,7 +140,7 @@ When you have enough information, write a concrete, numbered implementation plan
   }
 
   const chatIdOf = (messages) => { for (const c of live.values()) if (c.messages === messages) return c.id; return chat?.id; };
-  async function loop(messages, { onEvent, signal, maxIterations, onUsage, mode, subagent = false }) {
+  async function loop(messages, { onEvent, signal, maxIterations, onUsage, mode, subagent = false, runFolder = null }) {
     const tools = H.tools.openaiSpecs();
     const model = H.settings.get('model');
     let finalText = '';
@@ -175,7 +190,7 @@ When you have enough information, write a concrete, numbered implementation plan
       });
       const execOne = async ({ tc, toolMsg, sig }) => {
         if (signal?.aborted) { toolMsg.meta.running = false; toolMsg.content = JSON.stringify({ error: 'Cancelled by the user.' }); onEvent?.('tool-end', toolMsg); return; }
-        const ctx = { signal, finishReason: res.finish_reason, images, chatId: chatIdOf(messages), toolMsg, subagent, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
+        const ctx = { signal, finishReason: res.finish_reason, images, chatId: chatIdOf(messages), toolMsg, subagent, runFolder, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
         const prev = seen.get(sig);
         let out;
         if (prev && prev.count >= 3) {
@@ -194,7 +209,9 @@ When you have enough information, write a concrete, numbered implementation plan
         onEvent?.('tool-end', toolMsg);
       };
       // 2) run them: consecutive read-only calls that need no permission prompt run in parallel; everything else one at a time, in order
-      const parallelOk = (it) => { const t = H.tools.get(it.tc.function.name); return !!t && t.risk === 'safe' && H.perms.policyFor(t) === 'allow' && !['ask_user', 'run_subagent', 'sleep'].includes(t.name) && !H.perms.willPrompt(t, H.tryJSON(it.tc.function.arguments, null) || {}); };
+      /* the same lenient parse execution will use, so a call whose arguments need repairing is not mistaken for
+         one that will not prompt — that is how two permission modals end up stacked on top of each other */
+      const parallelOk = (it) => { const t = H.tools.get(it.tc.function.name); if (!t) return false; const a = H.parseArgs(it.tc.function.arguments).value; return t.risk === 'safe' && H.perms.policyFor(t) === 'allow' && !['ask_user', 'run_subagent', 'sleep', 'fs_upload_from_user'].includes(t.name) && !H.perms.willPrompt(t, a && typeof a === 'object' ? a : {}); };
       for (let i = 0; i < items.length;) {
         if (parallelOk(items[i])) { let j = i; while (j < items.length && parallelOk(items[j])) j++; await Promise.all(items.slice(i, j).map(execOne)); i = j; }
         else { await execOne(items[i]); i++; }
@@ -202,22 +219,40 @@ When you have enough information, write a concrete, numbered implementation plan
       if (stalled) {
         messages.push({ role: 'user', content: '[system] Repeated identical tool calls were blocked by the loop guard. Summarize what you found, explain what is blocking you, and ask the user how to proceed. Do not call tools in this reply.', ts: Date.now(), meta: { system: true } });
         onEvent?.('user-added', messages.at(-1));
-        return await loop(messages, { onEvent, signal, maxIterations: 1, onUsage, mode, subagent });
+        return await loop(messages, { onEvent, signal, maxIterations: 1, onUsage, mode, subagent, runFolder });
       }
       if (images.length) {   // images requested by tools are delivered as a user message with vision content
         const um = { role: 'user', content: `[Images requested via view_image: ${images.map(i => i.name).join(', ')}]`, display: `🖼 ${images.map(i => i.name).join(', ')} shown to the model`, ts: Date.now(), meta: { system: true }, apiContent: [{ type: 'text', text: `Here are the images you asked for: ${images.map(i => i.name).join(', ')}` }, ...images.map(i => ({ type: 'image_url', image_url: { url: i.content } }))] };
         messages.push(um); onEvent?.('user-added', um);
       }
       if (signal?.aborted) break;
-      if (iter === maxIterations - 1) messages.push({ role: 'user', content: `[system] Tool iteration limit (${maxIterations}) reached. Summarize progress and stop.`, ts: Date.now(), meta: { system: true } });
+      if (iter === maxIterations - 1) {
+        messages.push({ role: 'user', content: `[system] Tool iteration limit (${maxIterations}) reached. Summarize progress and stop.`, ts: Date.now(), meta: { system: true } });
+        onEvent?.('user-added', messages.at(-1));   // like the loop-guard message: visible now, not only after a reload
+      }
     }
     return finalText;
+  }
+
+  /* Every request a chat pays for lands here, so the ring under the message box counts the side requests
+     (compaction, auto-title) the same way it counts the ones in the transcript. */
+  function addUsage(c, u, cost) {
+    if (!c || !u) return;
+    const model = H.settings.get('model');
+    c.usage.prompt += u.prompt_tokens || 0;
+    c.usage.completion += u.completion_tokens || 0;
+    c.usage.cost = (c.usage.cost || 0) + (cost ?? H.usage.costOfUsage(model, u) ?? 0);
+    c.usage.requests = (c.usage.requests || 0) + 1;
+    H.usage.record(model, u);
+    H.bus.emit('usage', c);
   }
 
   /* ---------- context compaction ---------- */
   /** Summarise everything but the last `keepTurns` user turns into one message the model sees instead of the originals. */
   async function compact(c = chat, { keepTurns, manual = false } = {}) {
-    if (!c || runs.has(c.id) || compacting.has(c.id)) return false;
+    if (!c) { if (manual) H.toast('There is no chat to compact.', 'warn'); return false; }
+    if (runs.has(c.id)) { if (manual) H.toast('The assistant is still working; stop it or wait, then compact.', 'warn'); return false; }
+    if (compacting.has(c.id)) { if (manual) H.toast('This chat is already being compacted.', 'info'); return false; }
     keepTurns = keepTurns ?? H.settings.get('compactKeepTurns') ?? 3;
     const active = c.messages.filter(m => !m.meta?.compacted);
     const userIdx = active.map((m, i) => m.role === 'user' ? i : -1).filter(i => i >= 0);
@@ -237,7 +272,7 @@ When you have enough information, write a concrete, numbered implementation plan
       });
       const text = (res.content || '').trim();
       if (!text) throw new Error('empty summary');
-      if (res.usage) { c.usage.prompt += res.usage.prompt_tokens || 0; c.usage.completion += res.usage.completion_tokens || 0; H.usage.record(H.settings.get('model'), res.usage); }
+      if (res.usage) addUsage(c, res.usage);
       for (const m of older) m.meta = { ...(m.meta || {}), compacted: true };
       const summary = { role: 'user', content: `[Summary of the earlier conversation, compacted to save context]\n${text}`, display: 'Earlier conversation compacted into a summary', ts: Date.now(), meta: { summary: true, system: true, replaces: older.length } };
       const firstKeep = c.messages.indexOf(active[cut]);
@@ -281,14 +316,17 @@ When you have enough information, write a concrete, numbered implementation plan
 
   async function run() {
     const c = chat; if (!c || runs.has(c.id)) return;
-    const ctl = new AbortController(); runs.set(c.id, { abort: ctl }); live.set(c.id, c);
+    const ctl = new AbortController();
+    const f = H.fs.folder();
+    const runFolder = f ? { id: f.id, name: f.name } : null;   // the folder this run belongs to, for the whole run
+    runs.set(c.id, { abort: ctl, folder: runFolder }); live.set(c.id, c);
     const mode = H.perms.effectiveMode();
     H.bus.emit('run-state', true, c.id);
     try {
       await loop(c.messages, {
-        signal: ctl.signal, maxIterations: H.settings.get('maxToolIterations'), mode,
+        signal: ctl.signal, maxIterations: H.settings.get('maxToolIterations'), mode, runFolder,
         onEvent: (ev, msg) => { if (ev === 'assistant-start' || ev === 'tool-start' || ev === 'user-added') H.bus.emit('message-added', msg, c.id); else H.bus.emit('message-updated', msg, c.id); if (ev === 'assistant-end' || ev === 'tool-end') persist(c); },
-        onUsage: (u, cost) => { c.usage.prompt += u.prompt_tokens || 0; c.usage.completion += u.completion_tokens || 0; c.usage.cost = (c.usage.cost || 0) + (cost || 0); c.usage.requests = (c.usage.requests || 0) + 1; H.usage.record(H.settings.get('model'), u); H.bus.emit('usage', c); },
+        onUsage: (u, cost) => addUsage(c, u, cost),
       });
     } catch (e) { H.toast((chat === c ? '' : `[${c.title}] `) + e.message, 'error', 8000); }
     finally {
@@ -328,7 +366,7 @@ When you have enough information, write a concrete, numbered implementation plan
       try {
         const res = await H.llm.chat({ messages: [{ role: 'system', content: 'You name chat conversations. Reply with a short title of 3 to 6 words, plain text, no quotes, no punctuation at the end, nothing else.' }, { role: 'user', content: `First message:\n${H.clamp(text, 800)}${reply ? `\n\nAssistant reply (excerpt):\n${H.clamp(reply.content, 400)}` : ''}\n\nTitle:` }], maxTokens: 30, temperature: 0.2 });
         title = cleanTitle(res.content);
-        if (res.usage) { c.usage.prompt += res.usage.prompt_tokens || 0; c.usage.completion += res.usage.completion_tokens || 0; H.usage.record(H.settings.get('model'), res.usage); }
+        if (res.usage) addUsage(c, res.usage);
       } catch (e) { console.warn('auto-title attempt failed', e); }
     }
     if (!title) title = fallbackTitle(text);
@@ -342,10 +380,21 @@ When you have enough information, write a concrete, numbered implementation plan
     while (chat.messages.length && chat.messages.at(-1).role !== 'user') chat.messages.pop();
     H.bus.emit('chat-loaded', chat); await persist(); await run();
   }
+  /* A run writes the chat to storage as each tool finishes, so a tab closed mid-run leaves messages marked
+     `running` / `streaming` behind. Nothing will ever finish them, and a tool card stuck on "running" never
+     renders its result at all — so a chat read back from storage while nothing is running is settled here. */
+  function settleInterrupted(c) {
+    if (!c || runs.has(c.id)) return c;
+    for (const m of c.messages || []) {
+      if (!m.meta?.running && !m.meta?.streaming) continue;
+      m.meta = { ...m.meta, running: false, streaming: false, interrupted: true };
+    }
+    return c;
+  }
   async function load(id) {
     if (chat?.id === id) return;
     let c = live.get(id);                       // running (or recently run) chats live in memory: reuse the same object
-    if (!c) { c = await H.db.getChat(id); if (!c || !c.id) { H.bus.emit('chat-updated'); return; } c.usage ||= { prompt: 0, completion: 0, cost: 0, requests: 0 }; live.set(id, c); }
+    if (!c) { c = await H.db.getChat(id); if (!c || !c.id) { H.bus.emit('chat-updated'); return; } c.usage ||= { prompt: 0, completion: 0, cost: 0, requests: 0 }; settleInterrupted(c); live.set(id, c); }
     chat = c; H.bus.emit('chat-loaded', chat);
     /* a chat carries its own folder: opening one from last month must not aim its paths at today's project */
     await H.fs.use(c.folder ?? c.mounts ?? null).catch(e => console.warn('workspace restore', e));
@@ -371,14 +420,15 @@ When you have enough information, write a concrete, numbered implementation plan
   async function rename(title) { if (chat) { chat.title = title; await persist(chat, { now: true }); } }
   async function deleteMessage(idx) { if (!chat || runs.has(chat.id)) return; chat.messages.splice(idx, 1); H.bus.emit('chat-loaded', chat); await persist(); }
   const isRunning = (id) => runs.has(id || chat?.id);
-  const runningIds = () => [...runs.keys()];
+  /** the folder a running chat is bound to, or null — the sidebar warns when it is not the one that is open */
+  const runFolderOf = (id) => runs.get(id || chat?.id)?.folder || null;
 
-  async function runOnce({ task, maxIterations = 15, onStatus, signal }) {
+  async function runOnce({ task, maxIterations = 15, onStatus, signal, runFolder = null }) {
     const msgs = [{ role: 'user', content: task }];
     let steps = 0;
-    const text = await loop(msgs, { signal, maxIterations, subagent: true, mode: H.perms.effectiveMode() === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
+    const text = await loop(msgs, { signal, maxIterations, subagent: true, runFolder, mode: H.perms.effectiveMode() === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
     return text || '(sub-agent produced no final text)';
   }
 
-  return { send, stop, run, regenerate, continueRun, load, reset, remove, rename, deleteMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runningIds, systemPrompt };
+  return { send, stop, run, regenerate, continueRun, load, reset, remove, rename, deleteMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runFolderOf, systemPrompt };
 })();

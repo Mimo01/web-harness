@@ -373,8 +373,7 @@ H.git = (() => {
       if (!prefix) { if (mapCache.size > 20) mapCache.clear(); mapCache.set(treeSha, map); }
       return map;
     }
-    async function blobText(sha) { const o = await readObject(sha); return o.type === 'blob' ? text(o.data) : text(o.data); }
-    async function blobBytes(sha) { return (await readObject(sha)).data; }
+    async function blobText(sha) { return text((await readObject(sha)).data); }
 
     async function packedRefs() {
       const out = new Map();
@@ -743,9 +742,9 @@ H.git = (() => {
     }
 
     return {
-      detect, requireRepo, head, config, resolve, readObject, commit, tree, treeMap, blobText, blobBytes,
+      detect, requireRepo, head, config, resolve, readObject, commit, tree, treeMap, blobText,
       readIndex, status, diffWorktree, diffRefs, commitChanges, log, blame, branches, quickBranch, state,
-      parseTag, hashBlob, resetCaches, root: () => root,
+      parseTag, hashBlob, resetCaches,
     };
   }
 

@@ -8,7 +8,8 @@
   const recent = await H.db.recentChat();   // one index record via cursor: never reads message bodies at startup
   if (recent) await H.agent.load(recent.id); else await H.agent.reset();   // reopen the most recent chat; create one only when there is none
   H.ui.renderChatList();
-  if (H.settings.apiKey()) { H.ui.refreshModels().catch(() => { }); H.usage.refreshModelInfo(); } else { H.ui.setStatus('', 'not configured'); H.ui.openSettings('general'); }
+  if (H.settings.apiKey()) H.ui.refreshModels().catch(() => { });   // which also loads /model/info for prices and context windows
+  else { H.ui.setStatus('', 'not configured'); H.ui.openSettings('general'); }
   H.plugins.connectEnabledMcp();
   H.update.start();
   // one harness tab per browser profile: two tabs would overwrite each other's settings and usage totals

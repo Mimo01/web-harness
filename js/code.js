@@ -213,7 +213,7 @@ H.code = (() => {
     }
 
     /* ============================ grep ============================ */
-    async function search({ query, path = '', regex = false, caseSensitive = false, glob = '', exclude = '', maxResults = 100, maxPerFile = 20, contextLines = 0, filesOnly = false, includeNoisy = false, refresh = false }) {
+    async function search({ query, path = '', regex = false, caseSensitive = false, glob = '', exclude = '', maxResults = 100, maxPerFile = 20, contextLines = 0, filesOnly = false, includeNoisy = false, refresh = false, signal = null }) {
       const { files, truncated: idxTrunc } = await index({ refresh });
       const base = String(path || '').replace(/^\.?\/+/, '').replace(/\/+$/, '');
       const pool = files.filter(f => (!base || f.path === base || f.path.startsWith(base + '/'))
@@ -221,11 +221,14 @@ H.code = (() => {
         && (!exclude || !H.fs.globMatch(exclude, f.path))
         && searchable(f, { includeNoisy }));
       let re;
-      try { re = new RegExp(regex ? query : String(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), caseSensitive ? '' : 'i'); }
+      /* a model-written pattern runs here on the UI thread: H.safeRegex refuses the shapes that backtrack forever */
+      const src = regex ? H.safeRegex(query) : String(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      try { re = new RegExp(src, caseSensitive ? '' : 'i'); }
       catch (e) { throw new Error(`Invalid regular expression: ${e.message}`); }
-      const out = []; let total = 0, scanned = 0, truncated = false;
+      const out = []; let total = 0, scanned = 0, truncated = false, cancelled = false;
       for (const f of pool) {
         if (out.length >= maxResults) { truncated = true; break; }
+        if (signal?.aborted) { cancelled = true; break; }   // Stop reaches a long sweep between files
         let text; try { text = await read(f.path, f); } catch { continue; }
         scanned++;
         if (!re.test(text)) continue;
@@ -244,7 +247,11 @@ H.code = (() => {
         }
         if (matches.length) out.push({ file: f.path, count: matches.length, matches });
       }
-      return { query, files: out, totalMatches: total, filesScanned: scanned, filesInScope: pool.length, truncated: truncated || idxTrunc, note: truncated ? `Stopped at ${maxResults} files with matches; narrow with path/glob or raise maxResults.` : undefined };
+      return {
+        query, files: out, totalMatches: total, filesScanned: scanned, filesInScope: pool.length,
+        truncated: truncated || idxTrunc, cancelled: cancelled || undefined,
+        note: cancelled ? 'Cancelled by the user (Stop) part-way through the search.' : truncated ? `Stopped at ${maxResults} files with matches; narrow with path/glob or raise maxResults.` : undefined,
+      };
     }
     async function find(glob, path = '', { refresh = false } = {}) {
       const { files } = await index({ refresh });
@@ -466,7 +473,7 @@ H.code = (() => {
 
     return {
       generation: () => generation, bump, index, read, search, find, outline, outlineGlob, symbol, deps,
-      overview, contextFile, snapshot, getSnapshot, snapKey, changes, ignoredBy, root: () => root,
+      overview, contextFile, snapshot, getSnapshot, snapKey, changes, ignoredBy,
     };
   }
 

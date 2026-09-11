@@ -12,7 +12,7 @@ H.update = (() => {
       const r = await fetch(url, { cache: 'no-store' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       latest = await r.json();
-      localStorage.setItem(KEY, String(Date.now()));
+      H.store.write(KEY, String(Date.now()));
       const newer = cmp(latest.version, H.ABOUT.version) > 0;
       H.bus.emit('update', { latest, newer });
       if (newer && (manual || localStorage.getItem('harness.update.dismissed') !== latest.version)) notify(latest);
@@ -27,7 +27,7 @@ H.update = (() => {
       H.el('div', {}, [H.el('b', {}, [`Version ${v.version} is available`]), H.el('div', { class: 'small muted' }, [`You are running ${H.ABOUT.version}.` + (v.notes ? ' ' + v.notes : '')])]),
       H.el('div', { class: 'row gap', style: 'margin-top:8px' }, [
         H.el('a', { class: 'btn sm primary', href: v.url || H.ABOUT.repoUrl, target: '_blank', rel: 'noopener' }, ['Download']),
-        H.el('button', { class: 'btn sm ghost', onclick: () => { localStorage.setItem('harness.update.dismissed', v.version); t.remove(); } }, ['Later']),
+        H.el('button', { class: 'btn sm ghost', onclick: () => { H.store.write('harness.update.dismissed', v.version); t.remove(); } }, ['Later']),
       ]),
     ]);
     box.append(t);

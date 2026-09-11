@@ -245,6 +245,10 @@ H.fs = (() => {
   return {
     supported, pick, open, close, use, state, grant, setMode,
     folder: () => folder, resolve,
+    /* which folder the file tools speak for right now. A run captures this at the start and checks it before
+       every call: H.fs is global, so switching chats mid-run would otherwise aim a background chat's writes at
+       whatever project the foreground chat just opened. */
+    folderId: () => (folder ? folder.id : null),
     readFile, writeFile, appendFile, exists, stat, list, mkdir, remove, move, globMatch, replaceText, eolOf,
     name: () => (folder ? folder.name : ''), hasRoot,
     /** one line for the system prompt: which folder this chat works in */

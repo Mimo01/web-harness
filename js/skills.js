@@ -10,8 +10,8 @@ H.skills = (() => {
   const MAX_PREV = 30;
   let skills = H.tryJSON(localStorage.getItem(KEY), null) || [];
   let prev = H.tryJSON(localStorage.getItem(PREV_KEY), null) || {};   // name -> { at, skill: skill|null }; null = did not exist
-  const save = () => { localStorage.setItem(KEY, JSON.stringify(skills)); H.bus.emit('skills', skills); };
-  const savePrev = () => { localStorage.setItem(PREV_KEY, JSON.stringify(prev)); };
+  const save = () => { H.store.write(KEY, skills); H.bus.emit('skills', skills); };
+  const savePrev = () => { H.store.write(PREV_KEY, prev); };
 
   /* parse "---\nname: x\ndescription: y\n---\nbody" */
   function parse(md, fallbackName) {

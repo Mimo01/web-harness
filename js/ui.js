@@ -236,6 +236,7 @@ H.ui = (() => {
     const es = node.querySelector('.err-slot'); es.innerHTML = '';
     if (m.meta?.error) es.append(el('div', { class: 'error-box row gap wrap' }, [el('span', { style: 'flex:1' }, ['Error: ' + m.meta.error]), el('button', { class: 'btn sm', onclick: () => H.agent.regenerate() }, [H.icon('refresh'), 'Retry'])]));
     if (m.meta?.aborted) es.append(el('div', { class: 'muted small' }, ['(stopped)']));
+    if (m.meta?.interrupted) es.append(el('div', { class: 'row gap wrap truncated-box' }, [el('span', { class: 'muted small', style: 'flex:1' }, ['This reply was still being written when the tab was closed.']), el('button', { class: 'btn sm', onclick: () => H.agent.regenerate() }, [H.icon('refresh'), 'Retry'])]));
     if (m.meta?.truncated && !m.meta.streaming) es.append(el('div', { class: 'row gap wrap truncated-box' }, [el('span', { class: 'muted small', style: 'flex:1' }, ['The reply was cut off at the output limit.']), el('button', { class: 'btn sm primary', onclick: () => H.agent.continueRun() }, ['Continue'])]));
     const turn = turnOf.get(node); if (turn) updateTurnStats(turn);
     const ps = node.querySelector('.plan-slot'); ps.innerHTML = '';
@@ -294,7 +295,7 @@ H.ui = (() => {
     return el('div', { class: 'diff-wrap' }, [path ? el('div', { class: 'diff-path' }, [path]) : null, pre]);
   }
   function updateTool(node, m) {
-    const bodyKey = (m.meta?.running ? 'r' : 'd') + '|' + (m.meta?.error || '') + '|' + (m.content?.length || 0) + '|' + (m.meta?.question ? JSON.stringify(m.meta.question.answered ?? null) : '');
+    const bodyKey = (m.meta?.running ? 'r' : m.meta?.interrupted ? 'i' : 'd') + '|' + (m.meta?.error || '') + '|' + (m.content?.length || 0) + '|' + (m.meta?.question ? JSON.stringify(m.meta.question.answered ?? null) : '');
     const bodyChanged = node._bodyKey !== bodyKey; node._bodyKey = bodyKey;
     if (m.meta?.question) {   // ask_user: the card IS the question
       node.classList.add('ask'); node.open = true;
@@ -308,6 +309,7 @@ H.ui = (() => {
     const a = m.meta?.args; args.textContent = typeof a === 'object' ? JSON.stringify(a) : String(a || '');
     node.classList.remove('running', 'ok', 'error', 'denied');
     if (m.meta?.running) { node.classList.add('running'); st.innerHTML = ''; st.append(el('span', { class: 'spinner' })); if (m.meta.status) st.append(' ' + m.meta.status); }
+    else if (m.meta?.interrupted) { node.classList.add('denied'); st.textContent = 'interrupted'; }   // the tab closed while it ran; nothing will finish it
     else if (m.meta?.denied) { node.classList.add('denied'); st.textContent = 'denied'; }
     else if (m.meta?.error) { node.classList.add('error'); st.textContent = 'error'; }
     else { node.classList.add('ok'); st.textContent = m.meta?.ms != null ? m.meta.ms + ' ms' : 'done'; }
@@ -319,14 +321,17 @@ H.ui = (() => {
     }
     const body = node.querySelector('.tbody'); body.innerHTML = '';
     body.append(el('div', { class: 'lbl' }, ['Arguments']), el('pre', {}, [typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a || '')]));
-    if (!m.meta?.running) {
+    if (m.meta?.interrupted) {
+      body.append(el('div', { class: 'lbl' }, ['Result']), el('p', { class: 'small muted', style: 'padding:6px 12px 12px' }, ['This call was still running when the tab was closed or reloaded, so it never produced a result. Ask again to re-run it.']));
+    } else if (!m.meta?.running) {
       const patches = patchesOf(m);
       if (patches) {
         body.append(el('div', { class: 'lbl' }, ['Changes', el('span', { class: 'lbl-extra' }, [patches.length + (patches.length === 1 ? ' file' : ' files')])]));
         for (const p of patches) body.append(renderPatch(p));
       }
-      let out = m.content; try { out = JSON.stringify(JSON.parse(out), null, 2); } catch { }
-      body.append(el('div', { class: 'lbl' }, ['Result', el('span', { class: 'lbl-extra' }, [H.fmtBytes(m.content.length)])]), el('pre', {}, [H.clamp(out, patches ? 4000 : 20000)]));
+      let out = m.content || '';
+      try { out = JSON.stringify(JSON.parse(out), null, 2); } catch { }
+      body.append(el('div', { class: 'lbl' }, ['Result', el('span', { class: 'lbl-extra' }, [H.fmtBytes((m.content || '').length)])]), el('pre', {}, [H.clamp(out, patches ? 4000 : 20000)]));
     }
     body.append(el('div', { class: 'rerun-slot' }));
   }
@@ -499,7 +504,11 @@ H.ui = (() => {
     for (const c of filtered) {
       const b = H.dateBucket(c.updated); if (b !== bucket) { bucket = b; list.append(el('div', { class: 'side-label' }, [b])); }
       const running = H.agent.isRunning(c.id);
-      list.append(el('div', { class: 'chat-item' + (cur?.id === c.id ? ' active' : '') + (running ? ' running' : ''), onclick: () => H.agent.load(c.id), title: `${c.title}\n${c.count} messages · ${H.relTime(c.updated)}${running ? '\nRunning…' : ''}` }, [
+      /* a chat keeps running when you switch away, but the file tools always speak for the folder that is open
+         now — so a running chat bound to another folder is stuck until that one is reopened, and says so */
+      const rf = running ? H.agent.runFolderOf(c.id) : null;
+      const wrongFolder = !!rf && rf.id !== H.fs.folderId();
+      list.append(el('div', { class: 'chat-item' + (cur?.id === c.id ? ' active' : '') + (running ? ' running' : '') + (wrongFolder ? ' stale-folder' : ''), onclick: () => H.agent.load(c.id), title: `${c.title}\n${c.count} messages · ${H.relTime(c.updated)}${running ? '\nRunning…' : ''}${wrongFolder ? `\nIt works in "${rf.name}", which is not the folder open now: its file tools will refuse until you reopen it.` : ''}` }, [
         running ? el('span', { class: 'spinner' }) : null,
         el('span', { class: 'title' + (c.count ? '' : ' muted') }, [c.count || c.title !== 'New chat' ? c.title : 'New chat (empty)']),
         el('button', { class: 'btn sm icon del', title: 'Rename', onclick: async (e) => { e.stopPropagation(); const t = prompt('Chat title', c.title); if (t) { if (cur?.id === c.id) { await H.agent.rename(t); } else { const full = await H.db.getChat(c.id); if (full) { full.title = t; await H.db.putChat(full); } } indexVersion++; renderChatList(); } } }, [H.icon('edit')]),
@@ -515,7 +524,13 @@ H.ui = (() => {
     if (!text && !attachments.length) return;
     /* a system command runs here and now — before every guard below, so /copy works mid-run too — and never becomes a message */
     if (H.commands.run(text)) { t.value = ''; autoresize(); hideSlash(); return; }
-    if (H.agent.pendingQuestion()) { H.agent.answerQuestion(H.agent.current().id, text); t.value = ''; autoresize(); return; }   // answer, not a new message
+    /* answering a question is a send like any other: it carries the attachments too, so the model gets the file
+       the user picked to answer with instead of leaving it stranded in the composer */
+    if (H.agent.pendingQuestion()) {
+      const ans = attachments; attachments = []; renderAttachments();
+      H.agent.answerQuestion(H.agent.current().id, text, ans);
+      t.value = ''; autoresize(); hideSlash(); return;
+    }
     if (H.agent.isRunning()) return;
     if (!H.settings.apiKey() && !confirm('No API key configured. Send anyway?')) { openSettings('general'); return; }
     const att = attachments; attachments = []; renderAttachments();
@@ -822,7 +837,7 @@ H.ui = (() => {
           : 'File history is turned off in Settings → Workspace, so changes are not recorded.']));
         return;
       }
-      const live = rows.filter(r => !r.unchanged && !r.elsewhere);
+      const live = rows.filter(r => !r.unchanged && !r.elsewhere && r.revertible);
       head.append(el('button', { class: 'btn sm chg-act', title: 'Save every change in this chat as a patch file', onclick: () => {
         H.download('chat-changes.patch', rows.map(r => r.patch).filter(Boolean).join('') || '(no textual changes)', 'text/x-patch');
       } }, ['Export as .patch']));
@@ -838,7 +853,7 @@ H.ui = (() => {
           el('span', { class: 'spacer' }),
           el('span', { class: 'small muted' }, [`${r.count} write${r.count > 1 ? 's' : ''} · ${H.relTime(r.last)}`]),
           r.unchanged || r.elsewhere ? null : el('button', {
-            class: 'btn sm ghost', title: r.note ? 'The previous contents were not kept' : 'Put this file back the way the chat found it', disabled: !!r.note,
+            class: 'btn sm ghost', title: r.revertible ? 'Put this file back the way the chat found it' : `Cannot be put back: ${r.note || 'the previous contents were not kept'}`, disabled: !r.revertible,
             onclick: async (e) => { e.stopPropagation(); try { await H.journal.revert(r); H.toast('Reverted ' + r.address, 'success'); render(); } catch (err) { H.toast(err.message, 'error', 6000); } },
           }, ['Revert']),
         ]);
@@ -878,6 +893,9 @@ H.ui = (() => {
      Ten sections, each with one job. Every control carries its settings key as id="set-<key>", so anything that
      needs to point at one setting — a deep link, a future jump-to — has a stable handle for it. */
   let settingsModal = null;
+  /* bus subscriptions a panel made while it was on screen; dropped when the section changes or the dialog closes */
+  let panelCleanups = [];
+  const dropPanels = () => { for (const off of panelCleanups.splice(0)) { try { off(); } catch { } } };
   const SECTIONS = [
     ['general', 'General', 'link'], ['model', 'Model', 'cube'], ['permissions', 'Permissions', 'shield'],
     ['workspace', 'Workspace', 'folder'], ['plugins', 'Plugins', 'plug'], ['skills', 'Skills', 'bolt'],
@@ -894,13 +912,13 @@ H.ui = (() => {
     if (!builders[curSection]) curSection = 'general';
 
     const show = (k) => {
-      curSection = k;
+      curSection = k; dropPanels();
       nav.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.k === k));
       body.innerHTML = ''; body.append(builders[k]()); body.scrollTop = 0;
     };
     /* rebuild the current section in place: a setting that changes what its own panel shows must not throw the
        reader back to the top of the page (which re-opening the whole dialog used to do) */
-    const repaint = () => { const y = body.scrollTop; body.innerHTML = ''; body.append(builders[curSection]()); body.scrollTop = y; };
+    const repaint = () => { const y = body.scrollTop; dropPanels(); body.innerHTML = ''; body.append(builders[curSection]()); body.scrollTop = y; };
     settingsRepaint = repaint;
 
     for (const [k, label, ic] of SECTIONS) nav.append(el('button', { 'data-k': k, onclick: () => show(k) }, [H.icon(ic), el('span', {}, [label])]));
@@ -910,7 +928,7 @@ H.ui = (() => {
       el('div', { class: 'settings-layout' }, [nav, body])])]);
     document.body.append(settingsModal); show(curSection);
     settingsClose = close;
-    function close() { settingsModal.remove(); settingsModal = null; settingsRepaint = null; settingsClose = null; updateModeUI(); updateContextMeter(); }
+    function close() { dropPanels(); settingsModal.remove(); settingsModal = null; settingsRepaint = null; settingsClose = null; updateModeUI(); updateContextMeter(); }
   }
   /* set while the dialog is open, so a control can refresh its own panel without re-opening the dialog,
      or step out of the dialog entirely and hand the user back to the chat */
@@ -1014,7 +1032,8 @@ H.ui = (() => {
       the indent is the box's, not each child's — a list keeps the padding its bullets need. */
   const advanced = (children, label = 'Advanced') => {
     const k = 'harness.adv.' + label;
-    return el('details', { class: 'adv', open: sessionStorage.getItem(k) === '1' || null, ontoggle: (e) => sessionStorage.setItem(k, e.target.open ? '1' : '0') },
+    const remember = (open) => { try { sessionStorage.setItem(k, open ? '1' : '0'); } catch { } };   // a private window may refuse; the disclosure still works
+    return el('details', { class: 'adv', open: sessionStorage.getItem(k) === '1' || null, ontoggle: (e) => remember(e.target.open) },
       [el('summary', {}, [H.icon('chev'), label]), el('div', { class: 'adv-body' }, [].concat(children).filter(Boolean))]);
   };
 
@@ -1279,7 +1298,12 @@ H.ui = (() => {
       } else if (routeSel.value === 'extension') {
         const target = (() => { try { return new URL(url.value.trim()).origin; } catch { return '(enter the URL above)'; } })();
         const status = el('div', { class: 'setup-result ' + (H.ext.available() ? 'ok' : 'err') }, [H.ext.available() ? `✓ Extension installed (v${H.ext.version()}). Make sure ${target} is in its allowed sites.` : '✕ Extension not detected on this page.']);
-        H.bus.on('ext', () => { status.className = 'setup-result ok'; status.textContent = `✓ Extension installed (v${H.ext.version()}). Make sure ${target} is in its allowed sites.`; });
+        /* the route can be switched back and forth all day: unsubscribe once this line is off the page, or every
+           switch leaves another handler behind holding a detached node */
+        const offExt = H.bus.on('ext', () => {
+          if (!status.isConnected) return offExt();
+          status.className = 'setup-result ok'; status.textContent = `✓ Extension installed (v${H.ext.version()}). Make sure ${target} is in its allowed sites.`;
+        });
         routeDetail.append(
           el('p', { class: 'help' }, ['A tiny extension (in the "extension" folder of the harness download) performs the REST calls for allowed sites, with your browser login or the token from step 2. No tab to keep open, no admin, survives sleep and navigation.']),
           el('ol', { class: 'help-list' }, [
@@ -1381,8 +1405,10 @@ H.ui = (() => {
       ]));
     };
     render();
-    /* a skill written from a chat while this dialog is open should appear here, not on the next visit */
+    /* a skill written from a chat while this dialog is open should appear here, not on the next visit.
+       The panel is rebuilt whenever the section changes, so the check runs on every event, not only after one. */
     const off = H.bus.on('skills', () => { if (wrap.isConnected) render(); else off(); });
+    panelCleanups.push(off);
     return wrap;
   }
   function skillEditor(s, done) {
@@ -1562,7 +1588,7 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
       searchBox.append(
         urlField('Search URL', 'searchTemplate', { id: false, placeholder: 'https://…/search?q={q}&format=json', help: '{q} is where the query goes. The endpoint has to answer with JSON and allow requests from this page.' }),
         field('API key header', 'searchKeyHeader', 'text', { placeholder: 'e.g. X-Subscription-Token — leave empty if the endpoint needs no key' }),
-        secretField('API key value', () => H.settings.get('searchKeyValue') || '', (v) => H.settings.set({ searchKeyValue: v }), 'searchKeyValue', 'the token for that header'),
+        secretField('API key value', () => H.settings.searchKey(), (v) => H.settings.setSearchKey(v), 'searchKey', 'the token for that header'),
       );
     }
     paintSearch();
@@ -1598,7 +1624,7 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
   function privacyPanel() {
     return el('div', {}, [
       sec('Where your data lives', 'All of it stays in this browser profile. There is no server, no account, no analytics and no telemetry.', [el('table', { class: 'table' }, [el('tbody', {}, [
-        ['Settings, tool policies, skills, plugin manifests', 'localStorage'], ['API key and plugin credentials', H.secrets.persist() ? 'localStorage (remembered)' : 'sessionStorage (this tab only)'], ['Chats, memories, usage counters', 'IndexedDB'], ['Workspace files', 'your local folder, reached through the File System Access API only after you pick it'],
+        ['Settings, tool policies, skills, plugin manifests', 'localStorage'], ['API key, plugin credentials, web-search key', H.secrets.persist() ? 'localStorage (remembered)' : 'sessionStorage (this tab only)'], ['Chats, memories, usage counters', 'IndexedDB'], ['Workspace files', 'your local folder, reached through the File System Access API only after you pick it'],
       ].map(([a, b]) => el('tr', {}, [el('td', {}, [a]), el('td', { class: 'mono small' }, [b])])))])]),
       sec('Secrets', null, [
         toggle('Remember the API key and plugin credentials', 'persistSecrets', null, {
@@ -1644,7 +1670,8 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
 
   /* ---------------- import / export ---------------- */
   async function exportAll() {
-    const data = { version: 2, exported: new Date().toISOString(), settings: { ...H.settings.get(), searchKeyValue: undefined }, perms: H.perms.rules(), plugins: JSON.parse(H.plugins.exportAll()), skills: H.skills.list(), chats: await H.db.allChats(), memory: await H.db.memAll() };
+    /* secrets never leave: the API key and plugin credentials live in H.secrets and are simply not read here */
+    const data = { version: 2, exported: new Date().toISOString(), settings: H.settings.get(), perms: H.perms.rules(), plugins: JSON.parse(H.plugins.exportAll()), skills: H.skills.list(), chats: await H.db.allChats(), memory: await H.db.memAll() };
     H.download('harness-export.json', JSON.stringify(data, null, 2), 'application/json');
   }
   function importAll() {
@@ -1652,9 +1679,22 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     i.onchange = async () => {
       try {
         const d = JSON.parse(await H.readFileAsText(i.files[0]));
-        if (d.settings) { delete d.settings.apiKey; H.settings.set(Object.fromEntries(Object.entries(d.settings).filter(([, v]) => v !== undefined))); }
+        /* say what the file will change before it changes it — an export can carry plugins, permission rules and
+           chats from anyone, and the plugin manifests can carry code expressions */
+        const counts = [[d.plugins?.length, 'plugin'], [d.perms && Object.keys(d.perms).length, 'permission rule'], [d.skills?.length, 'skill'], [d.chats?.length, 'chat'], [d.memory?.length, 'memory']]
+          .filter(([n]) => n).map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`);
+        if (!confirm(`Import ${counts.join(', ') || 'nothing'}${d.settings ? ' and overwrite your settings' : ''}?\n\nExisting items with the same name or id are replaced. Your API key and plugin credentials are never in an export and are kept as they are.`)) return;
+        if (d.settings) {
+          delete d.settings.apiKey; delete d.settings.searchKeyValue;   // secrets are never imported, whatever the file says
+          H.settings.set(Object.fromEntries(Object.entries(d.settings).filter(([, v]) => v !== undefined)));
+        }
         if (d.perms) for (const [k, v] of Object.entries(d.perms)) H.perms.setRule(k, v);
-        if (d.plugins) for (const p of d.plugins) { const ex = H.plugins.get(p.id); H.plugins.upsert(ex ? { ...p, auth: ex.auth, headers: { ...(p.headers || {}), ...(ex.headers || {}) } } : p); }
+        /* through importJSON, so a manifest carrying transform/prepare/pathFn asks the same question it asks
+           when it arrives on its own — the credentials already stored here survive the replacement */
+        if (d.plugins?.length) {
+          const merged = d.plugins.map(p => { const ex = H.plugins.get(p.id); return ex ? { ...p, auth: ex.auth, headers: { ...(p.headers || {}), ...(ex.headers || {}) } } : p; });
+          H.plugins.importJSON(JSON.stringify(merged));
+        }
         if (d.skills) for (const s of d.skills) H.skills.upsert(s);
         if (d.chats) for (const c of d.chats) await H.db.putChat(c);
         if (d.memory) for (const m of d.memory) await H.db.memSet(m.key, m.value, m.tags);
@@ -1837,12 +1877,12 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
       if (broken.length) return openSettings('plugins');
       H.toast('All plugins connected ✓', 'success', 2500);
     };
-    H.bus.on('workspace', (n) => { updateWorkspaceBtn(n); if (!$('#ws-menu').classList.contains('hidden')) renderWorkspaceMenu(); });
+    H.bus.on('workspace', (n) => { updateWorkspaceBtn(n); renderChatList(); if (!$('#ws-menu').classList.contains('hidden')) renderWorkspaceMenu(); });
     H.bus.on('git-state', () => updateWorkspaceBtn());
     H.bus.on('preview', showPreview);
     H.bus.on('settings', (s) => { if (modePick?.value !== s.chatMode) updateModeUI(); if (modelPick?.value !== s.model) setModelOptions(s.models || [], s.model); });
     H.bus.on('perm-prompt', () => { try { if (document.hidden && Notification.permission === 'granted') new Notification('Permission needed', { body: 'The assistant is waiting for your approval.' }); } catch { } });
   }
 
-  return { init, renderChat, renderChatList, refreshModels, openSettings, setStatus, updateWorkspaceBtn, md, updateContextMeter, applyTheme };
+  return { init, renderChat, renderChatList, refreshModels, openSettings, setStatus, updateWorkspaceBtn, updateContextMeter, applyTheme };
 })();

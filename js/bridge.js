@@ -242,11 +242,8 @@ ka.onclick=()=>{if(st.ka){try{st.ka.osc.stop();st.ka.ctx.close();}catch(e){}st.k
 if(!b.querySelector('[data-x]')){const x=document.createElement('span');x.dataset.x=1;x.textContent='  \\u2715';x.style.cssText='cursor:pointer;margin-left:12px';x.onclick=()=>{clearInterval(st.t);if(st.fr)st.fr.remove();if(st.ka){try{st.ka.osc.stop();st.ka.ctx.close();}catch(e){}}delete window.__llmBridge;b.remove();};b.append(x);}})();`;
     return 'javascript:' + encodeURIComponent(src);
   }
-  /** the bookmarklet code as plain JS (for tests and the extension) */
-  const bookmarkletSource = () => decodeURIComponent(bookmarklet().slice('javascript:'.length));
-
   /** minimal end-to-end check: GET the site root through the bridge */
   async function ping(origin) { const r = await fetch(origin + '/', { method: 'GET', headers: {}, timeout: 15000 }); return { status: r.status, ok: r.ok, bytes: (r.body || '').length }; }
   function diagnostics() { return ['harness: ' + location.href.split('#')[0], 'origin: ' + myOrigin, 'identity: ' + (ident ? ident.pub.slice(0, 16) + '…' : 'none') + (secure ? '' : ' (no Web Crypto: plaintext protocol)'), 'bridges: ' + JSON.stringify(list()), 'pending: ' + pending.size, 'log:', ...log].join('\n'); }
-  return { fetch, ping, has, list, legacy, health, bookmarklet, bookmarkletSource, openSite, diagnostics, usable, init, identity: () => ident, embedded: () => window.top !== window || location.hash.includes('embedded') };
+  return { fetch, ping, has, list, legacy, health, bookmarklet, openSite, diagnostics, usable, init, identity: () => ident, embedded: () => window.top !== window || location.hash.includes('embedded') };
 })();

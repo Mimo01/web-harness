@@ -116,8 +116,6 @@ H.runtime = (() => {
       catch (e) { clearTimeout(timer); pyPending.delete(id); resolve({ error: 'Could not start Python: ' + e.message, stdout: '', stderr: '' }); }
     });
   }
-  const getPyodide = () => { throw new Error('Pyodide runs in a worker; use runPython'); };
-
   /* ---- HTML preview in a sandboxed iframe / new tab ---- */
   /* A srcdoc iframe inherits the page CSP (connect-src *), so model-authored HTML gets its own, stricter policy injected:
      no fetch/XHR/WebSocket, no form posts, no frames, images/media only inline; scripts and styles inline or from the
@@ -146,5 +144,5 @@ H.runtime = (() => {
     if (r.error) throw new Error(`${kind} expression failed: ${String(r.error).split('\n')[0]}`);
     return r.result;
   }
-  return { runJS, runPython, previewHTML, hardenHTML, PREVIEW_CSP, getPyodide, evalExpr, pyodideLoaded: () => pyReady };
+  return { runJS, runPython, previewHTML, evalExpr, pyodideLoaded: () => pyReady };
 })();

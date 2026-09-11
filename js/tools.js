@@ -144,7 +144,7 @@ H.tools = (() => {
       includeNoisy: bool('Also search lockfiles and generated files'),
       refresh: bool('Re-scan the workspace instead of using the cached file index'),
     }, ['query']),
-    run: async (a) => ok(await H.code.search(a)),
+    run: async (a, ctx) => ok(await H.code.search({ ...a, signal: ctx?.signal })),
   });
   def({
     name: 'fs_find', group: 'Files', risk: 'safe',
@@ -434,7 +434,7 @@ H.tools = (() => {
       if (!tpl) throw new Error('web_search is disabled: no search provider is configured (Settings > Security & web). Ask the user to configure one, or use open_url to open a search page for them.');
       const url = tpl.replace('{q}', encodeURIComponent(query));
       const headers = { 'Accept': 'application/json, text/plain' };
-      const hk = H.settings.get('searchKeyHeader'), hv = H.settings.get('searchKeyValue');
+      const hk = H.settings.get('searchKeyHeader'), hv = H.settings.searchKey();
       if (hk && hv) headers[hk] = hv;
       const r = await fetchWithProxy(url, { headers, signal: ctx?.signal }, { allowProxy: !(hk && hv) });   // a keyed search API is never sent via the proxy
       if (!r.ok) throw new Error(`Search HTTP ${r.status}: ${H.clamp(await r.text(), 500)}`);
@@ -480,8 +480,15 @@ H.tools = (() => {
   def({
     name: 'open_url', rerun: 'Open again', group: 'Web', risk: 'write',
     description: 'Open a URL in a new browser tab for the user.',
-    parameters: obj({ url: str('URL') }, ['url']),
-    run: async ({ url }) => { const w = window.open(url, '_blank', 'noopener'); if (!w) throw new Error('The browser blocked the new tab (popup blocker). Tell the user the URL so they can open it themselves: ' + url); return ok({ opened: url }); },
+    parameters: obj({ url: str('Absolute http(s) URL') }, ['url']),
+    /* http(s) only, like web_fetch and http_request. A blob: or data: URL minted by run_javascript would open a
+       document on *this* origin, with reach into the harness's own storage; javascript: is the same problem. */
+    run: async ({ url }) => {
+      if (!/^https?:\/\//i.test(String(url))) throw new Error(`open_url only opens absolute http(s) URLs, got "${H.clamp(String(url), 120)}". blob:, data:, file: and javascript: URLs are refused because they would run on the harness's own origin.`);
+      const w = window.open(url, '_blank', 'noopener');
+      if (!w) throw new Error('The browser blocked the new tab (popup blocker). Tell the user the URL so they can open it themselves: ' + url);
+      return ok({ opened: url });
+    },
   });
 
   /* ===================== DATA ===================== */
@@ -495,7 +502,16 @@ H.tools = (() => {
     name: 'regex_extract', group: 'Data', risk: 'safe',
     description: 'Extract all matches of a regex from text.',
     parameters: obj({ text: str('Input text'), pattern: str('Regular expression'), flags: str('Regex flags (default "g")') }, ['text', 'pattern']),
-    run: async ({ text, pattern, flags = 'g' }) => { const re = new RegExp(pattern, flags.includes('g') ? flags : flags + 'g'); const out = []; let m; while ((m = re.exec(text)) && out.length < 1000) { out.push(m.length > 1 ? m.slice(1) : m[0]); if (!m[0]) re.lastIndex++; } return ok({ matches: out }); },
+    run: async ({ text, pattern, flags = 'g' }) => {
+      const MAX_INPUT = 2_000_000;
+      const src = String(text ?? '');
+      const truncated = src.length > MAX_INPUT;
+      const re = new RegExp(H.safeRegex(pattern), flags.includes('g') ? flags : flags + 'g');
+      const out = []; let m;
+      const hay = truncated ? src.slice(0, MAX_INPUT) : src;
+      while ((m = re.exec(hay)) && out.length < 1000) { out.push(m.length > 1 ? m.slice(1) : m[0]); if (!m[0]) re.lastIndex++; }
+      return ok({ matches: out, truncated: truncated || undefined, note: truncated ? `Only the first ${MAX_INPUT} characters of ${src.length} were searched.` : undefined });
+    },
   });
   def({
     name: 'csv_parse', group: 'Data', risk: 'safe',
@@ -658,7 +674,7 @@ H.tools = (() => {
     description: 'Delegate a self-contained task to a fresh sub-agent (same model, same tools) with its own context window. Returns its final answer. Useful for long research or big file exploration.',
     parameters: obj({ task: str('Complete task description with all needed context'), maxIterations: num('Max tool iterations (default 15)') }, ['task']),
     run: async ({ task, maxIterations = 15 }, ctx) => {
-      const res = await H.agent.runOnce({ task, maxIterations, onStatus: ctx.onStatus, signal: ctx.signal });
+      const res = await H.agent.runOnce({ task, maxIterations, onStatus: ctx.onStatus, signal: ctx.signal, runFolder: ctx.runFolder });
       return ok({ answer: res });
     },
   });

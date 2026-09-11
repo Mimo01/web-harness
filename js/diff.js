@@ -13,8 +13,13 @@ H.diff = (() => {
     if (!N) return [{ t: '+', lines: b }];
     if (!M) return [{ t: '-', lines: a }];
     if (MAX > 20000) return [{ t: '-', lines: a }, { t: '+', lines: b }];   // too big to be worth an exact script
+    /* the trace costs one Int32Array(2*MAX+1) per edit-distance step, so the *distance* has to be capped too:
+       two large regions with nothing in common would otherwise allocate gigabytes before finishing. Past the cap
+       the diff degrades to "replaced wholesale", which is what such a pair looks like anyway. */
+    const DMAX = Math.min(MAX, Math.max(300, Math.floor(8e6 / (2 * MAX + 1))));   // ~64 MB ceiling for the trace
     const V = new Int32Array(2 * MAX + 1); const trace = [];
     for (let d = 0; d <= MAX; d++) {
+      if (d > DMAX) return [{ t: '-', lines: a }, { t: '+', lines: b }];
       trace.push(V.slice());
       for (let k = -d; k <= d; k += 2) {
         let x = (k === -d || (k !== d && V[k - 1 + MAX] < V[k + 1 + MAX])) ? V[k + 1 + MAX] : V[k - 1 + MAX] + 1;

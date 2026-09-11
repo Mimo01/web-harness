@@ -6,6 +6,7 @@
    server can read any file the user can read. Run it on your own machine, not anywhere shared. */
 const http = require('http'), fs = require('fs'), path = require('path'), cp = require('child_process');
 const root = path.resolve(__dirname, '..');
+const PORT = Number(process.env.PORT) || 8765;   // so a second checkout (or a second session) can serve alongside the first
 const types = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.md': 'text/markdown', '.svg': 'image/svg+xml' };
 const GIT_OK = new Set(['rev-parse', 'log', 'status', 'ls-tree', 'cat-file', 'diff', 'show', 'branch', 'blame', 'ls-files', 'rev-list', 'for-each-ref', 'count-objects']);
 
@@ -62,4 +63,4 @@ http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': types[path.extname(f)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(data);
   });
-}).listen(8765, '127.0.0.1', () => console.log('serving', root, 'on http://127.0.0.1:8765'));
+}).listen(PORT, '127.0.0.1', () => console.log('serving', root, 'on http://127.0.0.1:' + PORT));

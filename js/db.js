@@ -3,7 +3,8 @@
    chat, written once), `chatIndex` holds one small record per chat (title, time, counts, search text, usage) so the
    sidebar and startup never read message bodies. In memory a chat always carries its images inline.
    v3 adds `folders` (every workspace folder the user ever picked, with its directory handle) and `journal`
-   (what each chat changed on disk, with the previous contents, so a write can be undone). */
+   (what each chat changed on disk, with the previous contents, so a write can be undone).
+   `memory` holds the model's own persistent notes (memory_save / memory_get), keyed by name. */
 H.db = (() => {
   const NAME = 'llm-harness', VER = 3;
   let dbp;
@@ -53,7 +54,7 @@ H.db = (() => {
 
   function open() {
     if (dbp) return dbp;
-    dbp = new Promise((res, rej) => {
+    const p = new Promise((res, rej) => {
       const req = indexedDB.open(NAME, VER);
       req.onupgradeneeded = (e) => {
         const db = e.target.result, t = e.target.transaction;
@@ -86,8 +87,15 @@ H.db = (() => {
       };
       req.onsuccess = () => res(req.result);
       req.onerror = () => rej(req.error);
-      req.onblocked = () => rej(new Error('The database is open in another tab with an older version; close that tab and reload.'));
+      req.onblocked = () => rej(Object.assign(new Error('The database is open in another tab with an older version; close that tab and reload.'), { blocked: true }));
     });
+    /* a failure must not be remembered: another tab holding an older version, or a transient storage error,
+       would otherwise poison every later call for the lifetime of this page */
+    p.catch((e) => {
+      if (dbp === p) dbp = null;
+      if (e?.blocked) try { H.toast(e.message, 'error', 15000); } catch { }
+    });
+    dbp = p;
     return dbp;
   }
   /* run fn(store) or fn(transaction) inside one transaction; fn may return a request, a value, or a function evaluated on completion */
@@ -137,11 +145,9 @@ H.db = (() => {
     kvDel: (k) => tx('kv', 'readwrite', s => s.delete(k)),
     folders: () => all('folders'),
     folderPut: (f) => tx('folders', 'readwrite', s => s.put(f)),
-    folderDel: (id) => tx('folders', 'readwrite', s => s.delete(id)),
     journalPut: (rec) => tx('journal', 'readwrite', s => s.put(rec)),
     journalOf: (chat) => tx('journal', 'readonly', s => s.index('chat').getAll(chat)),
     journalDel: (id) => tx('journal', 'readwrite', s => s.delete(id)),
-    journalAll: () => all('journal'),
     journalClear: (chat) => tx('journal', 'readwrite', s => { if (!chat) return s.clear(); s.index('chat').openKeyCursor(IDBKeyRange.only(chat)).onsuccess = (e) => { const c = e.target.result; if (!c) return; s.delete(c.primaryKey); c.continue(); }; }),
     memGet: (k) => tx('memory', 'readonly', s => s.get(k)),
     memAll: () => all('memory'),

@@ -25,10 +25,17 @@ H.llm = (() => {
     if (tools && tools.length) { body.tools = tools; body.tool_choice = 'auto'; }
     if (body.stream) body.stream_options = { include_usage: true };
 
-    /* transient failures (429, 5xx, dropped connection) are retried with backoff, as long as nothing was streamed yet */
-    let r, attempt = 0, delivered = false;
-    const origDelta = onDelta;
-    const wrapDelta = origDelta ? (d) => { delivered = true; origDelta(d); } : null;
+    /* transient failures (429, 5xx, dropped connection) are retried with backoff. Nothing has been streamed while
+       this loop runs — the body is only read after it — so a retry can never duplicate text the caller has seen. */
+    /* one abortable sleep for both retry paths: Stop must not have to wait out the backoff, and the abort
+       listener has to come off the signal again or three retries leave three listeners behind */
+    const backoff = (ms) => new Promise((res, rej) => {
+      if (signal?.aborted) return rej(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      const onAbort = () => { clearTimeout(timer); rej(Object.assign(new Error('aborted'), { name: 'AbortError' })); };
+      const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); res(); }, ms);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+    let r, attempt = 0;
     while (true) {
       try {
         r = await fetch(url('/v1/chat/completions'), { method: 'POST', headers: headers(), body: JSON.stringify(body), signal });
@@ -38,16 +45,15 @@ H.llm = (() => {
         if (!transient || attempt >= 3) throw new Error(`LLM HTTP ${r.status}: ${H.clamp(t, 2000)}`);
         const ra = parseFloat(r.headers.get('retry-after')); const wait = (isFinite(ra) ? ra * 1000 : 1000 * 2 ** attempt) + Math.random() * 300;
         H.toast(`LiteLLM answered ${r.status}; retrying in ${Math.round(wait / 1000)} s (${attempt + 1}/3)…`, 'warn', wait);
-        await new Promise((res, rej) => { const t = setTimeout(res, wait); signal?.addEventListener('abort', () => { clearTimeout(t); rej(Object.assign(new Error('aborted'), { name: 'AbortError' })); }, { once: true }); });
+        await backoff(wait);
         attempt++;
       } catch (e) {
-        if (e.name === 'AbortError' || delivered || attempt >= 3 || !/Failed to fetch|NetworkError|Load failed|network/i.test(e.message)) throw e;
+        if (e.name === 'AbortError' || attempt >= 3 || !/Failed to fetch|NetworkError|Load failed|network/i.test(e.message)) throw e;
         const wait = 1000 * 2 ** attempt + Math.random() * 300;
         H.toast(`Connection to LiteLLM failed; retrying in ${Math.round(wait / 1000)} s (${attempt + 1}/3)…`, 'warn', wait);
-        await new Promise((res) => setTimeout(res, wait)); attempt++;
+        await backoff(wait); attempt++;
       }
     }
-    onDelta = wrapDelta;
     if (!body.stream) {
       const j = await r.json();
       const m = j.choices?.[0]?.message || {};
@@ -55,6 +61,7 @@ H.llm = (() => {
       return { content: m.content || '', reasoning: m.reasoning_content || '', tool_calls: m.tool_calls || [], usage: j.usage, finish_reason: j.choices?.[0]?.finish_reason };
     }
     // SSE parsing
+    if (!r.body) throw new Error(`LiteLLM answered HTTP ${r.status} with an empty body where a stream was expected. Check that the proxy supports streaming for this model, or turn streaming off in Settings › General.`);
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = '', raw = '', sawData = false, content = '', reasoning = '', usage = null, finish = null;
@@ -76,7 +83,9 @@ H.llm = (() => {
         toolCalls[i] ||= { id: '', type: 'function', function: { name: '', arguments: '' } };
         const cur = toolCalls[i];
         if (tc.id && !cur.id) cur.id = tc.id;                                   // ids are not incremental
-        if (tc.function?.name && !cur.function.name.includes(tc.function.name)) cur.function.name += tc.function.name;
+        /* names arrive either in pieces ("fs" + "_read") or repeated whole each chunk ("get_" then
+           "get_datetime"): a repeat starts with what we already have and replaces it, anything else is appended */
+        if (tc.function?.name) cur.function.name = tc.function.name.startsWith(cur.function.name) ? tc.function.name : cur.function.name + tc.function.name;
         if (tc.function?.arguments) {
           const d = tc.function.arguments, acc = cur.function.arguments;
           if (acc && d.length >= acc.length && d.startsWith(acc)) cur.function.arguments = d;   // cumulative style

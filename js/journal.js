@@ -14,15 +14,17 @@ H.journal = (() => {
 
   let suspended = false;              // a revert is not itself a change worth recording
 
-  /** read a file's current contents, or null when it does not exist / is not worth storing */
+  /** read a file's current contents, or null when it does not exist / is not worth storing.
+      "Does it exist?" is asked first even for binaries: a binary the chat *created* can still be undone by
+      deleting it again, which needs no stored contents. */
   async function before(address) {
+    let st = null;
+    try { st = await H.fs.stat(address); } catch { }
+    if (!st || st.kind !== 'file') return { text: null, missing: true };
     if (BINARY.test(address)) return { text: null, note: 'binary file' };
-    try {
-      const st = await H.fs.stat(address);
-      if (st.kind !== 'file') return { text: null, missing: true };
-      if (st.size > MAX_FILE) return { text: null, note: `file larger than ${Math.round(MAX_FILE / 1e6)} MB` };
-      return { text: await H.fs.readFile(address), size: st.size };
-    } catch { return { text: null, missing: true }; }
+    if (st.size > MAX_FILE) return { text: null, note: `file larger than ${Math.round(MAX_FILE / 1e6)} MB` };
+    try { return { text: await H.fs.readFile(address), size: st.size }; }
+    catch (e) { return { text: null, note: 'it could not be read (' + e.message + ')' }; }
   }
 
   /** called by H.fs before it changes anything; never throws — a failed recording must not block the write */
@@ -52,15 +54,36 @@ H.journal = (() => {
     H.bus.emit('journal', chat);
     prune(chat);
   }
-  let pruning = null;
+  /* Pruning has to respect what a revert actually needs. The undo baseline for a file is the *oldest* record for
+     it — the state the chat found it in — so trimming oldest-first (as this used to) throws away exactly the thing
+     "Revert" reads, and every later revert quietly restores an intermediate version instead.
+     So: drop the redundant later records for a file first (they are only history), and only if that is still not
+     enough drop whole files, oldest baseline first, marking them so the panel can say the history is gone. */
+  let pruning = null, pruneAgain = false;
   function prune(chat) {
-    if (pruning) return;
+    if (pruning) { pruneAgain = true; return; }          // a burst of writes must not skip pruning altogether
     pruning = (async () => {
       try {
-        const rows = (await H.db.journalOf(chat)).sort((a, b) => a.at - b.at);
-        let total = rows.reduce((n, r) => n + (r.bytes || 0), 0);
-        for (const r of rows) { if (total <= MAX_CHAT) break; total -= r.bytes || 0; await H.db.journalDel(r.id); }
-      } catch { } finally { pruning = null; }
+        do {
+          pruneAgain = false;
+          const rows = (await H.db.journalOf(chat)).sort((a, b) => a.at - b.at);
+          let total = rows.reduce((n, r) => n + (r.bytes || 0), 0);
+          if (total <= MAX_CHAT) break;
+          const keyOf = (r) => r.folderId + '/' + r.path;
+          const baseline = new Map();                     // key -> the oldest record, which holds `before`
+          for (const r of rows) if (!baseline.has(keyOf(r))) baseline.set(keyOf(r), r);
+          for (const r of rows) {                         // pass 1: later records for a file are history, not undo
+            if (total <= MAX_CHAT) break;
+            if (baseline.get(keyOf(r)) === r) continue;
+            total -= r.bytes || 0; await H.db.journalDel(r.id);
+          }
+          for (const r of baseline.values()) {            // pass 2: give up whole files, oldest first, and say so
+            if (total <= MAX_CHAT) break;
+            total -= r.bytes || 0;
+            await H.db.journalPut({ ...r, before: null, bytes: 0, note: 'the previous contents were dropped to stay within the history limit', dropped: true });
+          }
+        } while (pruneAgain);
+      } catch (e) { console.warn('journal prune', e); } finally { pruning = null; }
     })();
   }
 
@@ -82,7 +105,7 @@ H.journal = (() => {
     const out = [];
     for (const e of byFile.values()) {
       if (e.folderId !== here) {                    // written while this chat was in another folder
-        out.push({ ...e, address: `${e.folderName}/${e.path}`, elsewhere: e.folderName, status: 'elsewhere', unchanged: false, patch: null, now: null, exists: null });
+        out.push({ ...e, address: `${e.folderName}/${e.path}`, elsewhere: e.folderName, status: 'elsewhere', unchanged: false, revertible: false, patch: null, now: null, exists: null });
         continue;
       }
       const address = e.path;
@@ -91,6 +114,9 @@ H.journal = (() => {
       const status = !e.missing && !exists ? 'deleted' : e.missing && exists ? 'created' : 'modified';
       out.push({
         ...e, address, now, exists, status,
+        /* what revert() will actually accept: a file the chat created needs no stored contents, anything else
+           does — so a note (binary, oversized, or history the pruner dropped) rules it out */
+        revertible: !!e.missing || !e.note,
         unchanged: (e.before ?? null) === (exists ? now : null),
         patch: e.note ? null : H.diff.unified(e.missing ? null : e.before, exists ? now : null, { path: address, context: 3 }),
       });
@@ -105,8 +131,10 @@ H.journal = (() => {
     }
     suspended = true;
     try {
-      if (entry.note) throw new Error(`The previous contents of "${entry.address}" were not kept (${entry.note}).`);
+      /* a file the chat created needs no stored contents to undo, so it is revertible even when there was
+         nothing worth keeping (a binary, an oversized file, or history the pruner had to drop) */
       if (entry.missing) await H.fs.remove(entry.address).catch(() => { });   // the chat created it: remove it again
+      else if (entry.note) throw new Error(`The previous contents of "${entry.address}" were not kept (${entry.note}).`);
       else await H.fs.writeFile(entry.address, entry.before);
       await forget(entry);
       return { ok: true };

@@ -3,7 +3,7 @@ H.perms = (() => {
   const KEY = 'harness.perms.v1';
   let rules = H.tryJSON(localStorage.getItem(KEY), {});   // { toolName | 'tool@origin': 'allow'|'ask'|'deny' }
   const session = new Set();                               // tools / tool@origin keys allowed for this session
-  const save = () => { localStorage.setItem(KEY, JSON.stringify(rules)); H.bus.emit('perms', rules); };
+  const save = () => { H.store.write(KEY, rules); H.bus.emit('perms', rules); };
 
   /* default policy by tool risk level declared in tool definition */
   const defaultFor = (tool) => {

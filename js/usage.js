@@ -56,7 +56,6 @@ H.usage = (() => {
     }
     return { cost, known, partial };
   }
-  const cost_ = (m, p, c) => cost(m, p, c);
 
   /* estimate the current context size of a chat (tokens that would be sent on the next request) */
   let specsMemo = { list: null, tokens: 0 };

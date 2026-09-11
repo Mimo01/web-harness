@@ -21,7 +21,7 @@ H.plugins = (() => {
   const save = () => {
     invalidateTools();
     const pubs = plugins.map(p => { const { pub, sec } = splitSecrets(p); H.secrets.set('plugin:' + p.id, Object.keys(sec).length ? JSON.stringify(sec) : ''); return pub; });
-    localStorage.setItem(KEY, JSON.stringify(pubs)); H.bus.emit('plugins', plugins);
+    H.store.write(KEY, pubs); H.bus.emit('plugins', plugins);
   };
 
   /* ----------------------------- BUILT-IN TEMPLATES ----------------------------- */
@@ -260,7 +260,7 @@ H.plugins = (() => {
     ],
   };
   const templates = { jira: JIRA, jira2: JIRA2, git: GITHUB, gitlab: GITLAB, mcp: MCP_EXAMPLE, litellmMcp: LITELLM_MCP };
-  setTimeout(() => localStorage.setItem('harness.migrated.bridge2', '1'), 3000);
+  setTimeout(() => H.store.write('harness.migrated.bridge2', '1'), 3000);
   for (const p of plugins) {
     const t = Object.values(templates).find(x => x.id === p.id); if (!t) continue;
     p.setup = t.setup; p.notes = t.notes; p.guide = t.guide; p.headers = { ...(t.headers || {}), ...(p.headers || {}) };
@@ -290,8 +290,8 @@ H.plugins = (() => {
     const r = p.route || { type: 'direct' };
     if (r.type === 'litellm') {
       const base = H.settings.get('baseUrl').replace(/\/+$/, '') + '/' + String(r.path || p.id).replace(/^\/+|\/+$/g, '');
-      const u = new URL(fullUrl); const target = (p.kind === 'mcp' ? p.url : p.baseUrl).replace(/\/+$/, '');
-      return { url: base + fullUrl.slice(target.length), headers: { Authorization: 'Bearer ' + H.settings.apiKey(), 'x-litellm-api-key': H.settings.apiKey() }, dropAuth: !r.forwardAuth, host: u.host };
+      const target = (p.kind === 'mcp' ? p.url : p.baseUrl).replace(/\/+$/, '');
+      return { url: base + fullUrl.slice(target.length), headers: { Authorization: 'Bearer ' + H.settings.apiKey(), 'x-litellm-api-key': H.settings.apiKey() }, dropAuth: !r.forwardAuth };
     }
     if (r.type === 'bridge') return { url: fullUrl, headers: {}, dropAuth: p.auth?.type === 'none' || !!r.useSession, bridge: true };
     if (r.type === 'extension') return { url: fullUrl, headers: {}, dropAuth: p.auth?.type === 'none', ext: true };
@@ -421,7 +421,12 @@ H.plugins = (() => {
     const base = H.settings.get('baseUrl').replace(/\/+$/, '');
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + H.settings.apiKey() };
     const target = (p.baseUrl || '').replace(/\/+$/, '');
-    const fwd = { ...(p.headers || {}), ...authHeaders(p) }; delete fwd['<secret>'];
+    /* "<secret>" is the placeholder an export leaves behind as a header *value*; forwarding it would store the
+       literal string on the proxy as if it were a credential, so redacted headers are dropped and called out */
+    const fwd = { ...(p.headers || {}), ...authHeaders(p) };
+    const redacted = Object.keys(fwd).filter(k => fwd[k] === '<secret>');
+    for (const k of redacted) delete fwd[k];
+    if (redacted.length) throw new Error(`This plugin still has placeholder credentials for ${redacted.join(', ')} — it was set up from an exported manifest, which never carries secrets. Fill them in (step 2) before creating the pass-through endpoint.`);
     const body = { path: '/' + path, target, headers: fwd };
     const r = await fetch(base + '/config/pass_through_endpoint', { method: 'POST', headers, body: JSON.stringify(body) });
     const text = await r.text();
