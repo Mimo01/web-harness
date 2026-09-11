@@ -265,14 +265,13 @@ H.tools = (() => {
       paths: { type: 'array', items: { type: 'string' }, description: 'Limit to these files or directories' },
       context: num('Context lines (default 3)'), statOnly: bool('Only list changed files with their status'),
       thorough: bool('For the working-tree diff: hash every tracked file instead of trusting timestamps'),
-      downloadAs: str('Also save the full patch to the user\'s Downloads under this file name, e.g. "changes.patch"'),
     }),
-    run: async ({ from, to, paths, context, statOnly, thorough, downloadAs }) => {
+    /* No downloadAs: writing into the user's Downloads folder is not a read, and this tool is declared safe so it
+       runs without asking. To save a patch, pass it to download_file, which asks. */
+    run: async ({ from, to, paths, context, statOnly, thorough }) => {
       const r = from ? await H.git.diffRefs({ from, to: to || 'HEAD', paths, context, statOnly })
         : await H.git.diffWorktree({ paths, context, thorough });
       if (statOnly && !from) r.files = r.files.map(({ patch, ...f }) => f);
-      const full = r.files.map(f => f.patch).filter(Boolean).join('');
-      if (downloadAs) { H.download(String(downloadAs).replace(/[/\\]/g, '_'), full || '(no changes)', 'text/x-patch'); r.downloaded = downloadAs; }
       r.summary = { files: r.files.length, added: r.files.reduce((n, f) => n + (f.added || 0), 0), removed: r.files.reduce((n, f) => n + (f.removed || 0), 0) };
       return ok(clampDiff(r));
     },
@@ -396,8 +395,18 @@ H.tools = (() => {
 
   /* ===================== WEB ===================== */
   const originOf = (a) => { try { return new URL(String(a?.url || '')).origin; } catch { return null; } };
+  /* A connected bridge tab performs the request with the user's login cookies. That is a different act from
+     fetching a public page — it reads whatever that account can read — so it always confirms, whatever the mode
+     and whatever policy the tool itself carries. Shared by web_fetch and http_request. */
+  const bridgeAsk = (a, toolName) => {
+    const o = originOf(a);
+    return o && H.bridge.has(a.url)
+      ? { key: toolName + '@bridge:' + o, note: `This request would be sent through your connected browser tab for ${o}, using your login session there. It can read anything that account can read on that site. Approve only if you expect the assistant to act on ${o} as you.` }
+      : null;
+  };
   def({
     name: 'web_fetch', group: 'Web', risk: 'safe', scope: originOf,
+    mustAsk: (a) => bridgeAsk(a, 'web_fetch'),
     description: 'Fetch a URL directly from the browser and return readable text (HTML converted to markdown-ish text) or raw body. Sites that do not allow cross-origin requests cannot be fetched unless the user configured a proxy; in that case suggest open_url so the user can read the page themselves.',
     parameters: obj({ url: str('Absolute URL'), raw: bool('Return raw body instead of extracted text'), maxChars: num('Max characters to return (default 20000)') }, ['url']),
     run: async ({ url, raw = false, maxChars = 20000 }, ctx) => {
@@ -447,8 +456,7 @@ H.tools = (() => {
   });
   def({
     name: 'http_request', group: 'Web', risk: 'write', scope: originOf,
-    // A connected bridge tab would send the request with the user's login cookies: always confirm, whatever the mode.
-    mustAsk: (a) => { const o = originOf(a); return o && H.bridge.has(a.url) ? { key: 'http_request@bridge:' + o, note: `This request would be sent through your connected browser tab for ${o}, using your login session there. Approve only if you expect the assistant to act on that site as you.` } : null; },
+    mustAsk: (a) => bridgeAsk(a, 'http_request'),
     description: 'Make an arbitrary HTTP request (call any REST API). Returns status, headers and body (JSON parsed when possible).',
     parameters: obj({
       url: str('Absolute URL'), method: str('HTTP method', { enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] }),
@@ -689,8 +697,10 @@ H.tools = (() => {
     if (pluginIndexFor !== list) { pluginIndex = new Map(list.map(t => [t.name, t])); pluginIndexFor = list; }   // re-index only when the list object changes
     return pluginIndex.get(name);
   }
-  function enabled() { const dis = new Set(H.settings.get('disabledTools') || []); return all().filter(t => !dis.has(t.name) && H.perms.policyFor(t) !== 'deny' && (!t.plugin || H.plugins.get(t.plugin)?.enabled)); }
-  function openaiSpecs() { return enabled().map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters || { type: 'object', properties: {} } } })); }
+  /* `chatId` names the chat the list is for: a plan being executed lifts permissions for that chat only, and the
+     tool list it is offered has to match. Omitted = the chat on screen, which is what the UI wants. */
+  function enabled(chatId) { const dis = new Set(H.settings.get('disabledTools') || []); return all().filter(t => !dis.has(t.name) && H.perms.policyFor(t, chatId) !== 'deny' && (!t.plugin || H.plugins.get(t.plugin)?.enabled)); }
+  function openaiSpecs(chatId) { return enabled(chatId).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters || { type: 'object', properties: {} } } })); }
   function groups() { const g = {}; for (const t of all()) (g[t.group || 'Other'] ||= []).push(t); return g; }
   return { def, all, get, enabled, openaiSpecs, groups, fetchWithProxy };
 })();

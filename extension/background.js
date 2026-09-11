@@ -1,7 +1,10 @@
 /* Service worker: performs fetches on behalf of the harness page.
-   Two allow-lists (options page): harness page origins that may use the extension, and API origins it may call. */
+   Two allow-lists (options page): harness page origins that may use the extension, and API origins it may call.
+   The API origins are also real Chrome host permissions, granted one at a time from the options page — the
+   extension ships with none, so until the user adds a site it cannot read or touch anything. */
 const cfg = async () => chrome.storage.sync.get({ allowed: [], harness: [] });
 const originOf = (u) => { try { return new URL(u).origin; } catch { return ''; } };
+const granted = (origin) => chrome.permissions.contains({ origins: [origin + '/*'] }).catch(() => false);
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 
@@ -17,6 +20,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       const origin = originOf(msg.url);
       if (!allowed.includes(origin)) { sendResponse({ error: `NOT_ALLOWED:${origin}` }); return; }
+      if (!await granted(origin)) { sendResponse({ error: `NOT_GRANTED:${origin}` }); return; }
       const init = { method: msg.method || 'GET', headers: msg.headers || {}, credentials: msg.credentials === 'omit' ? 'omit' : 'include', redirect: 'follow' };
       if (msg.body !== undefined && init.method !== 'GET' && init.method !== 'HEAD') init.body = msg.body;
       const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), msg.timeout || 60000); init.signal = ctl.signal;

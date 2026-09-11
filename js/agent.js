@@ -141,7 +141,7 @@ When you have enough information, write a concrete, numbered implementation plan
 
   const chatIdOf = (messages) => { for (const c of live.values()) if (c.messages === messages) return c.id; return chat?.id; };
   async function loop(messages, { onEvent, signal, maxIterations, onUsage, mode, subagent = false, runFolder = null, chatId = null }) {
-    const tools = H.tools.openaiSpecs();
+    const tools = H.tools.openaiSpecs(chatId || chatIdOf(messages));
     const model = H.settings.get('model');
     let finalText = '';
     const seen = new Map();   // "name|args" -> { count, lastResult } for the loop guard
@@ -216,7 +216,7 @@ When you have enough information, write a concrete, numbered implementation plan
       // 2) run them: consecutive read-only calls that need no permission prompt run in parallel; everything else one at a time, in order
       /* the same lenient parse execution will use, so a call whose arguments need repairing is not mistaken for
          one that will not prompt — that is how two permission modals end up stacked on top of each other */
-      const parallelOk = (it) => { const t = H.tools.get(it.tc.function.name); if (!t) return false; const a = H.parseArgs(it.tc.function.arguments).value; return t.risk === 'safe' && H.perms.policyFor(t) === 'allow' && !['ask_user', 'run_subagent', 'sleep', 'fs_upload_from_user'].includes(t.name) && !H.perms.willPrompt(t, a && typeof a === 'object' ? a : {}); };
+      const parallelOk = (it) => { const t = H.tools.get(it.tc.function.name); if (!t) return false; const a = H.parseArgs(it.tc.function.arguments).value; const forChat = chatId || chatIdOf(messages); return t.risk === 'safe' && H.perms.policyFor(t, forChat) === 'allow' && !['ask_user', 'run_subagent', 'sleep', 'fs_upload_from_user'].includes(t.name) && !H.perms.willPrompt(t, a && typeof a === 'object' ? a : {}, forChat); };
       for (let i = 0; i < items.length;) {
         if (parallelOk(items[i])) { let j = i; while (j < items.length && parallelOk(items[j])) j++; await Promise.all(items.slice(i, j).map(execOne)); i = j; }
         else { await execOne(items[i]); i++; }
@@ -325,11 +325,11 @@ When you have enough information, write a concrete, numbered implementation plan
     const f = H.fs.folder();
     const runFolder = f ? { id: f.id, name: f.name } : null;   // the folder this run belongs to, for the whole run
     runs.set(c.id, { abort: ctl, folder: runFolder }); live.set(c.id, c);
-    const mode = H.perms.effectiveMode();
+    const mode = H.perms.effectiveMode(c.id);
     H.bus.emit('run-state', true, c.id);
     try {
       await loop(c.messages, {
-        signal: ctl.signal, maxIterations: H.settings.get('maxToolIterations'), mode, runFolder,
+        signal: ctl.signal, maxIterations: H.settings.get('maxToolIterations'), mode, runFolder, chatId: c.id,
         onEvent: (ev, msg) => { if (ev === 'assistant-start' || ev === 'tool-start' || ev === 'user-added') H.bus.emit('message-added', msg, c.id); else H.bus.emit('message-updated', msg, c.id); if (ev === 'assistant-end' || ev === 'tool-end') persist(c); },
         onUsage: (u, cost) => addUsage(c, u, cost),
       });
@@ -353,9 +353,10 @@ When you have enough information, write a concrete, numbered implementation plan
   /* Execute a plan produced in plan mode: switch to the chosen permission mode for this run */
   async function executePlan(permMode) {
     if (!chat || runs.has(chat.id)) return;
-    H.perms.setOverride(permMode || H.settings.get('planExecuteMode') || 'default');
+    const id = chat.id;   // the override belongs to this chat, and has to be lifted from this chat even if the user moved on
+    H.perms.setOverride(permMode || H.settings.get('planExecuteMode') || 'default', id);
     try { await send('Execute the plan above step by step. After each step, briefly confirm what was done. When everything is complete, summarize the result and any deviations from the plan.', [], { display: '▶ Execute the plan', meta: { planExec: true } }); }
-    finally { H.perms.setOverride(null); }
+    finally { H.perms.setOverride(null, id); }
   }
 
   /* Name the chat from its first exchange. Uses the model (2 attempts), falls back to the first words of the message. */
@@ -449,7 +450,7 @@ When you have enough information, write a concrete, numbered implementation plan
   async function runOnce({ task, maxIterations = 15, onStatus, signal, runFolder = null, chatId = null }) {
     const msgs = [{ role: 'user', content: task }];
     let steps = 0;
-    const text = await loop(msgs, { signal, maxIterations, subagent: true, runFolder, chatId, mode: H.perms.effectiveMode() === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
+    const text = await loop(msgs, { signal, maxIterations, subagent: true, runFolder, chatId, mode: H.perms.effectiveMode(chatId) === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
     return text || '(sub-agent produced no final text)';
   }
 

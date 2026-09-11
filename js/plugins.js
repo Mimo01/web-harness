@@ -273,6 +273,8 @@ H.plugins = (() => {
   else if (!plugins.find(p => p.id === 'jira2')) { plugins.splice(1, 0, H.deepClone(JIRA2)); save(); }
   if (!plugins.find(p => p.id === 'litellm-mcp')) { plugins.push(H.deepClone(LITELLM_MCP)); save(); }
   if (!plugins.find(p => p.id === 'gitlab')) { plugins.splice(plugins.findIndex(p => p.id === 'git') + 1, 0, H.deepClone(GITLAB)); save(); }
+  /* Tokens left behind by plugins removed before remove() cleaned up after itself. One sweep, once. */
+  { const ids = new Set(plugins.map(p => p.id)); for (const k of H.secrets.keys()) if (k.startsWith('plugin:') && !ids.has(k.slice(7))) H.secrets.del(k); }
 
   /* ----------------------------- REST EXECUTION ----------------------------- */
   function authHeaders(p) {
@@ -445,7 +447,9 @@ H.plugins = (() => {
     createPassThrough, promptSection,
     list: () => plugins, get: (id) => plugins.find(p => p.id === id), templates,
     upsert: (p) => { const i = plugins.findIndex(x => x.id === p.id); if (i >= 0) plugins[i] = p; else plugins.push(p); mcpCache.delete(p.id); invalidateTools(); save(); },
-    remove: (id) => { plugins = plugins.filter(p => p.id !== id); mcpCache.delete(id); invalidateTools(); save(); },
+    /* the credentials go with it: save() only rewrites secrets for the plugins that are left, so without this
+       the token of a removed plugin would sit in storage for the life of the browser profile */
+    remove: (id) => { plugins = plugins.filter(p => p.id !== id); mcpCache.delete(id); H.secrets.del('plugin:' + id); invalidateTools(); save(); },
     setEnabled: async (id, on) => { const p = plugins.find(x => x.id === id); if (!p) return; p.enabled = on; save(); if (on && p.kind === 'mcp') { try { await mcpConnect(p, true); invalidateTools(); H.bus.emit('plugins', plugins); } catch (e) { H.toast('MCP connect failed: ' + e.message, 'error', 6000); } } },
     tools, test, connectEnabledMcp, mcpConnect,
     exportAll: () => JSON.stringify(plugins.map(p => splitSecrets(p).pub), null, 2),

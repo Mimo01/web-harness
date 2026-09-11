@@ -57,7 +57,10 @@ http.createServer((req, res) => {
     return;
   }
 
-  const f = path.join(root, p === '/' ? '/index.html' : p);
+  /* the URL parser folds ".." and "%2e%2e" away, but leaves "%2f" encoded — and decodeURIComponent turns that back
+     into a separator, so "/..%2f..%2fetc/passwd" would escape the repo. Same guard as the dev endpoints above. */
+  const f = inside(root, p === '/' ? '/index.html' : p);
+  if (!f) { res.writeHead(403); res.end('forbidden'); return; }
   fs.readFile(f, (err, data) => {
     if (err) { res.writeHead(404); res.end('not found'); return; }
     res.writeHead(200, { 'Content-Type': types[path.extname(f)] || 'application/octet-stream', 'Cache-Control': 'no-store' });

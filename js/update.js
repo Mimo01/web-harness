@@ -23,10 +23,13 @@ H.update = (() => {
   function notify(v) {
     const box = H.$('#toasts');
     if (box.querySelector('.update-toast')) return;
+    /* the whole record comes off the network: an href is the one field that could do something on this origin
+       (javascript:, data:), so anything that is not plain http(s) falls back to the repository page */
+    const href = /^https?:\/\//i.test(String(v.url || '')) ? v.url : H.ABOUT.repoUrl;
     const t = H.el('div', { class: 'toast update-toast' }, [
       H.el('div', {}, [H.el('b', {}, [`Version ${v.version} is available`]), H.el('div', { class: 'small muted' }, [`You are running ${H.ABOUT.version}.` + (v.notes ? ' ' + v.notes : '')])]),
       H.el('div', { class: 'row gap', style: 'margin-top:8px' }, [
-        H.el('a', { class: 'btn sm primary', href: v.url || H.ABOUT.repoUrl, target: '_blank', rel: 'noopener' }, ['Download']),
+        H.el('a', { class: 'btn sm primary', href, target: '_blank', rel: 'noopener' }, ['Download']),
         H.el('button', { class: 'btn sm ghost', onclick: () => { H.store.write('harness.update.dismissed', v.version); t.remove(); } }, ['Later']),
       ]),
     ]);

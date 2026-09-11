@@ -13,10 +13,17 @@ H.perms = (() => {
     return 'ask'; // 'write'
   };
 
-  let override = null; // temporary mode override (e.g. while executing a plan)
-  function effectiveMode() { return override || H.settings.get('chatMode') || 'default'; }
-  function policyFor(tool) {
-    const mode = effectiveMode();
+  /* A mode override belongs to one chat (it is how "Execute the plan" lifts permissions for that run). Chats keep
+     running in the background, so a single global would hand every other chat the same lifted permissions for as
+     long as the plan runs. Keyed by chat; callers that know which chat they are acting for say so. */
+  const overrides = new Map();   // chatId -> mode
+  const currentChat = () => { try { return H.agent?.current?.()?.id || null; } catch { return null; } };
+  function effectiveMode(chatId) {
+    const id = chatId ?? currentChat();
+    return (id && overrides.get(id)) || H.settings.get('chatMode') || 'default';
+  }
+  function policyFor(tool, chatId) {
+    const mode = effectiveMode(chatId);
     const explicit = rules[tool.name];
     if (explicit === 'deny') return 'deny';
     if (mode === 'plan') return tool.risk === 'safe' ? (H.settings.get('alwaysAsk') ? 'ask' : 'allow') : 'deny';
@@ -38,12 +45,12 @@ H.perms = (() => {
     : { ok: false, reason: 'User denied this tool call.' + (decision && decision.startsWith('msg:') ? ' Message: ' + decision.slice(4) : '') };
 
   /** true when check() would show a prompt for these arguments (keeps prompting calls out of parallel batches) */
-  function willPrompt(tool, args) {
+  function willPrompt(tool, args, chatId) {
     if (tool.mustAsk) { const f = tool.mustAsk(args); if (f && !session.has(f.key)) return true; }
-    const p = policyFor(tool);
+    const p = policyFor(tool, chatId);
     if (p !== 'allow') return p === 'ask';
     const sk = scopeKey(tool, args);
-    return !!sk && effectiveMode() !== 'auto' && rules[tool.name] !== 'allow' && rules[sk] !== 'allow' && !session.has(sk);
+    return !!sk && effectiveMode(chatId) !== 'auto' && rules[tool.name] !== 'allow' && rules[sk] !== 'allow' && !session.has(sk);
   }
 
   /** returns { ok, reason? }. May prompt the user. */
@@ -59,13 +66,13 @@ H.perms = (() => {
       return { ok: true };
     }
     // 2) policy by tool
-    const p = policyFor(tool);
+    const p = policyFor(tool, ctx?.chatId);
     if (p === 'deny') return { ok: false, reason: 'Denied by permission policy.' };
     const sk = scopeKey(tool, args), key = sk || tool.name;
     if (sk && rules[sk] === 'deny') return { ok: false, reason: `Denied by permission policy for ${sk.slice(tool.name.length + 1)}.` };
     if (session.has(key) || (sk && rules[sk] === 'allow')) return { ok: true };
     // 3) a "safe" scoped tool still asks once per origin unless the whole tool was explicitly always-allowed, or mode is Allow all
-    const scopedAsk = p === 'allow' && sk && effectiveMode() !== 'auto' && rules[tool.name] !== 'allow';
+    const scopedAsk = p === 'allow' && sk && effectiveMode(ctx?.chatId) !== 'auto' && rules[tool.name] !== 'allow';
     if (p === 'allow' && !scopedAsk) return { ok: true };
     const scope = sk ? sk.slice(tool.name.length + 1) : null;
     const decision = await prompt(tool, args, ctx, scope ? { scope, note: `First ${tool.name} request to ${scope} in this session. Data in the URL or body leaves your browser for that site.` } : {});
@@ -118,7 +125,8 @@ H.perms = (() => {
   }
 
   return {
-    check, willPrompt, policyFor, defaultFor, effectiveMode, setOverride: (m) => { override = m; H.bus.emit('mode', effectiveMode()); },
+    check, willPrompt, policyFor, defaultFor, effectiveMode,
+    setOverride: (m, chatId) => { const id = chatId ?? currentChat(); if (!id) return; if (m) overrides.set(id, m); else overrides.delete(id); H.bus.emit('mode', effectiveMode(id)); },
     rules: () => rules,
     setRule: (name, pol) => { if (pol === 'default') delete rules[name]; else rules[name] = pol; save(); },
     clearSession: () => session.clear(),
