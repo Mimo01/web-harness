@@ -10,7 +10,8 @@ let html = fs.readFileSync(idx, 'utf8').replace(/window\.APP_VERSION = '[^']*'/,
 // the CSP allows the two inline scripts by hash; the version script changes each release, so recompute
 const crypto = require('crypto');
 const hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => "'sha256-" + crypto.createHash('sha256').update(m[1]).digest('base64') + "'").join(' ');
-html = html.replace(/(script-src [^;]*?)('sha256-[^;]*)?;/, (all, pre) => `${pre.replace(/\s+'sha256-.*$/, '')} ${hashes};`);
+// trimEnd matters: the old hashes are captured separately, so without it the gap before them grows by a space per release
+html = html.replace(/(script-src [^;]*?)('sha256-[^;]*)?;/, (all, pre) => `${pre.replace(/\s+'sha256-.*$/, '').trimEnd()} ${hashes};`);
 fs.writeFileSync(idx, html);
 const v = JSON.parse(fs.readFileSync(vj, 'utf8')); v.version = ver; v.date = new Date().toISOString().slice(0, 10); if (notes) v.notes = notes;
 fs.writeFileSync(vj, JSON.stringify(v, null, 2) + '\n');
