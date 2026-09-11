@@ -1,9 +1,11 @@
 /* IndexedDB persistence for chats + key/value store.
    v2 layout: `chats` holds full chats with image data replaced by references, `blobs` holds the image data (keyed by
    chat, written once), `chatIndex` holds one small record per chat (title, time, counts, search text, usage) so the
-   sidebar and startup never read message bodies. In memory a chat always carries its images inline. */
+   sidebar and startup never read message bodies. In memory a chat always carries its images inline.
+   v3 adds `folders` (every workspace folder the user ever picked, with its directory handle) and `journal`
+   (what each chat changed on disk, with the previous contents, so a write can be undone). */
 H.db = (() => {
-  const NAME = 'llm-harness', VER = 2;
+  const NAME = 'llm-harness', VER = 3;
   let dbp;
   const known = new Set();   // blob ids already in the store (written once, never rewritten)
 
@@ -60,6 +62,8 @@ H.db = (() => {
         if (!db.objectStoreNames.contains('memory')) db.createObjectStore('memory', { keyPath: 'key' });
         if (!db.objectStoreNames.contains('chatIndex')) db.createObjectStore('chatIndex', { keyPath: 'id' }).createIndex('updated', 'updated');
         if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs', { keyPath: 'id' }).createIndex('chat', 'chat');
+        if (!db.objectStoreNames.contains('folders')) db.createObjectStore('folders', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('journal')) { const j = db.createObjectStore('journal', { keyPath: 'id' }); j.createIndex('chat', 'chat'); j.createIndex('at', 'at'); }
         if (e.oldVersion < 2) {   // migrate v1 chats: build the index, move inline images to the blob store
           const chats = t.objectStore('chats'), idx = t.objectStore('chatIndex'), bl = t.objectStore('blobs');
           chats.openCursor().onsuccess = (ev) => {
@@ -67,6 +71,16 @@ H.db = (() => {
             const c = cur.value;
             try { const { stored, blobs } = split(c); idx.put(summary(c)); for (const b of blobs) bl.put(b); if (blobs.length) cur.update(stored); } catch { }
             cur.continue();
+          };
+        }
+        if (e.oldVersion < 3) {   // the single workspace handle becomes the first row of the folder registry
+          const kv = t.objectStore('kv'), folders = t.objectStore('folders');
+          const req = kv.get('workspaceHandle');
+          req.onsuccess = () => {
+            const h = req.result?.value;
+            if (!h) return;
+            folders.put({ id: H.uid(), name: h.name, handle: h, mode: 'readwrite', lastUsed: Date.now() });
+            kv.delete('workspaceHandle');
           };
         }
       };
@@ -121,6 +135,14 @@ H.db = (() => {
     kvGet: async (k) => (await tx('kv', 'readonly', s => s.get(k)))?.value,
     kvSet: (k, v) => tx('kv', 'readwrite', s => s.put({ key: k, value: v })),
     kvDel: (k) => tx('kv', 'readwrite', s => s.delete(k)),
+    folders: () => all('folders'),
+    folderPut: (f) => tx('folders', 'readwrite', s => s.put(f)),
+    folderDel: (id) => tx('folders', 'readwrite', s => s.delete(id)),
+    journalPut: (rec) => tx('journal', 'readwrite', s => s.put(rec)),
+    journalOf: (chat) => tx('journal', 'readonly', s => s.index('chat').getAll(chat)),
+    journalDel: (id) => tx('journal', 'readwrite', s => s.delete(id)),
+    journalAll: () => all('journal'),
+    journalClear: (chat) => tx('journal', 'readwrite', s => { if (!chat) return s.clear(); s.index('chat').openKeyCursor(IDBKeyRange.only(chat)).onsuccess = (e) => { const c = e.target.result; if (!c) return; s.delete(c.primaryKey); c.continue(); }; }),
     memGet: (k) => tx('memory', 'readonly', s => s.get(k)),
     memAll: () => all('memory'),
     memSet: (k, v, tags) => tx('memory', 'readwrite', s => s.put({ key: k, value: v, tags: tags || [], updated: Date.now() })),

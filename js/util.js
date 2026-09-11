@@ -121,7 +121,7 @@ H.explainError = (e, ctx = {}) => {
   const map = {
     NotFoundError: `Not found${where}. Paths are relative to the workspace root; use fs_list or fs_find to see what exists, and check spelling and case (case-sensitive on macOS/Linux).`,
     TypeMismatchError: `Wrong kind of entry${where}: expected a file but found a directory, or vice versa. Use fs_stat to check.`,
-    NotAllowedError: `Access denied by the browser${where}. The workspace permission may have expired: ask the user to click the Workspace button to re-grant access. Also make sure the file is not open exclusively in another program.`,
+    NotAllowedError: `Access denied by the browser${where}. The workspace permission may have expired: ask the user to click the folder button under the message box and grant access again. Also make sure the file is not open exclusively in another program.`,
     InvalidModificationError: `Cannot modify${where}: the directory is not empty (pass recursive: true to delete it) or the name is invalid.`,
     NoModificationAllowedError: `The file is locked or read-only${where}. Ask the user to close it in other programs.`,
     QuotaExceededError: `Browser storage quota exceeded. Ask the user to free space or reduce the amount of data.`,

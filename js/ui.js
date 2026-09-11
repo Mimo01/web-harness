@@ -79,7 +79,7 @@ H.ui = (() => {
   }
   function emptyState() {
     const tips = [
-      ['folder', 'Explore a workspace', 'Open a folder from the top bar, then ask the model to list and summarize the project.', 'List the files in the workspace and summarize what this project does.'],
+      ['folder', 'Explore a workspace', 'Open a folder with the folder button under the message box, then ask the model to list and summarize the project.', 'List the files in the workspace and summarize what this project does.'],
       ['code', 'Run code', 'Python (Pyodide) and JavaScript run in a sandbox right in the browser.', 'Use python to compute the first 20 primes and plot them as an ASCII chart.'],
       ['bolt', 'Plan first', 'Switch to Plan mode: the model investigates read-only, proposes a plan, and you decide whether to execute it.', 'Plan how to add unit tests to this project.'],
       ['plug', 'Use plugins', 'Set up Jira or GitHub in Plugins, then ask about issues and pull requests.', 'What are my open Jira issues? Group them by status.'],
@@ -491,17 +491,127 @@ H.ui = (() => {
      appears once something has actually run git_status, it is never computed to paint a button. */
   function updateWorkspaceBtn(name) {
     const n = (name === undefined ? H.fs.name() : name) || '';
+    const f = H.fs.folder();
     const btn = $('#ws-btn');
-    btn.querySelector('.lbl').textContent = n || 'Workspace';
+    btn.querySelector('.lbl').textContent = n || 'No folder';
     btn.classList.toggle('primary', !!n);
     const g = n ? H.git.state() : null;
     let tag = btn.querySelector('.ws-git');
+    const where = n ? `This chat works in "${n}"` : 'This chat has no folder open, so the file tools have nothing to work with';
     if (g?.branch) {
       if (!tag) { tag = el('span', { class: 'ws-git' }); btn.append(tag); }
       const dirty = (g.dirty || 0) + (g.untracked || 0);
       tag.textContent = '· ' + g.branch + (dirty ? ' ●' + dirty : '');
-      btn.title = `${n} — git branch ${g.branch}` + (g.dirty != null ? `, ${g.dirty} changed and ${g.untracked} untracked file(s) at the last git_status` : '');
-    } else { tag?.remove(); btn.title = n ? `Workspace folder: ${n}` : 'Open a local folder as the workspace for file tools'; }
+      btn.title = `${where}, on git branch ${g.branch}` + (g.dirty != null ? `, with ${g.dirty} changed and ${g.untracked} untracked file(s) at the last git_status` : '') + '.\nClick to work in a different folder.';
+    } else { tag?.remove(); btn.title = where + '.\nClick to open a folder, or switch to one you used before.'; }
+    btn.classList.toggle('needs-grant', !!(f && !f.granted));
+  }
+  /* The folder button opens a menu, not the OS picker: switching to a project you have opened before should be one
+     click, not a trip through the file dialog. */
+  function renderWorkspaceMenu() {
+    const box = $('#ws-menu'); box.innerHTML = '';
+    const f = H.fs.folder();
+    const git = H.git.state();
+    box.append(el('div', { class: 'menu-sec' }, ['This chat works in']));
+    if (f) {
+      const bits = [];
+      if (git?.branch) bits.push(git.branch);
+      if (f.mode === 'read') bits.push('read-only');
+      if (!f.granted) bits.push('needs access');
+      const row = el('button', {
+        class: 'ws-row on' + (f.granted ? '' : ' warn'),
+        title: f.granted ? `File paths are relative to "${f.name}"` : 'Browsers only re-grant folder access from a click',
+        onclick: async (e) => {
+          e.stopPropagation();
+          try { if (!f.granted && !await H.fs.grant()) H.toast(`Access to "${f.name}" was not granted.`, 'warn'); }
+          catch (err) { H.toast(err.message, 'error', 6000); }
+          renderWorkspaceMenu();
+        },
+      }, [el('span', { class: 'nm' }, [f.name]), bits.length ? el('span', { class: 'sub' }, [bits.join(' · ')]) : null]);
+      row.append(el('span', { class: 'ws-acts' }, [
+        f.granted ? null : el('span', { class: 'act warn' }, ['Grant access']),
+        el('span', {
+          class: 'act', title: f.mode === 'read' ? 'Allow the assistant to write to this folder' : 'Let the assistant read this folder but not write to it',
+          onclick: (e) => { e.stopPropagation(); H.fs.setMode(f.mode === 'read' ? 'readwrite' : 'read'); renderWorkspaceMenu(); },
+        }, [f.mode === 'read' ? 'read-only' : 'writable']),
+        el('span', { class: 'act', title: 'Close this folder: the file tools go idle until another is open', onclick: (e) => { e.stopPropagation(); H.fs.close(); renderWorkspaceMenu(); } }, ['close']),
+      ]));
+      box.append(row);
+    } else {
+      box.append(el('button', { class: 'ws-row', title: 'The file tools have nothing to work with until a folder is open', onclick: (e) => e.stopPropagation() },
+        [el('span', { class: 'nm muted' }, ['No folder']), el('span', { class: 'sub' }, ['the file tools are idle'])]));
+    }
+    box.append(el('button', {
+      title: f ? `Work in another folder instead of "${f.name}"` : 'Open a folder for this chat to work in',
+      onclick: async (e) => {
+        e.stopPropagation();
+        try { const name = await H.fs.pick(); H.toast('Working in ' + name, 'success'); box.classList.add('hidden'); }
+        catch (err) { if (err.name !== 'AbortError') H.toast(err.message, 'error', 6000); }
+      },
+    }, [H.icon('folder'), f ? 'Work in another folder…' : 'Open folder…']));
+    H.db.folders().then(rows => {
+      const recent = rows.filter(r => r.handle && r.id !== f?.id).sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0)).slice(0, 6);
+      if (!recent.length || box.classList.contains('hidden')) return;
+      box.append(el('div', { class: 'menu-sec' }, ['Recent']));
+      for (const r of recent) {
+        box.append(el('button', {
+          class: 'ws-row', title: 'Work in this folder again (the browser will ask for access)',
+          onclick: async (e) => {
+            e.stopPropagation();
+            try { await H.fs.open(r.handle, { mode: r.mode || 'readwrite' }); if (!await H.fs.grant()) H.toast(`Access to "${r.name}" was not granted.`, 'warn'); box.classList.add('hidden'); }
+            catch (err) { H.toast(err.message, 'error', 6000); }
+          },
+        }, [el('span', { class: 'nm' }, [r.name]), el('span', { class: 'sub' }, [H.relTime(r.lastUsed || Date.now())])]));
+      }
+    }).catch(() => { });
+  }
+  /* Files this chat changed on disk, with the diff against what it found and a way to put it back. Git here is
+     read-only, so this is the only undo there is — it restores from the copies H.journal kept before each write. */
+  async function changesPanel() {
+    const ov = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === ov) ov.remove(); } });
+    const body = el('div', { class: 'chg-body' }, [el('p', { class: 'muted' }, ['Loading…'])]);
+    const head = el('div', { class: 'row gap' }, [el('h3', {}, ['Files changed in this chat']), el('span', { class: 'spacer' })]);
+    ov.append(el('div', { class: 'modal wide' }, [head, body]));
+    document.body.append(ov);
+    const render = async () => {
+      const rows = await H.journal.list();
+      body.innerHTML = '';
+      head.querySelectorAll('.chg-act').forEach(b => b.remove());
+      if (!rows.length) {
+        body.append(el('p', { class: 'muted' }, [H.journal.enabled()
+          ? 'Nothing yet. Every file this chat writes, edits or deletes is recorded here with its previous contents, so you can put it back.'
+          : 'File history is turned off in Settings → Security & privacy, so changes are not recorded.']));
+        return;
+      }
+      const live = rows.filter(r => !r.unchanged && !r.elsewhere);
+      head.append(el('button', { class: 'btn sm chg-act', title: 'Save every change in this chat as a patch file', onclick: () => {
+        H.download('chat-changes.patch', rows.map(r => r.patch).filter(Boolean).join('') || '(no textual changes)', 'text/x-patch');
+      } }, ['Export as .patch']));
+      if (live.length) head.append(el('button', { class: 'btn sm danger-outline chg-act', onclick: async () => {
+        if (!confirm(`Restore ${live.length} file(s) to the state this chat found them in?`)) return;
+        for (const r of live) { try { await H.journal.revert(r); } catch (e) { H.toast(e.message, 'error', 6000); } }
+        H.toast('Reverted.', 'success'); render();
+      } }, ['Revert all']));
+      for (const r of rows) {
+        const label = el('div', { class: 'chg-head' }, [
+          el('span', { class: 'chg-status ' + r.status }, [r.unchanged ? 'unchanged' : r.status]),
+          el('code', {}, [r.address]),
+          el('span', { class: 'spacer' }),
+          el('span', { class: 'small muted' }, [`${r.count} write${r.count > 1 ? 's' : ''} · ${H.relTime(r.last)}`]),
+          r.unchanged || r.elsewhere ? null : el('button', {
+            class: 'btn sm ghost', title: r.note ? 'The previous contents were not kept' : 'Put this file back the way the chat found it', disabled: !!r.note,
+            onclick: async (e) => { e.stopPropagation(); try { await H.journal.revert(r); H.toast('Reverted ' + r.address, 'success'); render(); } catch (err) { H.toast(err.message, 'error', 6000); } },
+          }, ['Revert']),
+        ]);
+        const det = el('details', { class: 'chg-row' }, [el('summary', {}, [label])]);
+        if (r.patch) det.append(renderPatch({ path: r.address, patch: r.patch }));
+        else det.append(el('p', { class: 'small muted', style: 'padding:6px 10px' }, [
+          r.elsewhere ? `Changed while this chat was working in "${r.elsewhere}". Open that folder again to see the diff or put it back.`
+            : r.note ? `No diff: ${r.note}.` : 'No textual change.']));
+        body.append(det);
+      }
+    };
+    await render();
   }
   function updateModeUI() {
     const mode = H.perms.effectiveMode(); const sel = $('#mode-select'); sel.value = H.settings.get('chatMode');
@@ -921,6 +1031,7 @@ H.ui = (() => {
       sec('Workspace & code', 'How the assistant reads the folder you open. Nothing here sends anything anywhere.', [
         check('Follow the project\'s .gitignore when listing and searching files', 'respectGitignore', 'off = only the usual noise folders (node_modules, dist, build…) are skipped'),
         check('Load AGENTS.md / CLAUDE.md from the workspace root as project instructions', 'projectContextFile', 'the file becomes part of the system prompt; turn this off for folders you do not trust'),
+        check('Keep the previous contents of files the assistant changes, so they can be reverted', 'fileHistory', 'stored in this browser, per chat, and pruned as it grows; "Files changed in this chat" in the top-bar menu shows and restores them'),
       ]),
       sec('Update checks', null, [check('Check GitHub for a newer version (startup and every hour)', 'checkUpdates', 'only a public version file is fetched; no data about you is sent')]),
       sec('Python runtime', null, [check('Allow downloading Pyodide from the configured URL when Python is first used', 'allowPyodideCdn'), field('Pyodide URL', 'pyodideUrl')]),
@@ -928,11 +1039,11 @@ H.ui = (() => {
   }
   function dataPanel() {
     return el('div', {}, [
-      sec('Backup', 'Exports contain settings (without secrets), tool policies, plugins (without credentials), skills, chats, memories.', [el('div', { class: 'row gap wrap' }, [el('button', { class: 'btn', onclick: exportAll }, [H.icon('download'), 'Export everything']), el('button', { class: 'btn', onclick: importAll }, ['Import'])])]),
+      sec('Backup', 'Exports contain settings (without secrets), tool policies, plugins (without credentials), skills, chats, memories. Not included: the folders you have opened (a folder cannot be handed to another machine) or the file history kept for undo.', [el('div', { class: 'row gap wrap' }, [el('button', { class: 'btn', onclick: exportAll }, [H.icon('download'), 'Export everything']), el('button', { class: 'btn', onclick: importAll }, ['Import'])])]),
       sec('Danger zone', null, [el('div', { class: 'row gap wrap' }, [
-        el('button', { class: 'btn danger-outline', onclick: async () => { if (confirm('Delete ALL chats?')) { await H.db.clearChats(); H.agent.reset(); renderChatList(); } } }, ['Delete all chats']),
+        el('button', { class: 'btn danger-outline', onclick: async () => { if (confirm('Delete ALL chats, and the file history kept for them?')) { await H.db.clearChats(); await H.journal.clearAll(); H.agent.reset(); renderChatList(); } } }, ['Delete all chats']),
         el('button', { class: 'btn danger-outline', onclick: () => { if (confirm('Reset settings to defaults? (API key is kept)')) { H.settings.reset(); openSettings('connection'); } } }, ['Reset settings']),
-        el('button', { class: 'btn danger', onclick: async () => { if (confirm('Wipe EVERYTHING stored by this app in this browser (chats, settings, secrets, plugins, skills)?')) { await H.db.clearChats(); H.secrets.wipe(); localStorage.clear(); sessionStorage.clear(); indexedDB.deleteDatabase('llm-harness'); location.reload(); } } }, ['Wipe all local data']),
+        el('button', { class: 'btn danger', onclick: async () => { if (confirm('Wipe EVERYTHING stored by this app in this browser (chats, settings, secrets, plugins, skills, the list of folders you have opened and the file history kept for undo)? Your folders themselves are not touched.')) { await H.db.clearChats(); H.secrets.wipe(); localStorage.clear(); sessionStorage.clear(); indexedDB.deleteDatabase('llm-harness'); location.reload(); } } }, ['Wipe all local data']),
       ])]),
     ]);
   }
@@ -1074,12 +1185,13 @@ H.ui = (() => {
     $('#chat-list').addEventListener('click', (e) => { if (narrow() && e.target.closest('.chat-item') && !e.target.closest('button')) openDrawer(false); });
     $('#new-chat').addEventListener('click', () => { if (narrow()) openDrawer(false); });
     window.addEventListener('resize', () => { if (!narrow()) openDrawer(false); });
-    $('#ws-btn').onclick = async () => { try { await H.fs.pick(); H.toast('Workspace: ' + H.fs.name(), 'success'); } catch (e) { if (e.name !== 'AbortError') H.toast(e.message, 'error', 6000); } };
+    $('#ws-btn').onclick = (e) => { e.stopPropagation(); const m = $('#ws-menu'); const show = m.classList.contains('hidden'); if (show) renderWorkspaceMenu(); m.classList.toggle('hidden', !show); };
     $('#model-select').onchange = (e) => { H.settings.set({ model: e.target.value }); updateContextMeter(); };
     $('#mode-select').onchange = (e) => { H.settings.set({ chatMode: e.target.value }); updateModeUI(); };
     $('#more-btn').onclick = (e) => { e.stopPropagation(); $('#more-menu').classList.toggle('hidden'); };
-    document.addEventListener('click', () => $('#more-menu').classList.add('hidden'));
+    document.addEventListener('click', () => { $('#more-menu').classList.add('hidden'); $('#ws-menu').classList.add('hidden'); });
     $('#usage-btn').onclick = () => openSettings('usage');
+    $('#changes-btn').onclick = () => changesPanel();
     $('#compact-btn').onclick = () => H.agent.compact(H.agent.current(), { manual: true });
     H.bus.on('compacting', (id, on) => { if (id === H.agent.current()?.id) { $('#compact-btn').disabled = on; if (on) H.toast('Compacting the conversation…', 'info', 3000); } });
     $('#bug-btn').onclick = bugReport;
@@ -1131,7 +1243,7 @@ H.ui = (() => {
       if (broken.length) return openSettings('plugins');
       H.toast('All plugins connected ✓', 'success', 2500);
     };
-    H.bus.on('workspace', updateWorkspaceBtn);
+    H.bus.on('workspace', (n) => { updateWorkspaceBtn(n); if (!$('#ws-menu').classList.contains('hidden')) renderWorkspaceMenu(); });
     H.bus.on('git-state', () => updateWorkspaceBtn());
     H.bus.on('preview', showPreview);
     H.bus.on('settings', (s) => { if ($('#mode-select').value !== s.chatMode) updateModeUI(); if ($('#model-select').value !== s.model) fillModelSelect($('#model-select'), s.models || [], s.model); });

@@ -1,6 +1,6 @@
 {
-  "version": "1.15.0",
+  "version": "1.16.0",
   "date": "2026-09-11",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "code projects and git: project_overview, code_outline/code_symbol/code_deps, gitignore-aware cached search index, read-only git (status, diff, log, show, file history, branches, blame) parsed straight from .git, workspace snapshots for folders without a repository, AGENTS.md as project instructions, branch on the workspace button and rendered diffs in tool cards"
+  "notes": "a folder per chat: a new chat starts with no folder and keeps the one you pick, shown on the folder button next to the message box, with folders you have opened before one click away; read-only folders; a file index and git reader cached per folder; 'Files changed in this chat' with per-file diffs, revert and patch export; fixes: added/deleted files were diffed as binary, and '**' in a glob could not match zero directories"
 }

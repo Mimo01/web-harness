@@ -3,7 +3,8 @@
    and run Myers on the small regions in between. No dependency. */
 H.diff = (() => {
   const splitLines = (t) => String(t ?? '').split('\n');
-  const isBinary = (t) => typeof t === 'string' ? t.includes('\0') : true;
+  /* null means "the file is not there" (added or deleted), which is not the same as unreadable */
+  const isBinary = (t) => t == null ? false : typeof t === 'string' ? t.includes('\0') : true;
 
   /* --- Myers O(ND) on two line arrays, with a cost cap. Returns [{t:'=',|'-'|'+', lines:[…]}] --- */
   function myers(a, b) {

@@ -146,8 +146,6 @@ input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(-
 #status { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
 #status .txt { display: none; } #status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); }
 #status.online .dot { background: var(--ok); } #status.error .dot { background: var(--danger); }
-#ws-btn.primary { background: var(--accent-soft); border-color: transparent; color: var(--accent); box-shadow: none; }
-#ws-btn.primary:hover { color: var(--accent-hover); }
 .menu-wrap { position: relative; }
 .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 224px; padding: 4px; background: var(--raised); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow-lg); animation: pop .12s ease; }
 .menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-sm); background: none; color: var(--fg-2); font-size: 13px; text-align: left; cursor: pointer; }
@@ -157,7 +155,7 @@ input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(-
 .conn-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
 .conn-pill.on .dot { background: var(--ok); }
 .conn-pill.warn { color: var(--warn); } .conn-pill.warn .dot { background: var(--warn); }
-body.embedded #topbar { padding: 0 8px; } body.embedded #ws-btn, body.embedded #export-chat { display: none; } body.embedded .msg-wrap { padding: 0 14px; }
+body.embedded #topbar { padding: 0 8px; } body.embedded #export-chat { display: none; }   /* the folder pill stays: embedded or not, you must see what you are working on */ body.embedded .msg-wrap { padding: 0 14px; }
 
 /* ---------- Conversation ---------- */
 #content { position: relative; flex: 1; display: flex; min-height: 0; }
@@ -271,8 +269,30 @@ pre code.hljs, .hljs { background: transparent !important; padding: 0 !important
 .tool-card pre.diff .dk { color: var(--accent); }
 .tool-card pre.diff .dh { color: var(--muted); }
 
-/* branch indicator on the workspace button */
-#ws-btn .ws-git { margin-left: 5px; font-size: 11.5px; font-family: var(--mono); opacity: .72; white-space: nowrap; }
+/* the folder pill sits with the other per-conversation controls and names what this chat is working on */
+.pill-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; max-width: 260px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background .12s, color .12s; }
+.pill-btn:hover { background: var(--surface-2); color: var(--fg-2); }
+.pill-btn .ico { width: 14px; height: 14px; }
+.pill-btn .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ws-btn.primary { color: var(--fg-2); }        /* a folder is open: name it a shade stronger than its neighbours */
+#ws-btn .ws-git { font-size: 11.5px; font-family: var(--mono); opacity: .72; white-space: nowrap; }
+#ws-btn.needs-grant { color: var(--warn); } #ws-btn.needs-grant .ws-git { color: var(--warn); opacity: 1; }
+.menu.up { top: auto; bottom: calc(100% + 6px); }
+#ws-menu { right: auto; left: 0; }             /* opens rightwards from the pill, which sits at the left of the strip */
+
+/* workspace menu: the folders this chat has open, then the ones opened before */
+#ws-menu { min-width: 300px; }
+.menu-sec { padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.menu button.ws-row { display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; padding: 7px 10px; }
+.ws-row .nm { grid-column: 1; font-weight: 500; color: var(--fg); }
+.ws-row .sub { grid-column: 1; font-size: 11.5px; font-family: var(--mono); color: var(--muted); }
+.ws-row.on .nm::before { content: '●'; margin-right: 6px; font-size: 9px; vertical-align: 1px; color: var(--accent); }
+.ws-row.warn .sub { color: var(--warn); }
+.ws-acts { grid-row: 1 / 3; grid-column: 2; display: flex; align-items: center; gap: 8px; opacity: 0; font-size: 11.5px; color: var(--muted); }
+.ws-row:hover .ws-acts { opacity: 1; }
+.ws-acts .act:hover { color: var(--fg); text-decoration: underline; }
+.ws-acts .act.warn { color: var(--warn); }
+.ws-row.warn .ws-acts { opacity: 1; }          /* a folder that needs access must say so without being hovered */
 
 /* inline question from the model */
 .tool-card.ask { border-color: var(--warn-line); border-top: 1px solid var(--warn-line); }
@@ -426,7 +446,6 @@ label.check.small { align-items: center; padding: 0; font-size: 12px; color: var
   #sidebar.collapsed { margin-left: calc(var(--sidebar-w) * -1); }
   #topbar { height: 48px; padding: 0 8px; gap: 4px; }
   #chat-title { flex: 1; max-width: none; font-size: 13px; }
-  #ws-btn .lbl { display: none; }
   #bridge-pill { padding: 0 7px; font-size: 11px; }
   #messages { padding: 16px 0 24px; } .msg-wrap { padding: 0 14px; }
   .msg { margin-bottom: 20px; } .msg.user .body { max-width: 92%; }
@@ -436,6 +455,7 @@ label.check.small { align-items: center; padding: 0; font-size: 12px; color: var
   #input { padding: 12px 14px 4px; font-size: 16px; }   /* 16px prevents iOS zoom on focus */
   .composer-bar { gap: 2px; padding: 2px 6px 6px; }
   .pill-select { max-width: 46vw; } .pill-select select { max-width: 38vw; }
+  .pill-btn { max-width: 42vw; padding: 0 6px; }      /* the folder still names itself: that is the point of it */
   .composer-bar #usage { display: none; }
   #preview { position: fixed; inset: 0; z-index: 25; width: auto; min-width: 0; }
   #empty { padding: 6vh 8px 24px; } #empty h2 { font-size: 30px; } #empty .tips { grid-template-columns: 1fr; }
@@ -485,6 +505,9 @@ label.check.small { align-items: center; padding: 0; font-size: 12px; color: var
   .pill-strip .spacer { flex: 1; } .pill-strip #usage { display: none; }
   .pill-select { height: 24px; max-width: 42vw; flex-shrink: 0; padding: 0 2px 0 6px; font-size: 11.5px; }
   .pill-select .ico { width: 12px; height: 12px; } .pill-select select { max-width: 34vw; padding-right: 16px; font-size: 11.5px; background-size: 10px; }
+  .pill-btn { height: 24px; max-width: 42vw; flex-shrink: 0; padding: 0 6px; font-size: 11.5px; } .pill-btn .ico { width: 12px; height: 12px; }
+  /* the strip scrolls sideways, so the menu is pinned to the viewport instead of to the pill inside it */
+  #ws-menu { position: fixed; left: 8px; right: 8px; bottom: 58px; min-width: 0; max-height: 58vh; overflow-y: auto; }
   #ctx-meter { margin-left: auto; font-size: 11px; } #ctx-meter .ring { width: 16px; height: 16px; }
   body.asking .composer-box { border: 0; } body.asking #input { border-color: var(--warn); }
 }
@@ -503,3 +526,18 @@ label.check.small { align-items: center; padding: 0; font-size: 12px; color: var
 }
 /* very short viewports (landscape phones) */
 @media (max-height: 500px) { #empty { padding-top: 12px; } #empty h2 { font-size: 26px; } }
+
+/* Files changed in this chat: one row per file, the diff folded away behind it */
+.chg-body { max-height: 62vh; overflow-y: auto; margin-top: 10px; }
+.chg-row { border: 1px solid var(--border); border-radius: var(--r-sm); margin-bottom: 6px; background: var(--surface); }
+.chg-row > summary { list-style: none; cursor: pointer; padding: 7px 10px; }
+.chg-row > summary::-webkit-details-marker { display: none; }
+.chg-row[open] > summary { border-bottom: 1px solid var(--border); }
+.chg-head { display: flex; align-items: center; gap: 8px; }
+.chg-head code { font-size: 12px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chg-status { flex: none; font-size: 10.5px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.chg-status.created { color: var(--ok); border-color: var(--ok); }
+.chg-status.modified { color: var(--accent); border-color: var(--accent); }
+.chg-status.deleted { color: var(--danger); border-color: var(--danger); }
+.chg-status.elsewhere { color: var(--warn); border-color: var(--warn); }
+.chg-row pre.diff { margin: 0; border: 0; border-radius: 0 0 var(--r-sm) var(--r-sm); }

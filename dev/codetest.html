@@ -126,8 +126,54 @@ async function run() {
   BASE = document.getElementById('base').value.trim();
   H.code.bump(); H.git.resetCaches();
 
+  /* ---------------- path resolution ---------------- */
+  /* resolve() normalises whatever the model wrote into a path relative to the folder's root, or refuses it.
+     It is pure — whether a folder is actually open is ensure()'s business — so it can be tested on its own. */
+  const throws = (fn, contains) => {
+    try { fn(); } catch (e) { if (contains && !e.message.includes(contains)) throw new Error(`wrong error: ${e.message}`); return e.message; }
+    throw new Error('expected a throw');
+  };
+  await test('fs: a bare path is kept relative to the folder root', () => {
+    eq(H.fs.resolve('src/app.js').path, 'src/app.js');
+    eq(H.fs.resolve('').path, '');                     // the folder root itself
+  });
+  await test('fs: "@@" escapes a file whose name starts with @', () =>
+    eq(H.fs.resolve('@@odd/a.md').path, '@odd/a.md'));
+  await test('fs: an "@name" prefix is rejected with an explanation', () =>
+    throws(() => H.fs.resolve('@other-project/x.md'), 'is not a place this harness can reach'));
+  await test('fs: path traversal and absolute paths are rejected', () => {
+    throws(() => H.fs.resolve('../outside.txt'), 'traversal');
+    throws(() => H.fs.resolve('src/../../outside.txt'), 'traversal');
+    throws(() => H.fs.resolve('/Users/me/secrets.txt'), 'absolute path');
+    throws(() => H.fs.resolve('C:/Windows/system.ini'), 'absolute path');
+    return 'four rejections';
+  });
+  await test('fs: leading "./", duplicate and trailing slashes normalise away', () => {
+    eq(H.fs.resolve('./src//app.js/').path, 'src/app.js');
+    eq(H.fs.resolve('  src/./app.js  ').path, 'src/app.js');
+    eq(H.fs.resolve('src\\win\\path.js').path, 'src/win/path.js');
+  });
+
+  await test('fs: globs match the way the model expects', () => {
+    const m = H.fs.globMatch;
+    const cases = [['src/**/*.js', 'src/util.js', true], ['src/**/*.js', 'src/deep/a.js', true], ['src/**/*.js', 'lib/a.js', false],
+      ['**/*.md', 'README.md', true], ['**/*.md', 'docs/a.md', true], ['*.md', 'docs/a.md', true],
+      ['src/*.js', 'src/deep/a.js', false], ['src/*.js', 'src/a.js', true], ['a?c.js', 'abc.js', true], ['a?c.js', 'abbc.js', false]];
+    for (const [g, p, want] of cases) if (m(g, p) !== want) throw new Error(`glob "${g}" vs "${p}": got ${m(g, p)}, expected ${want}`);
+    return cases.length + ' patterns';
+  });
+
   /* ---------------- diff engine ---------------- */
   await test('diff: identical text produces no patch', () => eq(H.diff.unified('a\nb\n', 'a\nb\n', { path: 'x' }), ''));
+  await test('diff: an added or deleted file diffs as text, not as binary', () => {
+    const add = H.diff.unified(null, 'hello\nworld\n', { path: 'a.txt' });
+    const del = H.diff.unified('hello\n', null, { path: 'a.txt' });
+    if (add.includes('Binary')) throw new Error('added file reported as binary:\n' + add);
+    if (del.includes('Binary')) throw new Error('deleted file reported as binary:\n' + del);
+    eq(add.includes('+hello') && add.includes('+world'), true, 'added lines present');
+    eq(del.includes('-hello'), true, 'removed lines present');
+    eq(H.diff.unified(null, 'a\0b', { path: 'x.bin' }).includes('Binary'), true, 'real NUL bytes are still binary');
+  });
   await test('diff: insert/delete counts', () => {
     const s = H.diff.stat('a\nb\nc\n', 'a\nB\nc\nd\n');
     eq(s.added, 2, 'added'); eq(s.removed, 1, 'removed');
@@ -381,7 +427,7 @@ async function run() {
     const victim = Object.keys(rec.files).find(p => p.endsWith('.js') && rec.files[p].text);
     rec.files[victim].text = 'CHANGED\n' + rec.files[victim].text;
     rec.files[victim].mtime = 1;
-    await H.db.kvSet('snapshot:' + H.fs.name(), rec);
+    await H.db.kvSet(H.code.snapKey(), rec);   // one baseline per folder, keyed by the folder's id
     const after = await H.code.changes();
     const f = after.files.find(x => x.path === victim);
     if (!f || f.status !== 'modified' || !f.patch.includes('-CHANGED')) throw new Error('change not detected for ' + victim);

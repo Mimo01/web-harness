@@ -35,7 +35,7 @@ H.tools = (() => {
     parameters: obj({ path: str('Directory path relative to workspace root (empty = root)'), recursive: bool('List recursively (respects .gitignore)') }),
     run: async ({ path = '', recursive = false }) => {
       if (!recursive) return ok({ workspace: H.fs.name(), entries: await H.fs.list(path, { recursive: false }) });
-      const base = String(path || '').replace(/^\.?\/+/, '').replace(/\/+$/, '');
+      const base = H.fs.resolve(path).path;
       const { files, dirs, truncated } = await H.code.index();
       const inScope = (p) => !base || p === base || p.startsWith(base + '/');
       const entries = files.filter(f => inScope(f.path)).map(f => ({ path: f.path, kind: 'file', size: f.size }));
@@ -150,7 +150,10 @@ H.tools = (() => {
     name: 'fs_find', group: 'Files', risk: 'safe',
     description: 'Find files by glob pattern, e.g. "**/*.ts" or "*.md". Respects .gitignore.',
     parameters: obj({ glob: str('Glob pattern'), path: str('Directory to search in'), refresh: bool('Re-scan the workspace first') }, ['glob']),
-    run: async ({ glob, path = '', refresh }) => { const files = await H.code.find(glob, path, { refresh }); return ok({ count: files.length, files: files.slice(0, 1000), truncated: files.length > 1000 }); },
+    run: async ({ glob, path = '', refresh }) => {
+      const files = await H.code.find(glob, path, { refresh });
+      return ok({ count: files.length, files: files.slice(0, 1000), truncated: files.length > 1000 });
+    },
   });
   def({
     name: 'fs_upload_from_user', group: 'Files', risk: 'safe',
@@ -200,7 +203,7 @@ H.tools = (() => {
     description: 'Structure of a source file without its contents: classes, functions, methods, types and imports with line numbers. Use it to decide which part of a large file to read. Pass a glob instead of a path to outline many files at once.',
     parameters: obj({ path: str('File path'), glob: str('Outline every file matching this glob instead, e.g. "src/**/*.ts"'), maxSymbols: num('Max symbols per file (default 400)') }),
     run: async ({ path, glob, maxSymbols }) => {
-      if (glob) return ok(await H.code.outlineGlob(glob, '', {}));
+      if (glob) return ok(await H.code.outlineGlob(glob, path || '', {}));
       if (!path) throw new Error('code_outline needs either "path" or "glob".');
       return ok(await H.code.outline(path, { maxSymbols }));
     },
@@ -227,10 +230,7 @@ H.tools = (() => {
     name: 'workspace_changes', group: 'Code', risk: 'safe',
     description: 'Show every file added, changed or deleted since the last workspace_snapshot, with unified diffs. The non-git equivalent of git_diff; use git_diff when the folder is a repository.',
     parameters: obj({ paths: { type: 'array', items: { type: 'string' }, description: 'Limit to these files or directories' }, statOnly: bool('Only list the files, without diffs'), context: num('Context lines (default 3)') }),
-    run: async ({ paths, statOnly, context }) => {
-      const r = await H.code.changes({ paths, statOnly, context });
-      return ok(clampDiff(r));
-    },
+    run: async ({ paths, statOnly, context }) => ok(clampDiff(await H.code.changes({ paths, statOnly, context }))),
   });
 
   /* ===================== GIT (read-only) ===================== */
@@ -303,7 +303,8 @@ H.tools = (() => {
     name: 'git_show_file', group: gitGroup, risk: 'safe',
     description: 'The contents of a file as it was at a given commit, branch or tag — what the file looked like before a change.',
     parameters: obj({ path: str('File path'), ref: str('Commit, branch or tag (default HEAD)'), startLine: num('1-based first line'), endLine: num('1-based last line') }, ['path']),
-    run: async ({ path, ref = 'HEAD', startLine, endLine }) => {
+    run: async ({ path: raw, ref = 'HEAD', startLine, endLine }) => {
+      const { path } = H.fs.resolve(raw);        // normalise the path against the folder's root
       const sha = await H.git.resolve(ref);
       const map = await H.git.treeMap((await H.git.commit(sha)).tree);
       const e = map.get(path);
@@ -318,7 +319,8 @@ H.tools = (() => {
     name: 'git_file_history', group: gitGroup, risk: 'safe',
     description: 'The commits that touched one file, newest first, optionally with the change each one made to it.',
     parameters: obj({ path: str('File path'), max: num('How many commits (default 10)'), patch: bool('Include each commit\'s diff of this file'), ref: str('Start from this ref (default HEAD)') }, ['path']),
-    run: async ({ path, max = 10, patch = false, ref = 'HEAD' }) => {
+    run: async ({ path: raw, max = 10, patch = false, ref = 'HEAD' }) => {
+      const { path } = H.fs.resolve(raw);
       const h = await H.git.log({ ref, path, max });
       if (!patch) return ok(h);
       const commits = [];
@@ -336,7 +338,8 @@ H.tools = (() => {
     name: 'git_blame', group: gitGroup, risk: 'safe',
     description: 'Who last changed each line of a file, and in which commit. Approximate: it reconstructs attribution from the file\'s history and does not follow renames.',
     parameters: obj({ path: str('File path'), ref: str('Start from this ref (default HEAD)'), maxRevisions: num('How far back to walk (default 40)'), startLine: num('First line to return'), endLine: num('Last line to return') }, ['path']),
-    run: async ({ path, ref, maxRevisions, startLine, endLine }) => {
+    run: async ({ path: raw, ref, maxRevisions, startLine, endLine }) => {
+      const { path } = H.fs.resolve(raw);
       const r = await H.git.blame(path, { ref, maxRevisions });
       if (startLine || endLine) r.lines = r.lines.slice(Math.max(0, (startLine || 1) - 1), endLine || undefined);
       if (r.lines.length > 600) { r.note = `Showing the first 600 of ${r.lines.length} lines; pass startLine/endLine for the rest.`; r.lines = r.lines.slice(0, 600); }
@@ -624,6 +627,7 @@ H.tools = (() => {
       return ok({ answer: res });
     },
   });
+
 
   /* ---------- registry API ---------- */
   function all() { return [...registry.values(), ...H.plugins.tools()]; }

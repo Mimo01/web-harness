@@ -4,8 +4,7 @@
   H.ui.init();
   await H.bridge.init();   // signing identity for the browser-session bridge (needed before the bookmarklet is shown)
   if (H.bridge.embedded()) { document.body.classList.add('embedded'); H.$('#sidebar').classList.add('collapsed'); }
-  await H.fs.restore();
-  H.ui.updateWorkspaceBtn(H.fs.hasRoot() ? H.fs.name() : '');
+  H.ui.updateWorkspaceBtn('');   // no folder until a chat is loaded: each one carries its own
   const recent = await H.db.recentChat();   // one index record via cursor: never reads message bodies at startup
   if (recent) await H.agent.load(recent.id); else await H.agent.reset();   // reopen the most recent chat; create one only when there is none
   H.ui.renderChatList();
@@ -19,7 +18,7 @@
     bc.onmessage = (e) => { const m = e.data || {}; if (m.from === me) return; if (m.type === 'hello') { bc.postMessage({ type: 'here', from: me }); warn(); } else if (m.type === 'here') warn(); };
     bc.postMessage({ type: 'hello', from: me });
   } catch { }
-  if (!H.fs.supported()) H.toast('This browser lacks the File System Access API; file tools use an in-memory workspace. Use Chrome/Edge for real folders.', 'warn', 8000);
+  if (!H.fs.supported()) H.toast('This browser lacks the File System Access API, so local folders cannot be opened and the file tools will not work. Use Chrome or Edge.', 'warn', 8000);
   window.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); H.agent.reset(); H.$('#input').focus(); }
     if ((e.metaKey || e.ctrlKey) && e.key === '/') { e.preventDefault(); H.ui.openSettings('connection'); }

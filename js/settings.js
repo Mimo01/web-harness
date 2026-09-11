@@ -63,6 +63,7 @@ H.settings = (() => {
     compactKeepTurns: 3,           // most recent user turns are never summarised
     respectGitignore: true,        // file listings, search and the code index follow the project's .gitignore
     projectContextFile: true,      // load AGENTS.md / CLAUDE.md from the workspace root into the system prompt
+    fileHistory: true,             // keep the previous contents of changed files so a chat's writes can be reverted
     maxIndexFiles: 20000,          // upper bound for the workspace file index
     transcriptionModel: '',        // e.g. whisper-1 on the LiteLLM proxy; empty = audio/video transcription off            // GET version.json from GitHub on startup / every 6 h
     settingsVersion: 2,

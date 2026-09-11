@@ -28,7 +28,11 @@ H.agent = (() => {
   const pendingQuestion = (chatId) => questions.get(chatId || chat?.id) || null;
   const live = new Map();    // chatId -> chat object currently in memory (so switching back shows live updates)
 
-  const newChat = () => ({ id: H.uid(), title: 'New chat', messages: [], created: Date.now(), updated: Date.now(), usage: { prompt: 0, completion: 0, cost: 0, requests: 0 } });
+  /* A new chat starts with no folder: the first thing you do in it is say what it is about, and picking the folder
+     is part of that. Inheriting the last one silently aims a fresh conversation at whatever you had open before. */
+  const newChat = () => ({ id: H.uid(), title: 'New chat', messages: [], created: Date.now(), updated: Date.now(), folder: null, usage: { prompt: 0, completion: 0, cost: 0, requests: 0 } });
+  /* the folder is part of the chat: whatever the user opens while it is active is what it reopens with */
+  H.bus.on('workspace', () => { if (!chat) return; const s = H.fs.state(); if (JSON.stringify(s) !== JSON.stringify(chat.folder)) { chat.folder = s; delete chat.mounts; persist(); } });
 
   const PLAN_PROMPT = `# PLAN MODE
 You are in plan mode. Investigate using read-only tools only (reading files, searching, fetching, listing). Do NOT modify anything, and do not try to call tools that change state; they are unavailable.
@@ -49,7 +53,8 @@ When you have enough information, write a concrete, numbered implementation plan
     ].join('\n');
     const git = H.git.state();
     const tail = [
-      H.fs.hasRoot() ? `A workspace folder named "${H.fs.name()}" is open; file tools operate relative to it.${git?.branch ? ` It is a git repository on branch "${git.branch}"${git.dirty != null ? ` with ${git.dirty} changed and ${git.untracked} untracked file(s) as of the last git_status` : ''}.` : ''}` : `No workspace folder is open; file tools will fail until the user opens one (top bar > Workspace).`,
+      H.fs.describe()
+      + (git?.branch ? `\nThe open folder is a git repository on branch "${git.branch}"${git.dirty != null ? ` with ${git.dirty} changed and ${git.untracked} untracked file(s) as of the last git_status` : ''}.` : ''),
       `Older tool results in this conversation may appear as short stubs marked [tool result truncated]; call the tool again if you need the full data.`,
       `Date: ${new Date().toISOString().slice(0, 10)}. Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}.`,
     ].join('\n');
@@ -342,9 +347,12 @@ When you have enough information, write a concrete, numbered implementation plan
     let c = live.get(id);                       // running (or recently run) chats live in memory: reuse the same object
     if (!c) { c = await H.db.getChat(id); if (!c || !c.id) { H.bus.emit('chat-updated'); return; } c.usage ||= { prompt: 0, completion: 0, cost: 0, requests: 0 }; live.set(id, c); }
     chat = c; H.bus.emit('chat-loaded', chat);
+    /* a chat carries its own folder: opening one from last month must not aim its paths at today's project */
+    await H.fs.use(c.folder ?? c.mounts ?? null).catch(e => console.warn('workspace restore', e));
   }
   async function reset() {
     chat = newChat(); live.set(chat.id, chat); H.perms.clearSession();
+    await H.fs.use(null);                          // and the folder that was open belongs to the chat you just left
     await H.db.putChat(chat);                      // exists right away: visible in the sidebar, switchable, keeps its draft
     H.bus.emit('chat-loaded', chat); H.bus.emit('chat-updated', chat);
     return chat;
@@ -352,6 +360,7 @@ When you have enough information, write a concrete, numbered implementation plan
   async function remove(id) {
     deleted.add(id); stop(id); live.delete(id);
     await H.db.delChat(id);
+    H.journal?.clear(id).catch(() => { });      // the file history of a deleted chat has nothing left to undo
     H.bus.emit('chat-updated');            // sidebar index must forget it
     if (chat?.id === id) {
       chat = null;

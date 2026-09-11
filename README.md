@@ -20,7 +20,7 @@ and you're in.
 
 **1. Download** → [web-harness.zip](https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip)
 **2. Unzip** it anywhere (Desktop, Documents, a network share…). Rename the folder if you like.
-**3. Open** `index.html` in Chrome or Edge (Firefox and Safari work too, without local-folder access).
+**3. Open** `index.html` in Chrome or Edge (Firefox and Safari run everything except the local-folder tools).
 **4. Connect**: Settings opens by itself. Paste your LiteLLM **base URL** (without `/v1`) and **API key**, click
 *Test connection*, pick a model. Done.
 
@@ -56,6 +56,11 @@ Don't want the check? Turn it off in Settings → Security & privacy; it only ev
 - **Git, read-only**: the harness parses `.git` itself — branch, status, uncommitted diff, log, commit contents, file
   history, blame — with no git binary and no server. It never writes to a repository. No `.git`? Take a snapshot of the
   folder and it will still show you everything that changed.
+- **A folder per chat**: each conversation owns the folder it works in and reopens with it, so a chat from last
+  month never points at today's project. Every path is relative to that folder — no prefixes, no absolute paths,
+  nothing outside it.
+- **Undo, even though git is read-only**: the previous contents of every file the assistant writes, edits or deletes
+  are kept, so *Files changed in this chat* shows the diff against what the chat found and puts any of it back.
 - **50+ built-in tools**: files, code intelligence, git, code execution (Python via Pyodide, JavaScript in a sandbox),
   web, data, memory.
 - **Three chat modes**: *Default* asks before writes, *Allow all* just goes, *Plan* investigates read-only and
@@ -72,7 +77,8 @@ Don't want the check? Turn it off in Settings → Security & privacy; it only ev
 
 ## 🧭 Quick tour
 
-1. Click **Workspace** and pick a project folder. Ask: *"Summarize what this project does and how it is put together."*
+1. A new chat has no folder: click the **folder button under the message box** and pick your project (folders you
+   have opened before are one click away in that menu). Ask: *"Summarize what this project does and how it is put together."*
    (or type `/explain-repo`). If it is a git checkout, the branch appears next to the folder name.
 2. Ask *"What have I changed?"* — or type `/review-diff` to have the uncommitted diff reviewed.
 3. Switch to **Plan mode** and ask: *"Plan how to add unit tests."* Review the plan, hit **Execute**.
@@ -103,8 +109,31 @@ Multiple persisted conversations, streaming responses, markdown + syntax highlig
 | Skills | `use_skill`, `list_skills` |
 | Agent | `run_subagent` (fresh context, same tools) |
 
-Click **📁 Workspace** to grant access to a local folder; file tools operate inside it (path traversal is blocked).
-Browsers without the File System Access API fall back to an in-memory workspace.
+The **folder button under the message box** names the folder this chat is working in; click it to open one, switch
+to a folder you used before, or make it read-only. File tools operate inside that folder and nowhere else: absolute paths and `..` are refused.
+
+### The chat's folder
+A chat works in exactly one folder. Every path is relative to it (`src/app.js`), which is why every skill and prompt
+written before this still works unchanged. There is nowhere else to write: no second folder, no hidden store, nothing
+outside the folder you picked.
+
+- **Per chat.** A new chat starts with no folder — picking one is part of saying what the conversation is about —
+  and opening an old chat restores the folder it was working in. Switching projects does not disturb any other
+  conversation. That is why the folder lives with the conversation's own controls, next to the model and the chat
+  mode, rather than in the top bar.
+- **Remembered.** Every folder you ever picked stays in the menu, so reopening one is a click (the browser still asks
+  for access once per session — it only grants that from a real click, never from a tool).
+- **Read-only.** A folder can be marked read-only: the assistant may read and search it but every write fails with an
+  explanation.
+- **Cached per folder, not globally.** Each folder keeps its own file index, `.gitignore` rules and git reader, so
+  moving a chat back to a project you were in an hour ago does not rebuild anything.
+
+### Files changed in this chat
+Git here is read-only by design, so undo comes from the filesystem layer instead: before every write, edit, append or
+delete, the file's previous contents are stored in the browser, per chat. The top-bar menu → **Files changed in this
+chat** lists every file the conversation touched with the diff against what it found, and restores any of them — or
+all of them — with one click. The same list exports as a `.patch` file. Turn the recording off in Settings → Security
+& privacy; it is pruned as it grows and deleted with the chat.
 
 ### Code projects & git
 Open a project folder and the assistant treats it as a codebase rather than a pile of files.
@@ -116,7 +145,7 @@ Open a project folder and the assistant treats it as a codebase rather than a pi
   a 3000-line file can be understood without reading it; `code_symbol` separates the *definition* of a name from its
   *uses*; `code_deps` answers "what does this file import, and what breaks if I change it". Outline rules cover
   JavaScript/TypeScript, Python, Go, Rust, Java, Kotlin, C#, Ruby, PHP, Swift, C/C++, shell, SQL, CSS and Markdown.
-- **Search that scales.** One cached index of the folder (invalidated when anything is written) backs `fs_search`,
+- **Search that scales.** A cached index per folder (invalidated when anything is written to it) backs `fs_search`,
   `fs_find` and `fs_list`; it follows the project's `.gitignore` and skips binaries, minified bundles and lockfiles.
   Searches return matches grouped per file, with optional context lines.
 - **Git without git.** The harness reads `.git` directly — loose objects *and* packfiles (including deltas), refs and
@@ -132,8 +161,8 @@ Open a project folder and the assistant treats it as a codebase rather than a pi
 - **Project instructions.** An `AGENTS.md`, `CLAUDE.md`, `.harness/context.md` or `HARNESS.md` in the workspace root is
   loaded into the system prompt as your standing instructions for that project (a toast tells you when it happens;
   turn it off in Settings → Security & privacy → *Workspace & code*).
-- **In the interface.** The Workspace button shows the branch and, once something has run `git_status`, how many files
-  differ. Tool results that carry a diff — `git_diff`, `git_show`, `workspace_changes`, and `fs_edit` — are rendered as
+- **In the interface.** The folder button under the message box shows the folder, its branch and, once something has
+  run `git_status`, how many files differ. Tool results that carry a diff — `git_diff`, `git_show`, `workspace_changes`, and `fs_edit` — are rendered as
   a real diff instead of raw JSON.
 
 The `/review-diff` and `/explain-repo` skills use all of this; `/commit` writes a commit message from the actual diff
@@ -377,7 +406,8 @@ PDFs; both happen only when you use them.
 - **Screens**: works from phones (sidebar becomes a drawer, dialogs go full screen, touch-friendly actions) to
   wide desktops.
 - **Browsers**: Chrome and Edge give the full feature set (workspace folders via the File System Access API).
-  Firefox and Safari run everything else; file tools then use an in-memory workspace.
+  Firefox and Safari run everything else — chats, code execution, plugins, the bridge — but cannot open a local
+  folder, so the file, code-intelligence and git tools are unavailable there.
 - **Opening from a file**: double-clicking `index.html` works on every OS. Two limitations of `file://` pages:
   some browsers refuse the folder picker there, and the bridge bookmark cannot embed a file path (it links to
   the open harness tab instead, so always open the site from the wizard's Open button). The bridge itself works:
