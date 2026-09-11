@@ -380,7 +380,7 @@ H.ui = (() => {
     const cc = H.usage.chatCost(chat);
     const costTxt = H.settings.get('showCost') ? ' · ' + (cc.known ? H.usage.fmtCost(cc.cost) : 'set pricing') : '';
     $('#usage').textContent = `${H.usage.fmtTok((u.prompt || 0) + (u.completion || 0))} tok${costTxt}`;
-    bar.title = `Context window: ~${est.toLocaleString()} of ${ctx.toLocaleString()} tokens used (${pct}%)${pct >= 70 ? '\nThe older part will be compacted automatically before the next message (⋯ menu → Compact this chat to do it now).' : ''}\nChat total: ${(u.prompt || 0).toLocaleString()} in / ${(u.completion || 0).toLocaleString()} out` + (cc.known ? `\nCost: ${H.usage.fmtCost(cc.cost)}${cc.partial ? ' (some messages have no pricing)' : ''}` : '\nCost unknown: set pricing in Settings > Usage & costs');
+    bar.title = `Context window: ~${est.toLocaleString()} of ${ctx.toLocaleString()} tokens used (${pct}%)${pct >= 70 ? '\nThe older part will be compacted automatically before the next message (type /compact to do it now).' : ''}\nChat total: ${(u.prompt || 0).toLocaleString()} in / ${(u.completion || 0).toLocaleString()} out` + (cc.known ? `\nCost: ${H.usage.fmtCost(cc.cost)}${cc.partial ? ' (some messages have no pricing)' : ''}` : '\nCost unknown: set pricing in Settings > Usage & costs');
   }
 
   /* ---------------- sidebar ---------------- */
@@ -428,6 +428,8 @@ H.ui = (() => {
   async function submit() {
     const t = $('#input'); const text = t.value.trim();
     if (!text && !attachments.length) return;
+    /* a system command runs here and now — before every guard below, so /copy works mid-run too — and never becomes a message */
+    if (H.commands.run(text)) { t.value = ''; autoresize(); hideSlash(); return; }
     if (H.agent.pendingQuestion()) { H.agent.answerQuestion(H.agent.current().id, text); t.value = ''; autoresize(); return; }   // answer, not a new message
     if (H.agent.isRunning()) return;
     if (!H.settings.apiKey() && !confirm('No API key configured. Send anyway?')) { openSettings('connection'); return; }
@@ -455,16 +457,28 @@ H.ui = (() => {
     }
     renderAttachments();
   }
-  function slashItems() { const v = $('#input').value; const m = v.match(/^\/([a-z0-9_-]*)$/i); if (!m) return null; return H.skills.list().filter(s => s.name.startsWith(m[1].toLowerCase())); }
+  /* The / menu holds both kinds of entry: system commands first (they run here, see js/commands.js), then skills.
+     Once the box reads "/command " the same menu lists that command's options instead (/copy → all, code). */
+  function slashItems() {
+    const v = $('#input').value;
+    const bare = v.match(/^\/([a-z0-9_-]*)$/i);
+    if (bare) { const q = bare[1].toLowerCase(); return [...H.commands.list(), ...H.skills.list()].filter(s => s.name.startsWith(q)); }
+    const sub = v.match(/^\/([a-z0-9_-]+)\s+([a-z0-9_-]*)$/i);
+    const cmd = sub && H.commands.get(sub[1].toLowerCase());
+    if (!cmd?.args) return null;
+    const q = sub[2].toLowerCase();
+    return cmd.args.filter(a => a.name.startsWith(q)).map(a => ({ name: cmd.name + (a.name ? ' ' + a.name : ''), description: a.description, full: '/' + cmd.name + (a.name ? ' ' + a.name : '') }));
+  }
   function showSlash() {
     const items = slashItems(); const menu = $('#slash-menu');
     if (!items || !items.length) { hideSlash(); return; }
     menu.classList.remove('hidden'); menu.innerHTML = '';
     if (slashIdx >= items.length || slashIdx < 0) slashIdx = 0;
-    items.forEach((s, i) => menu.append(el('div', { class: 'item' + (i === slashIdx ? ' active' : ''), onmousedown: (e) => { e.preventDefault(); pickSlash(s); } }, [el('b', {}, ['/' + s.name]), el('span', { class: 'muted small' }, [s.description])])));
+    items.forEach((s, i) => menu.append(el('div', { class: 'item' + (i === slashIdx ? ' active' : ''), onmousedown: (e) => { e.preventDefault(); pickSlash(s); } }, [el('b', {}, ['/' + s.name + (s.hint ? ' ' + s.hint : '')]), el('span', { class: 'muted small' }, [s.description])])));
   }
   function hideSlash() { $('#slash-menu').classList.add('hidden'); slashIdx = -1; }
-  function pickSlash(s) { $('#input').value = '/' + s.name + ' '; hideSlash(); $('#input').focus(); }
+  /* an option row completes the whole line (Enter then sends it); a command or skill row leaves the cursor after it */
+  function pickSlash(s) { $('#input').value = s.full || '/' + s.name + ' '; hideSlash(); $('#input').focus(); }
 
   /* ================= MENUS & PICKERS =================
      Every floating list in the app (the ⋯ menu, the workspace menu, every dropdown) registers itself here, so one
@@ -766,7 +780,7 @@ H.ui = (() => {
     if (H.agent.pendingQuestion()) { $('#input').placeholder = 'Answer the assistant\'s question…'; $('#send-btn').classList.remove('hidden'); $('#stop-btn').classList.add('hidden'); document.body.classList.add('asking'); return; }
     document.body.classList.remove('asking');
     if (modePick) modePick.btn.title = 'Chat mode · ' + (MODES.find(m => m.v === mode)?.short || mode);
-    $('#input').placeholder = mode === 'plan' ? 'Plan mode: describe what you want planned…' : window.matchMedia('(max-width: 560px)').matches ? 'Message…' : 'Message… type / for skills, drop files to attach';
+    $('#input').placeholder = mode === 'plan' ? 'Plan mode: describe what you want planned…' : window.matchMedia('(max-width: 560px)').matches ? 'Message…' : 'Message… type / for commands and skills, drop files to attach';
   }
   function updateTitle() { const c = H.agent.current(); $('#chat-title').textContent = c?.title || 'New chat'; }
   function bugReport() {
@@ -1095,8 +1109,10 @@ H.ui = (() => {
     const wrap = el('div', {});
     const render = () => {
       wrap.innerHTML = '';
-      wrap.append(sec('Skills', 'Reusable instruction sets. Type /name in the chat, or let the model load one via use_skill when a request matches its description.', []));
-      for (const s of H.skills.list()) {
+      const all = H.skills.list();
+      wrap.append(sec('Skills', 'Reusable instruction sets you write yourself. Type /name in the chat, or let the model load one via use_skill when a request matches its description.', []));
+      if (!all.length) wrap.append(el('p', { class: 'sec-desc' }, ['No skills yet. Write one below, or import a markdown file with name/description frontmatter.']));
+      for (const s of all) {
         wrap.append(el('div', { class: 'card' }, [
           el('div', { class: 'row gap' }, [el('h4', {}, ['/' + s.name]), el('span', { class: 'spacer' }),
             el('button', { class: 'btn sm', onclick: () => skillEditor(s, render) }, ['Edit']),
@@ -1108,7 +1124,6 @@ H.ui = (() => {
       wrap.append(el('div', { class: 'row gap wrap', style: 'margin-top:12px' }, [
         el('button', { class: 'btn', onclick: () => skillEditor({ name: '', description: '', content: '' }, render) }, [H.icon('plus'), 'New skill']),
         el('button', { class: 'btn', onclick: () => { const i = el('input', { type: 'file', accept: '.md,.txt', multiple: true }); i.onchange = async () => { for (const f of i.files) H.skills.upsert(H.skills.parse(await H.readFileAsText(f), f.name.replace(/\.\w+$/, ''))); render(); }; i.click(); } }, ['Import .md']),
-        el('button', { class: 'btn ghost', onclick: () => { H.skills.resetBuiltin(); render(); } }, ['Restore built-in skills']),
       ]));
     };
     render(); return wrap;
@@ -1119,7 +1134,7 @@ H.ui = (() => {
     const name = el('input', { type: 'text', value: s.name, placeholder: 'kebab-case-name' }), desc = el('input', { type: 'text', value: s.description, placeholder: 'One-line description (shown to the model)' }), body = el('textarea', { rows: 14, class: 'mono' }, [s.content]);
     ov.append(el('div', { class: 'modal wide' }, [el('h3', {}, [orig ? 'Edit skill' : 'New skill']),
       el('label', { class: 'field' }, [el('span', {}, ['Name']), name]), el('label', { class: 'field' }, [el('span', {}, ['Description']), desc]), el('label', { class: 'field' }, [el('span', {}, ['Instructions (markdown)']), body]),
-      el('div', { class: 'row gap' }, [el('button', { class: 'btn primary', onclick: () => { const n = name.value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-'); if (!n) return; if (orig && orig !== n) H.skills.remove(orig); H.skills.upsert({ name: n, description: desc.value.trim(), content: body.value }); ov.remove(); done(); } }, ['Save']), el('button', { class: 'btn', onclick: () => ov.remove() }, ['Cancel'])])]));
+      el('div', { class: 'row gap' }, [el('button', { class: 'btn primary', onclick: () => { const n = name.value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-'); if (!n) return; if (H.commands.get(n)) return H.toast(`/${n} is a system command; pick another name or the skill could never be reached.`, 'warn', 6000); if (orig && orig !== n) H.skills.remove(orig); H.skills.upsert({ name: n, description: desc.value.trim(), content: body.value }); ov.remove(); done(); } }, ['Save']), el('button', { class: 'btn', onclick: () => ov.remove() }, ['Cancel'])])]));
     document.body.append(ov);
   }
 
@@ -1373,8 +1388,7 @@ H.ui = (() => {
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openMenus.size) { e.stopPropagation(); closeMenus(); } });
     $('#usage-btn').onclick = () => openSettings('usage');
     $('#changes-btn').onclick = () => changesPanel();
-    $('#compact-btn').onclick = () => H.agent.compact(H.agent.current(), { manual: true });
-    H.bus.on('compacting', (id, on) => { if (id === H.agent.current()?.id) { $('#compact-btn').disabled = on; if (on) H.toast('Compacting the conversation…', 'info', 3000); } });
+    H.bus.on('compacting', (id, on) => { if (id === H.agent.current()?.id && on) H.toast('Compacting the conversation…', 'info', 3000); });
     $('#bug-btn').onclick = bugReport;
     $('#chat-title').onclick = () => { const c = H.agent.current(); if (!c) return; const t = prompt('Chat title', c.title); if (t && t.trim()) { H.agent.rename(t.trim()).then(() => { updateTitle(); renderChatList(); }); } };
     $('#preview-close').onclick = () => $('#preview').classList.add('hidden');
@@ -1389,7 +1403,7 @@ H.ui = (() => {
       await waitPreview(w);
       w.postMessage({ type: 'preview', title, html }, previewTarget());
     };
-    $('#export-chat').onclick = () => { const c = H.agent.current(); if (!c) return; const text = c.messages.map(m => m.role === 'tool' ? `### tool:${m.name}\n\`\`\`\n${H.clamp(m.content, 4000)}\n\`\`\`` : `### ${m.role}\n${m.display || (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))}${m.tool_calls?.length ? '\n\n' + m.tool_calls.map(t => `→ ${t.function.name}(${t.function.arguments})`).join('\n') : ''}`).join('\n\n'); H.download((c.title || 'chat').replace(/[^\w-]+/g, '_') + '.md', `# ${c.title}\n\n${text}`, 'text/markdown'); };
+    $('#export-chat').onclick = () => { const c = H.agent.current(); if (!c) return; H.download((c.title || 'chat').replace(/[^\w-]+/g, '_') + '.md', H.chatMarkdown(c), 'text/markdown'); };
     $('#messages').addEventListener('scroll', () => { const b = $('#messages'); stick = b.scrollHeight - b.scrollTop - b.clientHeight < 80; updateScrollBtn(); });
     $('#scroll-bottom').onclick = () => { stick = true; scrollBottom(true); };
     $('#chat-search').addEventListener('input', () => renderChatList());

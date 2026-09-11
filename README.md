@@ -65,7 +65,8 @@ Don't want the check? Turn it off in Settings → Security & privacy; it only ev
   web, data, memory.
 - **Three chat modes**: *Default* asks before writes, *Allow all* just goes, *Plan* investigates read-only and
   hands you a plan with an **Execute** button.
-- **Skills**: reusable playbooks you trigger with `/name` or the model picks up on its own.
+- **Slash in the message box**: `/compact` and `/copy` run right there in the browser, and the skills you write
+  are triggered the same way — `/name` — or the model picks them up on its own.
 - **Plugins**: Jira Cloud, Jira Server/Data Center, GitHub, GitLab out of the box, any REST API via a JSON manifest,
   and remote **MCP** servers.
 - **Browser session bridge**: APIs that block browsers (Jira!) still work: a bookmarklet turns your logged-in tab
@@ -79,10 +80,11 @@ Don't want the check? Turn it off in Settings → Security & privacy; it only ev
 
 1. A new chat has no folder: click the **folder button under the message box** and pick your project (folders you
    have opened before are one click away in that menu). Ask: *"Summarize what this project does and how it is put together."*
-   (or type `/explain-repo`). If it is a git checkout, the branch appears next to the folder name.
-2. Ask *"What have I changed?"* — or type `/review-diff` to have the uncommitted diff reviewed.
+   If it is a git checkout, the branch appears next to the folder name.
+2. Ask *"What have I changed?"* — or *"Review my uncommitted diff."*
 3. Switch to **Plan mode** and ask: *"Plan how to add unit tests."* Review the plan, hit **Execute**.
-4. Type `/research` followed by a topic, or `/review` on a file, to use a skill.
+4. Type `/` in the message box: `/compact` and `/copy` are there, and any skill you add in Settings → Skills
+   (import `skills/example-skill.md` to see one).
 5. Settings → **Plugins** → *Set up* Jira or GitLab, click the bookmarklet on your logged-in tab, then ask:
    *"What are my open issues? Group them by status."*
 
@@ -165,7 +167,7 @@ Open a project folder and the assistant treats it as a codebase rather than a pi
   run `git_status`, how many files differ. Tool results that carry a diff — `git_diff`, `git_show`, `workspace_changes`, and `fs_edit` — are rendered as
   a real diff instead of raw JSON.
 
-The `/review-diff` and `/explain-repo` skills use all of this; `/commit` writes a commit message from the actual diff
+A review or "explain this repo" skill leans on all of this; a commit-message skill writes one from the actual diff
 (you paste it, since the harness cannot commit).
 
 ### Chat modes & permissions
@@ -210,7 +212,7 @@ Long chats stay within the model's window and costs stay roughly linear:
 - **Compaction**: when the context passes 70% of the window (both configurable in Settings → Model & generation), the
   older part of the conversation is summarised by the model and replaced, for the model, by that summary; the last 3
   turns stay verbatim. The chat itself keeps every message: compacted ones are greyed and a "compacted" card shows the
-  summary. Run it by hand from the ⋯ menu ("Compact this chat").
+  summary. Run it by hand by typing `/compact`.
 - **Stable system prompt**: static rules, plugin guides and skills come first in a deterministic order; the workspace
   line and the date sit at the end, so proxies with prompt caching can reuse the long prefix between turns.
 
@@ -219,9 +221,20 @@ The message box shows the estimated context in use versus the model's window, an
 context sizes are read from LiteLLM's `/model/info` when the proxy exposes it; otherwise set them in
 Settings → Usage & costs (USD per 1M tokens). The Usage section also shows all-time totals per model and per day.
 
+### Commands
+Type `/` in the message box for the menu. Commands run in the browser: they never reach the model and never become a
+message in the chat.
+
+| Command | What it does |
+| --- | --- |
+| `/compact` | Summarise the earlier part of this chat to free up context (this used to sit in the ⋯ menu). |
+| `/copy` | Copy the last reply to the clipboard as Markdown. `/copy all` copies the whole chat, `/copy code` the last code block. |
+
+Commands are matched before skills, so a skill cannot be named after one.
+
 ### Skills
-Skills are reusable markdown instruction sets. Type `/` in the chat box to pick one (`/review`, `/research`,
-`/jira-standup`, …) or let the model load one itself through `use_skill` when a request matches its description.
+Skills are reusable markdown instruction sets — the ones you write; the app ships none. Type `/` in the chat box to
+pick one, or let the model load one itself through `use_skill` when a request matches its description.
 Create/edit in **Settings → Skills**, or import `.md` files with frontmatter:
 
 ```md
@@ -354,6 +367,7 @@ js/runtime.js     JS worker sandbox, Pyodide, HTML preview
 js/tools.js       built-in tools registry
 js/plugins.js     REST plugin engine, MCP client, Jira/GitHub manifests
 js/skills.js      skills
+js/commands.js    system commands typed in the chat box (/compact, /copy)
 js/agent.js       agent loop
 js/ui.js          UI
 js/app.js         bootstrap

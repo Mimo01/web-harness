@@ -1,6 +1,6 @@
 {
-  "version": "1.17.0",
+  "version": "1.18.0",
   "date": "2026-09-11",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "one dropdown for the whole app: model, chat mode, settings fields, per-tool policies and the plugin setup wizard all use the same picker as the folder menu - rows carry a sub-line (a model's context window and price, what a mode or connection route actually does), long lists get a filter field, and the keyboard drives all of it (arrows, type-ahead, Enter, Escape); one outside click or Escape closes whatever menu is open; fixes: the settings nav item 'Chat modes & permissions' wrapped onto a second line (now 'Modes & permissions', and no nav label can wrap again), and the dropdown arrow no longer stays warm grey in the dark theme"
+  "notes": "system commands in the message box: /compact (moved out of the ⋯ menu) and /copy - /copy puts the last reply on the clipboard as markdown, /copy all the whole chat (the same text as Export), /copy code the last fenced code block; commands run in the browser, never reach the model and never become a message, and typing the space after /copy turns the / menu into its options, each completing the whole line; the app no longer ships the seven example skills, so Settings > Skills starts empty and a skill can no longer be named after a command (skills you already have are untouched)"
 }

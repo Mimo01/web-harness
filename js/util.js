@@ -111,6 +111,14 @@ H.download = (name, content, type = 'text/plain') => {
   setTimeout(() => URL.revokeObjectURL(url), 60000);   // long enough for the browser to start the download
 };
 
+/* One definition of "this chat as markdown": used by the Export button and by /copy all */
+H.chatMarkdown = (c) => {
+  const body = (c?.messages || []).map(m => m.role === 'tool'
+    ? `### tool:${m.name}\n\`\`\`\n${H.clamp(m.content, 4000)}\n\`\`\``
+    : `### ${m.role}\n${m.display || (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))}${m.tool_calls?.length ? '\n\n' + m.tool_calls.map(t => `→ ${t.function.name}(${t.function.arguments})`).join('\n') : ''}`).join('\n\n');
+  return `# ${c?.title || 'Chat'}\n\n${body}`;
+};
+
 H.readFileAsText = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(file); });
 H.readFileAsDataURL = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
 
