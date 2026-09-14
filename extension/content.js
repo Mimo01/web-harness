@@ -10,10 +10,15 @@
    appeared to be installed on exactly the file:// setup the options page tells people to configure. */
 (() => {
   const isMarked = () => document.documentElement && document.documentElement.getAttribute('data-llm-harness') === '1';
-  chrome.runtime.sendMessage({ type: 'is-harness-origin', origin: location.origin }, (res) => {
+  /* Ask only once the page has marked itself. The question is what binds a file:// harness to its folder in the
+     service worker (a path cannot be an origin, so it is learned rather than configured), and a page that never
+     claims to be the harness must not be what binds it — which is what happened when this was asked first and the
+     marker checked afterwards. */
+  const boot = () => chrome.runtime.sendMessage({ type: 'is-harness-origin', origin: location.origin, url: location.href }, (res) => {
     if (chrome.runtime.lastError || !res || !res.ok) return;
-    if (isMarked()) start(); else { const obs = new MutationObserver(() => { if (isMarked()) { obs.disconnect(); start(); } }); obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-llm-harness'] }); }
+    start();
   });
+  if (isMarked()) boot(); else { const obs = new MutationObserver(() => { if (isMarked()) { obs.disconnect(); boot(); } }); obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-llm-harness'] }); }
   function start() {
     window.addEventListener('message', (e) => {
       if (e.source !== window || !e.data || e.data.type !== 'llm-ext-fetch') return;

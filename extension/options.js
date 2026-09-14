@@ -45,8 +45,26 @@ async function add(key, input, ul) {
   const data = await chrome.storage.sync.get({ [key]: [] }); const arr = data[key]; if (!arr.includes(v)) arr.push(v);
   await chrome.storage.sync.set({ [key]: arr }); input.value = ''; renderList(key, ul);
 }
+/* Which folder the file:// grant is bound to. It is learned, not typed: the first local page that identifies
+   itself as the harness binds it (see background.js). Shown here so it is visible, and forgettable so a harness
+   that moved — or a first binding that went to the wrong page — can be re-pointed by reloading the harness. */
+async function renderFileDir() {
+  const box = document.getElementById('fileDir');
+  const { harness, fileDir } = await chrome.storage.sync.get({ harness: [], fileDir: '' });
+  box.textContent = '';
+  if (!harness.includes('file://')) return;
+  if (!fileDir) { box.append(Object.assign(document.createElement('span'), { className: 'hint', textContent: 'No folder bound yet: the next local page that identifies itself as the harness will bind one.' })); return; }
+  box.append(Object.assign(document.createElement('span'), { className: 'hint', textContent: 'Local harness folder: ' }));
+  box.append(Object.assign(document.createElement('code'), { textContent: fileDir }));
+  const b = document.createElement('button');
+  b.textContent = 'Forget';
+  b.onclick = async () => { await chrome.storage.sync.set({ fileDir: '' }); renderFileDir(); };
+  box.append(' ', b);
+}
+chrome.storage.onChanged.addListener((ch) => { if (ch.fileDir || ch.harness) renderFileDir(); });
+
 const H = document.getElementById('harness'), HL = document.getElementById('harnessList'), O = document.getElementById('origin'), OL = document.getElementById('list');
 document.getElementById('addHarness').onclick = () => add('harness', H, HL);
 document.getElementById('add').onclick = () => add('allowed', O, OL);
 const params = new URLSearchParams(location.search); if (params.get('add')) O.value = params.get('add'); if (params.get('harness')) H.value = params.get('harness');
-renderList('harness', HL); renderList('allowed', OL);
+renderList('harness', HL); renderList('allowed', OL); renderFileDir();

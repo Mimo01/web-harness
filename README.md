@@ -307,7 +307,10 @@ one origin (removing it hands the access back). A site listed but not granted sh
 detects the extension automatically and marks plugins "via extension". Requests go with cookies when the plugin uses
 "My browser login session", or with the plugin's token (and without cookies) otherwise. Jira Server/Cloud work with the
 login session; for GitLab use a personal access token (its cookie sessions need a CSRF token the extension cannot read).
-If the harness is opened from a file, enable "Allow access to file URLs" in the extension's details.
+If the harness is opened from a file, enable "Allow access to file URLs" in the extension's details and add
+`file://` under "Harness page". Because every local file shares that one origin, the extension binds the grant to the
+folder of the first local page that identifies itself as the harness and refuses anything outside it; the options page
+shows the bound folder and can forget it, which is what you do after moving the harness to another folder.
 
 Alternative for Jira/Confluence/GitHub: the **LiteLLM MCP gateway** plugin. The LiteLLM admin registers MCP servers
 (e.g. Atlassian's remote MCP) in LiteLLM; the harness talks to `<LiteLLM>/mcp/` with your LiteLLM key, so no extra
@@ -351,6 +354,14 @@ credentials live in the browser and there is no CORS issue.
   Crypto is missing (plain http harness) the origin-checked plaintext protocol is used. Request ids are
   cryptographic. The connector extension only talks to pages served from harness origins you list in its options,
   and only calls APIs you list there — and it holds no browser access to a site until you add it and Chrome grants it.
+  `file://` is not an origin but every file on the disk, so listing it is narrowed to one folder: the first local
+  page that identifies itself as the harness binds it, anything outside is refused, and the extension's options page
+  shows the bound folder with a *Forget* button for when the harness moves.
+- **A backup is not a trust boundary.** Importing an export applies looks and behaviour immediately, but the settings
+  that decide where data goes — the LiteLLM address your API key is sent to, the Pyodide URL, CORS proxy, search
+  endpoint, system prompt, chat mode, update check — and any `always allow` permission rule it carries are listed
+  one by one in a second question and are not applied unless you say yes. Secrets are never in an export, and never
+  imported from one.
 - **Prompt injection.** Tool output is untrusted; the system prompt says so. Every outbound channel either asks or is
   closed: `web_fetch` and `http_request` prompt once per site (origin) in Default and Plan mode, with "allow this site
   for session / always", and prompt in every mode — Allow all included — when the request would go through a connected
@@ -362,8 +373,10 @@ credentials live in the browser and there is no CORS issue.
   every later chat. Per-tool `always ask` or `deny` in Settings → Permissions narrows any of it. `run_*` tools ask in
   Default mode; `calculate`, `json_query` and plugin
   manifest expressions run in a Worker with fetch, XHR, WebSocket, EventSource, importScripts and nested workers
-  removed; HTML previews get an injected CSP (`connect-src 'none'`, no remote images or form posts); markdown images
-  are click-to-load placeholders, never fetched on render. Use Plan mode when exploring untrusted content, and review
+  removed, and every JavaScript sandbox — networked or not — also loses IndexedDB, cache storage and
+  BroadcastChannel, so code in one cannot reach your chats, memories or folder handles; HTML previews get an
+  injected CSP (`connect-src 'none'`, no remote images or form posts) and a sandbox that cannot open windows or
+  show dialogs; markdown images are click-to-load placeholders, never fetched on render. Use Plan mode when exploring untrusted content, and review
   the arguments in every permission prompt. One deliberate exception: a project context file (`AGENTS.md`,
   `CLAUDE.md`, …) in the workspace root is treated as *your* instructions, not as untrusted data — that is the point of
   it. A toast names the file whenever one is loaded, and the switch is in Settings → Workspace → *Load
@@ -377,7 +390,11 @@ credentials live in the browser and there is no CORS issue.
   Give it an origin of its own: the connector extension's allow-list is per *origin*, so any other page served from
   the same host can mark itself as the harness and inherit the extension's access to the APIs you allowed. The
   Pyodide runtime is the one script fetched without an integrity hash (its URL is a setting, and it pulls its own
-  files); it lands in a Worker with no DOM, storage or secrets, but point that setting only at a host you trust.
+  files); it runs in a Worker with no DOM and no access to your secrets, but that worker does have the browser
+  storage of this origin and a network, so point that setting only at a host you trust — and treat `run_python`
+  as the powerful tool it is. Opening a site from the bridge setup leaves the two tabs linked, which is how the
+  bookmarklet finds the harness; that site can navigate the harness tab away, so use the bookmark only on sites you
+  trust and check the address bar afterwards.
 
 ## 🗂 Files
 ```

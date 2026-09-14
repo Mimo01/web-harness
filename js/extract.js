@@ -6,7 +6,10 @@ H.extract = (() => {
      Hashes are the ones cdnjs publishes for these exact versions — bump both together. */
   const CDN = {
     pdf: ['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', () => window.pdfjsLib, 'sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ=='],
-    pdfWorker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+    /* A classic worker script cannot carry an `integrity` attribute, so this one was the only CDN file here with
+       nothing checking it. It is fetched, hashed and run from a blob: URL instead — the same guarantee the other
+       three get from SRI, by hand. Bump the hash with the version, exactly like the others. */
+    pdfWorker: ['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js', null, 'sha512-BbrZ76UNZq5BhH7LL7pn9A4TKQpQeNCHOo65/akfelcIBbcVvYWOFQKPXIrykE3qZxYjmDX573oa4Ywsc7rpTw=='],
     jszip: ['https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', () => window.JSZip, 'sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg=='],
     xlsx: ['https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', () => window.XLSX, 'sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA=='],
   };
@@ -46,10 +49,28 @@ H.extract = (() => {
   const xmlText = (s) => s.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
   const rtfText = (s) => s.replace(/\\par[d]?/g, '\n').replace(/\{\\\*[^}]*\}/g, '').replace(/\\'([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\[a-z]+-?\d* ?/gi, '').replace(/[{}]/g, '').trim();
 
+  /* The worker, verified: fetch it, hash it, hand pdf.js a blob: URL for the bytes that matched. A mismatch (or a
+     browser with no Web Crypto) is not fatal — pdf.js can parse on the main thread — so the answer is null and
+     the caller falls back to disableWorker, which is slower and can block the tab on a large file, but still
+     reads the user's document rather than refusing to. */
+  let workerBlob = null;
+  async function verifiedWorker() {
+    if (workerBlob !== null) return workerBlob;
+    const [url, , integrity] = CDN.pdfWorker;
+    try {
+      const buf = await (await fetch(url, { cache: 'force-cache' })).arrayBuffer();
+      const digest = 'sha512-' + btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-512', buf))));
+      if (digest !== integrity) throw new Error('checksum mismatch');
+      workerBlob = URL.createObjectURL(new Blob([buf], { type: 'application/javascript' }));
+    } catch (e) { console.warn('pdf worker not verified, parsing on the main thread', e); workerBlob = ''; }
+    return workerBlob;
+  }
   async function pdf(buf, onStatus) {
     onStatus?.('Loading PDF reader…');
-    const lib_ = await lib('pdf'); lib_.GlobalWorkerOptions.workerSrc = CDN.pdfWorker;
-    const doc = await lib_.getDocument({ data: buf }).promise;
+    const lib_ = await lib('pdf');
+    const src = await verifiedWorker();
+    if (src) lib_.GlobalWorkerOptions.workerSrc = src;
+    const doc = await lib_.getDocument({ data: buf, disableWorker: !src }).promise;
     const parts = []; let empty = 0;
     for (let i = 1; i <= doc.numPages; i++) {
       onStatus?.(`Reading PDF page ${i}/${doc.numPages}`);
@@ -60,7 +81,10 @@ H.extract = (() => {
       if (!text) empty++;
       parts.push(`--- Page ${i} ---\n${text}`);
     }
-    const note = empty === doc.numPages ? 'The PDF contains no extractable text (scanned images?). OCR is not available in the browser; ask the user for a text version.' : empty ? `${empty} of ${doc.numPages} pages had no text layer.` : '';
+    const note = [
+      empty === doc.numPages ? 'The PDF contains no extractable text (scanned images?). OCR is not available in the browser; ask the user for a text version.' : empty ? `${empty} of ${doc.numPages} pages had no text layer.` : '',
+      src ? '' : 'The PDF worker could not be verified against its checksum, so parsing ran on the main thread (slower).',
+    ].filter(Boolean).join(' ');
     return { text: parts.join('\n\n'), pages: doc.numPages, note };
   }
   async function docx(buf, onStatus) {

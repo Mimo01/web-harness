@@ -12,7 +12,11 @@
 <style>html,body{margin:0;height:100%;background:#fff}iframe{border:0;width:100%;height:100%;display:block}</style>
 </head>
 <body>
-<iframe id="f" sandbox="allow-scripts allow-forms allow-modals allow-popups" title="preview"></iframe>
+<!-- No allow-popups: the CSP below closes every other way out of the frame, but it does not govern window.open,
+     which would let a rendered page carry data to a URL of its choosing on one click. "Open in tab" is a harness
+     button, not something the preview needs to do for itself. No allow-modals either: render_html is a tool that
+     never asks, and alert()/confirm() in a loop would hold the whole tab. -->
+<iframe id="f" sandbox="allow-scripts allow-forms" title="preview"></iframe>
 <script>
 (() => {
   const f = document.getElementById('f');

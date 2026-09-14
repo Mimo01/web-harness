@@ -1724,11 +1724,13 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
         el('div', { class: 'row gap wrap', id: 'set-export' }, [el('button', { class: 'btn', onclick: exportAll }, [H.icon('download'), 'Export everything']), el('button', { class: 'btn', onclick: importAll }, ['Import'])]),
       ]),
       sec('Running the model\'s code and showing its output', 'Everything the model produces is treated as untrusted: it runs walled off from this page and from your folder.', [advanced([el('ul', { class: 'help-list' }, [
-        el('li', {}, ['JavaScript runs in a Web Worker with no DOM or workspace access; Python runs in Pyodide (WebAssembly) in a Worker. Both can make network requests, so run_* tools ask for permission by default. calculate, json_query and plugin expressions run in a Worker with all network APIs removed.']),
-        el('li', {}, ['HTML previews render in a sandboxed iframe (unique origin) with an injected Content Security Policy: no fetch/XHR/WebSocket, no form posts, no remote images; scripts only inline or from the two CDNs the app itself uses.']),
+        el('li', {}, ['JavaScript runs in a Web Worker with no DOM or workspace access; Python runs in Pyodide (WebAssembly) in a Worker. Both can make network requests, so run_* tools ask for permission by default. calculate, json_query and plugin expressions run in a Worker with all network APIs removed. Every JavaScript sandbox also has IndexedDB, the cache storage and BroadcastChannel taken away, so code running in one cannot reach your chats, memories or the list of folders you have opened.']),
+        el('li', {}, ['HTML previews render in a sandboxed iframe (unique origin) with an injected Content Security Policy: no fetch/XHR/WebSocket, no form posts, no remote images; scripts only inline or from the two CDNs the app itself uses. The frame cannot open windows or show browser dialogs either, so a rendered page has no way to carry anything out of it.']),
         el('li', {}, ['Markdown from the model is sanitized with DOMPurify; images are shown as click-to-load placeholders so a reply can never trigger a request on its own.']),
         el('li', {}, ['web_fetch and http_request ask once per site (origin) in Default and Plan mode; "Allow this site for session" / "Always allow this site" remember the answer. When one of those two is routed through a connected browser tab (your login session), it asks in every mode, including Allow all.']),
-        el('li', {}, ['Plugin tools follow their own risk instead: once you enable a plugin, its "safe" read tools run without asking and its "write" / "danger" tools ask in Default mode — including when the plugin is routed through the bridge or the connector extension. Enabling a bridge plugin therefore lets the assistant read whatever that login can read on that site, without a prompt each time. Give a plugin "always ask" or "deny" per tool in Permissions if that is not what you want.']),
+        el('li', {}, ['Plugin tools follow their own risk: once you enable a plugin, its "safe" read tools run without asking and its "write" / "danger" tools ask in Default mode. A plugin routed through the bridge or the connector extension asks once per session before any of its tools run, whatever the mode, because those calls ride your login on that site. Give a plugin "always ask" or "deny" per tool in Permissions if that is not enough.']),
+        el('li', {}, ['Opening a site from the bridge setup keeps the two tabs linked (that is how the bookmarklet finds the harness). The link runs both ways: that site can navigate this tab away, so use the bookmark only on sites you trust, and check the address bar afterwards.']),
+        el('li', {}, ['An export is a backup, not something to trust: importing one applies looks and behaviour straight away, but settings that decide where your data goes — the LiteLLM address, the Pyodide script, proxies, the system prompt, the chat mode — and any "always allow" permission rule are named and asked about separately, and are not applied unless you say so.']),
         el('li', {}, ['Tool output is treated as untrusted; the system prompt tells the model not to follow instructions embedded in fetched content. Review permission prompts for http_request and plugin write calls, which could exfiltrate data if the model is manipulated.']),
       ])], 'How exactly')]),
       sec('Danger zone', null, [el('div', { class: 'row gap wrap', id: 'set-wipe' }, [
@@ -1760,6 +1762,17 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     const data = { version: 2, exported: new Date().toISOString(), settings: H.settings.get(), perms: H.perms.rules(), plugins: JSON.parse(H.plugins.exportAll()), skills: H.skills.list(), chats: await H.db.allChats(), memory: await H.db.memAll() };
     H.download('harness-export.json', JSON.stringify(data, null, 2), 'application/json');
   }
+  /* Settings an import may carry on the strength of the first confirm: how the app looks and behaves, and what it
+     costs. Everything outside this list decides where data goes or what runs — the base URL the API key is sent
+     to, the Pyodide script loaded into a same-origin worker, the proxy and search endpoints outbound traffic is
+     routed through, the system prompt, the chat mode (where "Allow all" means no tool ever asks again), the
+     update check — so an export is not allowed to change those quietly. An export file comes from wherever the
+     person who handed it over got it; it is a backup format, not a trust boundary. */
+  const IMPORTABLE_SETTINGS = new Set(['theme', 'sendKey', 'streaming', 'showCost', 'autoTitle', 'temperature', 'maxTokens',
+    'keepToolTurns', 'toolStubChars', 'autoCompact', 'compactAt', 'compactKeepTurns', 'respectGitignore',
+    'projectContextFile', 'fileHistory', 'maxIndexFiles', 'defaultContext', 'pricing', 'maxToolIterations',
+    'model', 'models', 'modelInfo', 'transcriptionModel', 'disabledTools', 'settingsVersion']);
+  const settingLabel = (v) => { const s = typeof v === 'object' ? JSON.stringify(v) : String(v); return s === '' ? '(empty)' : s.length > 60 ? s.slice(0, 57) + '…' : s; };
   function importAll() {
     const i = el('input', { type: 'file', accept: '.json' });
     i.onchange = async () => {
@@ -1772,9 +1785,30 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
         if (!confirm(`Import ${counts.join(', ') || 'nothing'}${d.settings ? ' and overwrite your settings' : ''}?\n\nExisting items with the same name or id are replaced. Your API key and plugin credentials are never in an export and are kept as they are.`)) return;
         if (d.settings) {
           delete d.settings.apiKey; delete d.settings.searchKeyValue;   // secrets are never imported, whatever the file says
-          H.settings.set(Object.fromEntries(Object.entries(d.settings).filter(([, v]) => v !== undefined)));
+          const cur = H.settings.get();
+          const entries = Object.entries(d.settings).filter(([, v]) => v !== undefined);
+          const held = entries.filter(([k, v]) => !IMPORTABLE_SETTINGS.has(k) && JSON.stringify(v) !== JSON.stringify(cur[k]));
+          H.settings.set(Object.fromEntries(entries.filter(([k]) => IMPORTABLE_SETTINGS.has(k))));
+          /* a second question, naming each one and both values, because these are the settings that decide where
+             your data goes — and the honest default for a file you did not write is "no" */
+          if (held.length && confirm(`This file also changes ${held.length} setting${held.length === 1 ? '' : 's'} that decide where your data goes and what code runs. They have NOT been applied.\n\n`
+            + held.map(([k, v]) => `• ${k}\n    now: ${settingLabel(cur[k])}\n    file: ${settingLabel(v)}`).join('\n')
+            + `\n\nApply ${held.length === 1 ? 'it' : 'them'} as well? Only do this if you made this export yourself.`)) {
+            H.settings.set(Object.fromEntries(held));
+          }
         }
-        if (d.perms) for (const [k, v] of Object.entries(d.perms)) H.perms.setRule(k, v);
+        if (d.perms) {
+          const rules = Object.entries(d.perms);
+          for (const [k, v] of rules) if (v !== 'allow') H.perms.setRule(k, v);   // deny/ask only ever narrow
+          /* "allow" is the half that grants: a rule for fs_delete or http_request@<some site> means that tool
+             stops asking, for good. Named, counted, and off unless the user says otherwise. */
+          const grants = rules.filter(([, v]) => v === 'allow');
+          if (grants.length && confirm(`This file also turns off the permission prompt for ${grants.length} tool${grants.length === 1 ? '' : 's'}:\n\n`
+            + grants.map(([k]) => '• ' + k).join('\n')
+            + `\n\nThey have NOT been applied. Apply ${grants.length === 1 ? 'it' : 'them'}?`)) {
+            for (const [k, v] of grants) H.perms.setRule(k, v);
+          }
+        }
         /* through importJSON, so a manifest carrying transform/prepare/pathFn asks the same question it asks
            when it arrives on its own — the credentials already stored here survive the replacement */
         if (d.plugins?.length) {

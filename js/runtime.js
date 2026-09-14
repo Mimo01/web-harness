@@ -1,20 +1,44 @@
 /* Code execution: sandboxed JavaScript (Web Worker) and Python (Pyodide via CDN) */
 H.runtime = (() => {
   /* ---- JavaScript in a Worker ---- */
+  /* A Worker made from a blob: URL runs on the harness's own origin, so "sandbox" here only means what is taken
+     away from it before the user code runs. Two preludes do that, sharing these two helpers: kill() replaces a
+     constructor with one that throws; hide() replaces an object-valued global with a getter that throws, so
+     reaching for it at all is the error rather than calling a method on a function. */
+  const KILL = `
+          const dead = (n, why) => function () { throw new Error(n + ' is not available: ' + why); };
+          const kill = (o, n, why) => { try { Object.defineProperty(o, n, { value: dead(n, why), writable: false, configurable: false }); } catch { try { o[n] = dead(n, why); } catch { } } };
+          const hide = (o, n, why) => { try { Object.defineProperty(o, n, { get() { throw new Error(n + ' is not available: ' + why); }, configurable: false }); } catch { try { o[n] = undefined; } catch { } } };`;
+  /* ALWAYS. localStorage is not exposed to workers (which is where the API key and plugin credentials live), but
+     IndexedDB is — and that is where every chat, the model's memories, the unsent draft and the folder registry
+     are kept. A registry row holds a live FileSystemDirectoryHandle, which is structured-cloneable and works from
+     a worker: reachable from here, the workspace would be readable and writable around H.fs and the whole
+     permission layer. Since calculate and json_query are "safe" tools that take an expression straight from the
+     model, and plugin manifests run transform/prepare/pathFn the same way, this has to go regardless of what the
+     caller asked for. BroadcastChannel and the lock/storage managers are shut for the same reason: they are
+     same-origin channels out of the sandbox. */
+  const NO_STORAGE = `
+        (() => {
+          ${KILL}
+          const why = 'this sandbox has no access to the harness\\'s storage';
+          for (const n of ['indexedDB', 'caches']) hide(self, n, why);
+          kill(self, 'BroadcastChannel', why);
+          if (self.navigator) for (const n of ['locks', 'storage']) hide(self.navigator, n, why);
+        })();`;
   /* network:false removes every outbound channel a Worker has (fetch, XHR, WebSocket, EventSource, importScripts, nested
      workers, WebTransport, sendBeacon) before the user code runs, so an expression evaluated as a "safe" tool cannot exfiltrate. */
   const NO_NETWORK = `
         (() => {
-          const dead = (n) => function () { throw new Error(n + ' is not available: this sandbox has no network access'); };
-          const kill = (o, n) => { try { Object.defineProperty(o, n, { value: dead(n), writable: false, configurable: false }); } catch { try { o[n] = dead(n); } catch { } } };
-          for (const n of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'Worker', 'SharedWorker', 'WebTransport', 'RTCPeerConnection']) kill(self, n);
-          if (self.navigator) kill(self.navigator, 'sendBeacon');
+          ${KILL}
+          const why = 'this sandbox has no network access';
+          for (const n of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'Worker', 'SharedWorker', 'WebTransport', 'RTCPeerConnection']) kill(self, n, why);
+          if (self.navigator) kill(self.navigator, 'sendBeacon', why);
         })();`;
   const ABORTED = { error: 'Cancelled by the user (Stop).', logs: [] };
   function runJS(code, { timeout = 15000, input, network = true, signal } = {}) {
     if (signal?.aborted) return Promise.resolve({ ...ABORTED });
     return new Promise((resolve) => {
-      const src = `${network ? '' : NO_NETWORK}
+      const src = `${NO_STORAGE}${network ? '' : NO_NETWORK}
         const __logs = [];
         const __fmt = (a) => a.map(x => { try { return typeof x === 'string' ? x : JSON.stringify(x, null, 1); } catch { return String(x); } }).join(' ');
         for (const k of ['log','info','warn','error','debug']) console[k] = (...a) => __logs.push((k==='log'?'':'['+k+'] ') + __fmt(a));
@@ -43,7 +67,10 @@ H.runtime = (() => {
 
   /* ---- Python via Pyodide, inside a dedicated Worker ----
      The interpreter is loaded once and kept alive between runs. Because it runs off the main thread, a timeout can
-     terminate it (an infinite loop cannot freeze the page); the next run then reloads the runtime. ---- */
+     terminate it (an infinite loop cannot freeze the page); the next run then reloads the runtime.
+     This worker deliberately keeps the globals NO_STORAGE takes away above: Pyodide is fetched and loaded here,
+     so it needs the network either way, and run_python is a 'write' tool that asks before it runs. Taking away
+     IndexedDB would buy nothing a tool with fetch cannot already do, at the cost of breaking package loading. ---- */
   let pyWorker = null, pyReady = false, pyLoading = null, pyId = 0;
   const pyPending = new Map();   // id -> { resolve, timer, onStatus }
   function pyWorkerSource() {

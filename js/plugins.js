@@ -496,7 +496,7 @@ H.plugins = (() => {
       const arr = [].concat(JSON.parse(json));
       for (const p of arr) if (!p.id || !p.kind) throw new Error('Plugin needs id and kind');
       const withCode = arr.filter(p => H.plugins.hasCode(p));
-      if (withCode.length && !confirm(`The plugin manifest "${withCode.map(p => p.name || p.id).join(', ')}" contains code expressions (transform / prepare / pathFn). They run in a sandbox without access to your page, storage or secrets, but they shape the requests sent with your credentials. Only import manifests from sources you trust.\n\nImport anyway?`)) throw new Error('Import cancelled');
+      if (withCode.length && !confirm(`The plugin manifest "${withCode.map(p => p.name || p.id).join(', ')}" contains code expressions (transform / prepare / pathFn). They run in a worker with no network, no page access and no reach into your chats, credentials or settings — but they shape the requests sent with your credentials, and they see every response. Only import manifests from sources you trust.\n\nImport anyway?`)) throw new Error('Import cancelled');
       for (const p of arr) H.plugins.upsert(p);
     },
   };

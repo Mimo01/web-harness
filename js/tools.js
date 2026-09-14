@@ -446,6 +446,10 @@ H.tools = (() => {
   });
   def({
     name: 'web_search', group: 'Web', risk: 'safe',
+    /* The query is model-authored text that leaves the browser for a third party — and, when the provider needs a
+       key, leaves with that key attached. Scoping it to the provider's origin gives it the same one-prompt-per-
+       site treatment web_fetch and http_request get, instead of no prompt at all. */
+    scope: () => originOf({ url: H.settings.get('searchTemplate') }),
     description: 'Search the web using the search provider configured by the user (disabled until configured). Returns result snippets and URLs.',
     parameters: obj({ query: str('Search query'), maxChars: num('Max characters (default 12000)') }, ['query']),
     run: async ({ query, maxChars = 12000 }, ctx) => {
@@ -575,7 +579,10 @@ H.tools = (() => {
 
   /* ===================== MEMORY (persistent notes) ===================== */
   def({
-    name: 'memory_save', group: 'Memory', risk: 'safe',
+    /* 'write', not 'safe': this outlives the chat that calls it and is readable by every later one, so it is the
+       same kind of act as skill_write — and Plan mode, which is meant to investigate without changing anything,
+       has to refuse it. memory_delete was already 'write'. */
+    name: 'memory_save', group: 'Memory', risk: 'write',
     description: 'Persist a fact/note under a key so it is available in future chats. Overwrites existing key.',
     parameters: obj({ key: str('Short kebab-case key'), value: str('Content to remember'), tags: { type: 'array', items: { type: 'string' } } }, ['key', 'value']),
     run: async ({ key, value, tags }) => { await H.db.memSet(key, value, tags); return ok({ saved: key }); },

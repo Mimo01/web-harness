@@ -3,9 +3,11 @@
 <body>
 <h1>Web LLM Harness Connector</h1>
 <h2>1. Harness page</h2>
-<p class="hint">Only pages served from these origins may use the extension. Enter the address you open the harness at (e.g. <code>https://intranet.example.com</code>). Pages opened from a file have the origin <code>file://</code>; add that only if you must, and enable "Allow access to file URLs" in the extension details.</p>
+<p class="hint">Only pages served from these origins may use the extension. Enter the address you open the harness at (e.g. <code>https://intranet.example.com</code>).</p>
+<p class="hint">Pages opened from a file all share one origin, <code>file://</code> — the browser has nothing finer to offer, so listing it would otherwise mean <em>every</em> HTML file on this computer. To stop that, the extension binds the grant to a single folder: the first local page that identifies itself as the harness. Anything outside that folder is refused. Add <code>file://</code> only if you must, enable "Allow access to file URLs" in the extension details, and prefer hosting the harness at an http(s) address where a real origin can be checked.</p>
 <div class="row"><input id="harness" placeholder="https://where-the-harness-is-hosted"><button id="addHarness" class="primary">Add</button></div>
 <ul id="harnessList"></ul>
+<p id="fileDir"></p>
 <h2>2. APIs it may call</h2>
 <p class="hint">The harness may call REST APIs on these origins through the extension, using your browser login (cookies) or a token the harness sends. Adding one asks Chrome for access to that site; removing it gives the access back. The extension starts with access to nothing.</p>
 <div class="row"><input id="origin" placeholder="https://jira.your-company.com"><button id="add" class="primary">Add</button></div>

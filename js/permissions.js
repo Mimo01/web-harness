@@ -90,13 +90,22 @@ H.perms = (() => {
     return new Promise((resolve) => {
       if (ctx?.signal?.aborted) return resolve('deny');
       const argStr = JSON.stringify(args, null, 2);
+      /* A decision about an fs_write is a decision about what it writes, so the preview cannot simply stop at
+         4000 characters and leave the rest unseen: it is cut for readability, and a button puts the whole thing
+         back. Long content is the normal case, not the suspicious one — the point is that it is available. */
+      const LIMIT = 4000;
+      const argPre = H.el('pre', { class: 'perm-args' }, [H.clamp(argStr, LIMIT)]);
+      const showAll = argStr.length > LIMIT
+        ? H.el('button', { class: 'btn sm perm-args-more', onclick: () => { argPre.textContent = argStr; showAll.remove(); } }, [`Show all ${argStr.length} characters`])
+        : '';
       const overlay = H.el('div', { class: 'modal-overlay perm' });
       const box = H.el('div', { class: 'modal perm-modal' }, [
         H.el('div', { class: 'modal-head' }, [H.el('h3', {}, ['Permission required']), H.el('span', { class: 'spacer' }), H.el('span', { class: 'chip risk-' + (tool.risk || 'write') }, [tool.risk || 'write'])]),
         H.el('p', { class: 'muted', style: 'margin:0 0 4px' }, [`The assistant wants to run `, H.el('code', {}, [tool.name]), tool.plugin ? ` from the ${tool.plugin} plugin` : '', ...(scope ? [' on ', H.el('b', {}, [scope])] : []), '.']),
         H.el('p', { class: 'small muted', style: 'margin:0 0 10px' }, [tool.description || '']),
         note ? H.el('p', { class: 'small perm-note' }, [note]) : '',
-        H.el('pre', { class: 'perm-args' }, [H.clamp(argStr, 4000)]),
+        argPre,
+        showAll,
         H.el('textarea', { class: 'perm-msg', placeholder: 'Optional: tell the assistant why you are denying / what to do instead', rows: 2 }),
         H.el('div', { class: 'row gap wrap perm-actions' }, [
           H.el('button', { class: 'btn primary', onclick: () => done('once') }, ['Allow once']),
