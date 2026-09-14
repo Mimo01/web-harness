@@ -96,6 +96,15 @@ Multiple persisted conversations, streaming responses, markdown + syntax highlig
 (when the model returns `reasoning_content`), token usage, regenerate, export to markdown, file/image attachments
 (drag & drop or paste), auto-titles, dark/light theme.
 
+**Edit and ask again**: hover any message you sent and click *Edit*. It becomes a field in place — nothing is
+thrown away until you save — and saving replaces the answer it got and everything after it. Attachments are not
+re-sent (the chat keeps their names, not their contents), and it says so before you commit.
+
+**Finding a chat again**: the search box over the chat list matches both sides of the conversation, over its whole
+length, not just the opening question — so a chat is findable by something the assistant said in it last week.
+Tool results are deliberately left out of the index: they are most of a long chat's bytes and the least useful
+thing to match on.
+
 ### Tools (built in)
 | Group | Tools |
 |---|---|
@@ -484,8 +493,10 @@ PDFs; both happen only when you use them.
   `\n` in `fs_edit` and it still matches.
 - **Paths**: the model may use `\` or `/`; both work. Absolute paths (`C:\…`, `/Users/…`) are rejected with an
   explanation, since tools only operate inside the chosen workspace.
-- **Shortcuts**: Ctrl (Windows/Linux) or Cmd (macOS) + K = new chat, + / = settings, + Enter = send when that mode
-  is selected. Show the bookmarks bar with Ctrl/Cmd+Shift+B to drop the bridge bookmark on it.
+- **Shortcuts**: Ctrl (Windows/Linux) or Cmd (macOS) + K = new chat, + / = settings, + B = show or hide the
+  sidebar, + Enter = send when that mode is selected; Escape stops a running reply. None of them fire while a
+  dialog or a permission prompt is open. Show the bookmarks bar with Ctrl/Cmd+Shift+B to drop the bridge
+  bookmark on it.
 - **Accessibility**: dialogs are announced as such and trap focus (Escape closes them, except permission prompts);
   icon buttons carry labels; a live region announces when the assistant starts, calls a tool, asks a question, and
   what it replied.

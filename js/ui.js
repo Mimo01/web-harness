@@ -210,6 +210,41 @@ H.ui = (() => {
   const turnOf = new Map();                  // part node -> turn
   function closeTurn() { openTurn = null; }
 
+  /* Edit and ask again. The message is rewritten in place rather than moved into the composer: nothing is thrown
+     away until Save, so a change of mind costs one Escape. What comes back is `display` when there is one, so a
+     skill invocation edits as "/review" and not as the paragraphs it expands into. */
+  function startEdit(node, m, idx) {
+    const textEl = node.querySelector('.text');
+    if (!textEl || node.querySelector('.edit-box')) return;
+    if (H.agent.isRunning()) return H.toast('The assistant is still working; stop it first.', 'warn');
+    const orig = m.display || (typeof m.content === 'string' ? m.content : '');
+    const ta = el('textarea', { class: 'edit-area', rows: Math.min(14, orig.split('\n').length + 1) });
+    ta.value = orig;
+    /* the whole bubble becomes the editor: its own row of actions (Copy, Edit again, Delete) and the chips for
+       attachments that this edit is about to drop belong to the message as it was, not to the one being written */
+    node.classList.add('editing');
+    const cancel = () => { node.classList.remove('editing'); box.replaceWith(textEl); };
+    const save = () => {
+      const v = ta.value.trim();
+      if (!v) return H.toast('An empty message cannot be sent.', 'warn');
+      if (v === orig) return cancel();
+      /* the message kept the names of its attachments, never their contents (those live in apiContent), so a
+         rewritten message cannot carry them — better said out loud than discovered in the model's answer */
+      if (m.attachments?.length && !confirm(`The ${m.attachments.length} attached file(s) will not be sent again with the edited message. Attach them again if the assistant still needs them.\n\nContinue?`)) return;
+      H.agent.editMessage(idx, v);
+    };
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); }
+    });
+    const box = el('div', { class: 'edit-box' }, [ta, el('div', { class: 'row gap', style: 'margin-top:6px' }, [
+      el('button', { class: 'btn sm primary', onclick: save }, [H.icon('send'), 'Save & ask again']),
+      el('button', { class: 'btn sm ghost', onclick: cancel }, ['Cancel']),
+      el('span', { class: 'muted small' }, ['Everything after this message is replaced by the new answer.']),
+    ])]);
+    textEl.replaceWith(box);
+    ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
   function userNode(m, idx) {
     if (m.meta?.summary) {
       const det = el('details', { class: 'summary-card' }, [el('summary', {}, [H.icon('bolt'), el('b', {}, ['Earlier conversation compacted']), el('span', { class: 'muted small' }, [` · ${m.meta.replaces} messages summarised; the model sees this summary instead`])]), mdBlock(m.content.replace(/^\[[^\]]*\]\n/, ''))]);
@@ -218,6 +253,9 @@ H.ui = (() => {
     const node = el('div', { class: 'msg user' + (m.meta?.planExec ? ' plan-exec' : '') + (m.meta?.system ? ' system' : '') + (m.meta?.compacted ? ' compacted' : '') }, [el('div', { class: 'body' }, [
       el('div', { class: 'role' }, [el('span', { class: 'actions' }, [
         el('button', { class: 'btn sm ghost', title: 'Copy', onclick: () => { navigator.clipboard.writeText(m.display || (typeof m.content === 'string' ? m.content : '')); H.toast('Copied', 'success', 1200); } }, ['Copy']),
+        /* not on the harness's own messages ("Continue", "Execute the plan", the images a tool asked for): there is
+           no wording of those to reconsider */
+        m.meta?.system ? null : el('button', { class: 'btn sm ghost', title: 'Edit this message and ask again', disabled: idx < 0 || null, onclick: () => startEdit(node, m, idx) }, ['Edit']),
         el('button', { class: 'btn sm ghost icon', title: 'Delete', disabled: idx < 0 || null, onclick: () => H.agent.deleteMessage(idx) }, [H.icon('x')])]), el('span', { class: 'muted small ts', title: H.fmtTime(m.ts) }, [H.fmtClock(m.ts)])]),
       el('div', { class: 'text' }, [m.display || (typeof m.content === 'string' ? m.content : '')]),
       m.attachments?.length ? el('div', { class: 'attachments' }, m.attachments.map(a => el('span', { class: 'chip' + (a.empty ? ' risk-danger' : ''), title: a.empty ? 'No text could be extracted from this file; the model cannot read it. ' + (a.note || '') : (a.chars ? `${a.chars.toLocaleString()} characters of text were sent to the model` : '') }, [H.icon('clip'), `${a.name} (${H.fmtBytes(a.size || 0)})`, a.empty ? ' · no text!' : '']))) : null,
@@ -1903,7 +1941,7 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
         if (e.key === 'ArrowDown') { e.preventDefault(); slashIdx = (slashIdx + 1) % items.length; showSlash(); return; }
         if (e.key === 'ArrowUp') { e.preventDefault(); slashIdx = (slashIdx - 1 + items.length) % items.length; showSlash(); return; }
         if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); pickSlash(items[Math.max(0, slashIdx)]); return; }
-        if (e.key === 'Escape') { hideSlash(); return; }
+        if (e.key === 'Escape') { e.stopPropagation(); hideSlash(); return; }   // closing the menu is all it does: not also stop the run
       }
       const mode = H.settings.get('sendKey');
       const touch = window.matchMedia('(hover: none) and (pointer: coarse)').matches;   // phones/tablets: Enter makes a new line, the button sends
@@ -2005,5 +2043,5 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     H.bus.on('perm-prompt', () => { try { if (document.hidden && Notification.permission === 'granted') new Notification('Permission needed', { body: 'The assistant is waiting for your approval.' }); } catch { } });
   }
 
-  return { init, renderChatList, refreshModels, openSettings, setStatus, updateWorkspaceBtn, restoreDraft };
+  return { init, renderChatList, refreshModels, openSettings, setStatus, updateWorkspaceBtn, restoreDraft, toggleSidebar: () => $('#toggle-sidebar').click() };
 })();

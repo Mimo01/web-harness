@@ -4,16 +4,40 @@
    sidebar and startup never read message bodies. In memory a chat always carries its images inline.
    v3 adds `folders` (every workspace folder the user ever picked, with its directory handle) and `journal`
    (what each chat changed on disk, with the previous contents, so a write can be undone).
-   `memory` holds the model's own persistent notes (memory_save / memory_get), keyed by name. */
+   `memory` holds the model's own persistent notes (memory_save / memory_get), keyed by name.
+   v4 changes no store, only what goes into a `chatIndex` record's search text (see searchText below), so the
+   upgrade rebuilds those records from the chats already in the database. */
 H.db = (() => {
-  const NAME = 'llm-harness', VER = 3;
+  const NAME = 'llm-harness', VER = 4;
   let dbp;
   const known = new Set();   // blob ids already in the store (written once, never rewritten)
 
+  /* What the sidebar search matches on: the conversation itself, gathered from the most recent end backwards
+     until the budget runs out, so a chat stays findable by what was last said in it rather than only by how it
+     opened. Both sides are indexed — half of what you remember about a chat is something the assistant said.
+     Tool results are left out: they are most of a long chat's bytes and the least useful thing to match on, and
+     indexing them would push the actual conversation out of the budget (and the record out of the sidebar's
+     "small enough to hold them all in memory" class). */
+  const SEARCH_CHARS = 20000;
+  function searchText(c) {
+    const msgs = c.messages || [];
+    const parts = [];
+    let left = SEARCH_CHARS;
+    for (let i = msgs.length - 1; i >= 0 && left > 0; i--) {
+      const m = msgs[i];
+      if (m.role !== 'user' && m.role !== 'assistant') continue;
+      const t = String(m.display || m.content || '').trim();
+      if (!t) continue;
+      parts.push(t.length > left ? t.slice(t.length - left) : t);   // the oldest message in budget keeps its tail
+      left -= Math.min(t.length, left);
+    }
+    parts.reverse();
+    return (c.title + ' ' + parts.join(' ')).toLowerCase();
+  }
   /* the search/sidebar record for a chat */
   const summary = (c) => ({
     id: c.id, title: c.title, updated: c.updated, created: c.created, count: (c.messages || []).length, usage: c.usage || null,
-    text: (c.title + ' ' + (c.messages || []).filter(m => m.role === 'user').slice(0, 20).map(m => String(m.display || m.content || '').slice(0, 300)).join(' ')).toLowerCase(),
+    text: searchText(c),
   });
   /* split image data URLs out of a chat: returns the storable chat and the blobs referenced by it */
   function split(c) {
@@ -82,6 +106,14 @@ H.db = (() => {
             if (!h) return;
             folders.put({ id: H.uid(), name: h.name, handle: h, mode: 'readwrite', lastUsed: Date.now() });
             kv.delete('workspaceHandle');
+          };
+        }
+        if (e.oldVersion && e.oldVersion < 4) {   // the search text used to be the first 20 user messages: rebuild it from the whole conversation
+          const chats = t.objectStore('chats'), idx = t.objectStore('chatIndex');
+          chats.openCursor().onsuccess = (ev) => {
+            const cur = ev.target.result; if (!cur) return;
+            try { idx.put(summary(cur.value)); } catch { }
+            cur.continue();
           };
         }
       };

@@ -181,6 +181,14 @@ body.embedded #topbar { padding: 0 8px; } body.embedded #export-chat { display: 
 .msg.user .role { order: 2; margin-top: 2px; } .msg.user .role .actions { order: -1; }
 .msg.user .text { padding: 10px 14px; border-radius: var(--r-lg); background: var(--bubble); color: var(--on-bubble); font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; word-wrap: break-word; }
 .msg.user.plan-exec .text { background: var(--ok); color: #fff; }
+/* editing a message in place: the bubble becomes a field, and the edit is the only thing worth looking at, so it
+   takes the full width the reply gets rather than the bubble's 76%, and the message's own row of actions and its
+   attachment chips go until the edit is settled */
+.msg.user.editing .role, .msg.user.editing .attachments { display: none; }
+.msg.user.editing .body { max-width: 100%; flex: 1; }
+.msg.user .edit-box { width: 100%; align-self: stretch; }
+.msg.user .edit-box .edit-area { width: 100%; min-height: 64px; padding: 10px 14px; border-radius: var(--r-lg); font: inherit; font-size: 14.5px; line-height: 1.55; resize: vertical; }
+.msg.user .edit-box .row { justify-content: flex-end; }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 /* assistant: plain prose, no label */
 .msg.assistant.turn { display: flex; position: relative; }

@@ -39,9 +39,17 @@
     bc.postMessage({ type: 'hello', from: me });
   } catch { }
   if (!H.fs.supported()) H.toast('This browser lacks the File System Access API, so local folders cannot be opened and the file tools will not work. Use Chrome or Edge.', 'warn', 8000);
+  /* The keyboard shortcuts, all in one place. None of them fire while a dialog is open: a settings panel or a
+     permission prompt owns the keyboard until it is answered. Escape reaches here only when nothing nearer
+     wanted it — the slash menu, an open dropdown and every dialog stop it first — so by the time it arrives
+     the only thing left to cancel is the run itself. */
   window.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); H.agent.reset(); H.$('#input').focus(); }
-    if ((e.metaKey || e.ctrlKey) && e.key === '/') { e.preventDefault(); H.ui.openSettings('general'); }
+    if (document.querySelector('.modal-overlay')) return;
+    const cmd = e.metaKey || e.ctrlKey;
+    if (cmd && e.key === 'k') { e.preventDefault(); H.agent.reset(); H.$('#input').focus(); }
+    else if (cmd && e.key === '/') { e.preventDefault(); H.ui.openSettings('general'); }
+    else if (cmd && e.key === 'b') { e.preventDefault(); H.ui.toggleSidebar(); }
+    else if (e.key === 'Escape' && H.agent.isRunning()) { e.preventDefault(); H.agent.stop(); }
   });
 })().catch((e) => {
   /* nothing above this line is allowed to fail silently either: the bootstrap is the only thing that wires

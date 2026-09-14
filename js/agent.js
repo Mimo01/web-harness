@@ -529,6 +529,21 @@ When you have enough information, write a concrete, numbered implementation plan
   /* the index comes from the rendered list, so it is checked here rather than trusted: a negative one would
      splice from the end and delete a message nobody pointed at */
   async function deleteMessage(idx) { if (!chat || runs.has(chat.id) || !(idx >= 0 && idx < chat.messages.length)) return; chat.messages.splice(idx, 1); H.bus.emit('chat-loaded', chat); await persist(); }
+  /* Rewrite a message and ask again from there. Everything after it answered the old wording, so it goes: what
+     the model said, the tools it ran and every later turn. The same index check as deleteMessage, for the same
+     reason. The attachments of the old message are not carried over — the message keeps only their names, the
+     content lives in `apiContent` — so the caller warns before it comes to this. */
+  async function editMessage(idx, text) {
+    const c = chat;
+    if (!c || runs.has(c.id) || !(idx >= 0 && idx < c.messages.length) || c.messages[idx].role !== 'user') return;
+    if (!String(text || '').trim()) return;
+    c.messages.splice(idx);
+    H.bus.emit('chat-loaded', c);
+    /* no persist of its own, and nothing awaited in between: send() writes the whole chat once it has added the
+       new message, and that write covers the truncation. An await here would be a window in which the chat on
+       screen could change, and send() works on whichever chat is current. */
+    await send(text);
+  }
   const isRunning = (id) => runs.has(id || chat?.id);
   /** the folder a running chat is bound to, or null — the sidebar warns when it is not the one that is open */
   const runFolderOf = (id) => runs.get(id || chat?.id)?.folder || null;
@@ -546,5 +561,5 @@ When you have enough information, write a concrete, numbered implementation plan
     return text || '(sub-agent produced no final text)';
   }
 
-  return { send, stop, run, regenerate, continueRun, load, reset, remove, rename, deleteMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runFolderOf, systemPrompt, restorePending, sweepLegacyEmpty, isPending: (id) => !!pending && (id || chat?.id) === pending.id };
+  return { send, stop, run, regenerate, continueRun, load, reset, remove, rename, deleteMessage, editMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runFolderOf, systemPrompt, restorePending, sweepLegacyEmpty, isPending: (id) => !!pending && (id || chat?.id) === pending.id };
 })();
