@@ -3,7 +3,56 @@ H.ui = (() => {
   const $ = H.$, el = H.el;
   let attachments = [];
   let slashIdx = -1;
-  const drafts = new Map();   // chatId -> unsent text (H.agent asks this before it sweeps an empty chat away)
+  /* chatId -> { text, attachments }: what is in the composer but not sent yet. Switching chats swaps it, so files
+     staged for one chat never follow you into another. The unsent chat's draft is also written to storage
+     (H.agent keeps the chat itself there), so a reload does not lose what you typed. */
+  const drafts = new Map();
+  const DRAFT_KEY = 'pendingDraft';
+  const DRAFT_MAX = 5 * 1024 * 1024;   // data URLs of pasted images: keep them in memory rather than filling the store
+  let draftTimer = 0;
+  function currentDraft() { return { text: $('#input')?.value || '', attachments }; }
+  /* an empty draft is not remembered: the map would otherwise hold an entry (and any staged file) for every chat
+     visited in this tab, for the life of it */
+  function stashDraft(id) {
+    if (!id) return;
+    const d = currentDraft();
+    if (d.text.trim() || d.attachments.length) drafts.set(id, d); else drafts.delete(id);
+  }
+  function saveDraft({ now = false } = {}) {
+    const c = H.agent.current(); if (!c) return;
+    stashDraft(c.id);
+    if (!H.agent.isPending(c.id)) return;          // only the unsent chat is worth persisting: the rest are in the sidebar
+    clearTimeout(draftTimer);
+    const write = () => {
+      const d = drafts.get(c.id) || { text: '', attachments: [] };
+      const size = d.attachments.reduce((n, a) => n + (a.content || '').length, 0);
+      H.db.kvSet(DRAFT_KEY, { chatId: c.id, text: d.text, attachments: size > DRAFT_MAX ? [] : d.attachments }).catch(e => console.warn('save draft', e));
+    };
+    if (now) write(); else draftTimer = setTimeout(write, 400);
+  }
+  /* Called as a message is sent: the chat it belonged to is committed by now, so the stored draft (which only ever
+     describes the unsent chat) is dropped along with the in-memory one. */
+  function clearDraft(id) {
+    if (!id) return;
+    drafts.delete(id);
+    if (!H.agent.isPending(id)) return;   // sending in a listed chat must not wipe the unsent chat's stored draft
+    clearTimeout(draftTimer);
+    H.db.kvSet(DRAFT_KEY, null).catch(() => { });
+  }
+  /* Boot: put back what was typed into the unsent chat before the tab was closed. It goes into the draft map even
+     when the app opened on another chat — otherwise the first click on New would show an empty composer and
+     overwrite what was stored. The composer itself is only filled when the unsent chat is the one on screen. */
+  async function restoreDraft() {
+    try {
+      const d = await H.db.kvGet(DRAFT_KEY);
+      if (!d?.chatId || !H.agent.isPending(d.chatId)) return;
+      const draft = { text: d.text || '', attachments: d.attachments || [] };
+      drafts.set(d.chatId, draft);
+      if (H.agent.current()?.id !== d.chatId) return;
+      $('#input').value = draft.text; attachments = draft.attachments;
+      autoresize(); renderAttachments();
+    } catch (e) { console.warn('restore draft', e); }
+  }
 
   /* ---------------- markdown ---------------- */
   /* Images are never fetched on render: a remote <img> in a reply would be a silent GET carrying whatever the model put
@@ -513,7 +562,7 @@ H.ui = (() => {
       const wrongFolder = !!rf && rf.id !== H.fs.folderId();
       list.append(el('div', { class: 'chat-item' + (cur?.id === c.id ? ' active' : '') + (running ? ' running' : '') + (wrongFolder ? ' stale-folder' : ''), onclick: () => H.agent.load(c.id), title: `${c.title}\n${c.count} messages · ${H.relTime(c.updated)}${running ? '\nRunning…' : ''}${wrongFolder ? `\nIt works in "${rf.name}", which is not the folder open now: its file tools will refuse until you reopen it.` : ''}` }, [
         running ? el('span', { class: 'spinner' }) : null,
-        el('span', { class: 'title' + (c.count ? '' : ' muted') }, [c.count || c.title !== 'New chat' ? c.title : 'New chat (empty)']),
+        el('span', { class: 'title' }, [c.title]),
         el('button', { class: 'btn sm icon del', title: 'Rename', onclick: async (e) => { e.stopPropagation(); const t = prompt('Chat title', c.title); if (t) { if (cur?.id === c.id) { await H.agent.rename(t); } else { const full = await H.db.getChat(c.id); if (full) { full.title = t; await H.db.putChat(full); } } indexVersion++; renderChatList(); } } }, [H.icon('edit')]),
         el('button', { class: 'btn sm icon del', title: 'Delete', onclick: (e) => { e.stopPropagation(); if (confirm('Delete chat "' + c.title + '"?')) H.agent.remove(c.id); } }, [H.icon('x')]),
       ]));
@@ -526,7 +575,7 @@ H.ui = (() => {
     const t = $('#input'); const text = t.value.trim();
     if (!text && !attachments.length) return;
     /* a system command runs here and now — before every guard below, so /copy works mid-run too — and never becomes a message */
-    if (H.commands.run(text)) { t.value = ''; autoresize(); hideSlash(); return; }
+    if (H.commands.run(text)) { t.value = ''; autoresize(); hideSlash(); saveDraft(); return; }
     /* answering a question is a send like any other: it carries the attachments too, so the model gets the file
        the user picked to answer with instead of leaving it stranded in the composer */
     if (H.agent.pendingQuestion()) {
@@ -537,7 +586,7 @@ H.ui = (() => {
     if (H.agent.isRunning()) return;
     if (!H.settings.apiKey() && !confirm('No API key configured. Send anyway?')) { openSettings('general'); return; }
     const att = attachments; attachments = []; renderAttachments();
-    t.value = ''; autoresize(); hideSlash(); drafts.delete(H.agent.current()?.id);
+    t.value = ''; autoresize(); hideSlash(); clearDraft(H.agent.current()?.id);
     askNotifications();
     await H.agent.send(text, att);
   }
@@ -554,7 +603,7 @@ H.ui = (() => {
   }
   function renderAttachments() {
     const box = $('#attach-list'); box.innerHTML = '';
-    attachments.forEach((a, i) => box.append(el('span', { class: 'chip' }, [H.icon('clip'), `${a.name} `, el('a', { href: '#', onclick: (e) => { e.preventDefault(); attachments.splice(i, 1); renderAttachments(); } }, ['✕'])])));
+    attachments.forEach((a, i) => box.append(el('span', { class: 'chip' }, [H.icon('clip'), `${a.name} `, el('a', { href: '#', onclick: (e) => { e.preventDefault(); attachments.splice(i, 1); renderAttachments(); saveDraft(); } }, ['✕'])])));
   }
   async function addFiles(files) {
     for (const f of files) {
@@ -570,7 +619,7 @@ H.ui = (() => {
       else if (r.kind === 'text') { attachments.push({ name: f.name, size: f.size, kind: 'text', content: r.content, pages: r.pages, note: r.note }); if (r.note) H.toast(`${f.name}: ${r.note}`, 'warn', 7000); }
       else { attachments.push({ name: f.name, size: f.size, kind: 'text', content: '', note: r.note }); H.toast(r.note, 'warn', 8000); }
     }
-    renderAttachments();
+    renderAttachments(); saveDraft();
   }
   /* The / menu holds both kinds of entry: system commands first (they run here, see js/commands.js), then skills.
      Once the box reads "/command " the same menu lists that command's options instead (/copy → all, code). */
@@ -1671,7 +1720,7 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
         el('li', {}, ['Tool output is treated as untrusted; the system prompt tells the model not to follow instructions embedded in fetched content. Review permission prompts for http_request and plugin write calls, which could exfiltrate data if the model is manipulated.']),
       ])], 'How exactly')]),
       sec('Danger zone', null, [el('div', { class: 'row gap wrap', id: 'set-wipe' }, [
-        el('button', { class: 'btn danger-outline', onclick: async () => { if (confirm('Delete ALL chats, and the file history kept for them?')) { await H.db.clearChats(); await H.journal.clearAll(); H.agent.reset(); renderChatList(); } } }, ['Delete all chats']),
+        el('button', { class: 'btn danger-outline', onclick: async () => { if (confirm('Delete ALL chats, and the file history kept for them?')) { await H.db.clearChats(); await H.journal.clearAll(); await H.agent.reset(); H.bus.emit('chat-updated'); } } }, ['Delete all chats']),
         el('button', { class: 'btn danger-outline', onclick: () => { if (confirm('Reset settings to defaults? (API key is kept)')) { H.settings.reset(); openSettings('general'); } } }, ['Reset settings']),
         el('button', { class: 'btn danger', onclick: async () => { if (confirm('Wipe EVERYTHING stored by this app in this browser (chats, settings, secrets, plugins, skills, the list of folders you have opened and the file history kept for undo)? Your folders themselves are not touched.')) { await H.db.clearChats(); H.secrets.wipe(); localStorage.clear(); sessionStorage.clear(); indexedDB.deleteDatabase('llm-harness'); location.reload(); } } }, ['Wipe all local data']),
       ])]),
@@ -1797,9 +1846,8 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
   }
   function init() {
     applyTheme(); a11yInit();
-    H.agent.setDraftCheck((id) => !!(drafts.get(id) || '').trim() || (id === H.agent.current()?.id && !!$('#input').value.trim()));
     const input = $('#input');
-    input.addEventListener('input', () => { autoresize(); showSlash(); });
+    input.addEventListener('input', () => { autoresize(); showSlash(); saveDraft(); });
     input.addEventListener('keydown', (e) => {
       const menu = $('#slash-menu'); const open = !menu.classList.contains('hidden');
       if (open) {
@@ -1877,10 +1925,11 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
 
     let shownChatId = null;
     H.bus.on('chat-loaded', (c) => {
-      if (shownChatId && shownChatId !== c.id) drafts.set(shownChatId, $('#input').value);   // keep the unsent text of the chat we leave
+      if (shownChatId && shownChatId !== c.id) drafts.set(shownChatId, currentDraft());   // keep the text and files of the chat we leave
       shownChatId = c.id;
       renderChat(c); renderChatList(); updateTitle();
-      $('#input').value = drafts.get(c.id) || ''; autoresize();
+      const d = drafts.get(c.id) || { text: '', attachments: [] };
+      $('#input').value = d.text; attachments = d.attachments; autoresize(); renderAttachments();
     });
     H.bus.on('chat-updated', () => { renderChatList(); updateTitle(); });
     H.bus.on('run-state', () => renderChatList());
@@ -1910,5 +1959,5 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     H.bus.on('perm-prompt', () => { try { if (document.hidden && Notification.permission === 'granted') new Notification('Permission needed', { body: 'The assistant is waiting for your approval.' }); } catch { } });
   }
 
-  return { init, renderChatList, refreshModels, openSettings, setStatus, updateWorkspaceBtn };
+  return { init, renderChatList, refreshModels, openSettings, setStatus, updateWorkspaceBtn, restoreDraft };
 })();

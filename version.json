@@ -1,6 +1,6 @@
 {
-  "version": "1.23.0",
+  "version": "1.24.0",
   "date": "2026-09-14",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "a third audit pass: sub-agent requests are billed to the chat that started them instead of vanishing from the ring, the cost and the usage table; a tool call cancelled by Stop no longer renders as a green success; desktop notifications actually ask for permission, so the \"assistant has a question\" and \"permission needed\" alerts work at all; awaiting a save now means it is saved; deleted chats release their lifted permissions and the deleted-id list is bounded; the workspace content cache stops reaching its ceiling early by miscounting itself; a lazily connected MCP server refreshes the tool list; fs_list and the code index agree on which directories are noise; fs_find accepts a single file as its scope; git_status says when it stopped early; skill_write no longer reports a skills/*.md path that does not exist; and the docs now describe what plugin tools actually ask, rather than what web_fetch asks"
+  "notes": "new chats are drafts until you send them: clicking New opens an empty chat window without adding a row to the sidebar, and the row appears with the first message. The unsent chat keeps what you typed, the files you staged and the folder you opened for it, so clicking into another chat and back to New — or reloading the tab — returns to it as you left it; clicking New again goes back to that same draft instead of piling up another. Staged files now belong to the chat they were staged in rather than following you into the next one, empty \"New chat\" rows left by earlier versions are cleared out on the first run, and the machinery that used to sweep them away is gone"
 }

@@ -39,7 +39,7 @@ H.agent = (() => {
   function pruneLive() {
     for (const id of [...live.keys()]) {
       if (live.size <= LIVE_KEEP) break;
-      if (id === chat?.id || runs.has(id) || questions.has(id) || pendingPersist.has(id)) continue;
+      if (id === chat?.id || id === pending?.id || runs.has(id) || questions.has(id) || pendingPersist.has(id)) continue;
       live.delete(id);
     }
   }
@@ -48,6 +48,44 @@ H.agent = (() => {
   /* A new chat starts with no folder: the first thing you do in it is say what it is about, and picking the folder
      is part of that. Inheriting the last one silently aims a fresh conversation at whatever you had open before. */
   const newChat = () => ({ id: H.uid(), title: 'New chat', messages: [], created: Date.now(), updated: Date.now(), folder: null, usage: { prompt: 0, completion: 0, cost: 0, requests: 0 } });
+
+  /* The unsent chat. "New chat" opens a window, not a history entry: until the first message is sent it stays out
+     of `chats` (and so out of the sidebar) and lives as a single `kv` record, which is enough to survive a reload
+     and to carry back the folder that was opened for it. There is one at a time — clicking New again returns to it. */
+  let pending = null;
+  const PENDING_KEY = 'pendingChat';
+  let pendingActive = false;   // was the unsent chat the one on screen? decides what the next boot opens
+  let pendingTimer = 0;
+  function savePending({ now = false } = {}) {
+    clearTimeout(pendingTimer);
+    const write = () => { if (!pending) return; const { pending: _flag, ...rec } = pending; H.db.kvSet(PENDING_KEY, { chat: rec, active: pendingActive }).catch(e => console.warn('save pending chat', e)); };
+    if (now) write(); else pendingTimer = setTimeout(write, 400);
+  }
+  function dropPending() { clearTimeout(pendingTimer); pending = null; pendingActive = false; return H.db.kvSet(PENDING_KEY, null).catch(() => { }); }
+  /* Read back at boot: the record holds no messages by definition, so the chat is whole as stored. */
+  async function restorePending() {
+    try {
+      const rec = await H.db.kvGet(PENDING_KEY);
+      if (!rec?.chat?.id) return null;
+      pending = { ...rec.chat, messages: [], pending: true, usage: rec.chat.usage || { prompt: 0, completion: 0, cost: 0, requests: 0 } };
+      pendingActive = !!rec.active;
+      live.set(pending.id, pending);
+      return { chat: pending, active: pendingActive };
+    } catch (e) { console.warn('restore pending chat', e); return null; }
+  }
+  /* Before this version a new chat was written to storage straight away, so a run of false starts left a column of
+     empty "New chat" rows behind. They cannot be created any more; the ones already there go on the next boot,
+     when no draft can be pointing at them. */
+  async function sweepLegacyEmpty() {
+    try {
+      for (const c of await H.db.listChats()) {
+        if (c.count || c.title !== 'New chat' || c.id === pending?.id) continue;
+        forget(c.id); live.delete(c.id); H.perms.forget?.(c.id);
+        await H.db.delChat(c.id);
+        H.journal?.clear(c.id).catch(() => { });
+      }
+    } catch (e) { console.warn('sweep empty chats', e); }
+  }
   /* the folder is part of the chat: whatever the user opens while it is active is what it reopens with */
   H.bus.on('workspace', () => { if (!chat) return; const s = H.fs.state(); if (JSON.stringify(s) !== JSON.stringify(chat.folder)) { chat.folder = s; delete chat.mounts; persist(); } });
 
@@ -105,6 +143,8 @@ When you have enough information, write a concrete, numbered implementation plan
   function persist(c = chat, { now = false } = {}) {
     if (!c || deleted.has(c.id)) return Promise.resolve();
     c.updated = Date.now();
+    /* an unsent chat is not history: it goes to its own `kv` record, never to `chats`/`chatIndex` */
+    if (c.pending) { savePending(); return Promise.resolve(); }
     if (now) {
       const t = pendingPersist.get(c.id); if (t) { clearTimeout(t.timer); pendingPersist.delete(c.id); }
       /* this write covers whatever the debounced one was going to write, so its waiters are satisfied by it */
@@ -332,6 +372,8 @@ When you have enough information, write a concrete, numbered implementation plan
     if (!chat) chat = newChat();
     if (questions.has(chat.id)) { answerQuestion(chat.id, text, attachments); return; }   // the model is waiting for this
     if (runs.has(chat.id)) return;
+    /* the first message is what makes a chat: from here it is history, written to `chats` and listed in the sidebar */
+    if (chat.pending) { delete chat.pending; if (pending?.id === chat.id) await dropPending(); }
     const slash = H.skills.expandSlash(text);
     const userMsg = { role: 'user', content: slash ? slash.content : text, display: slash ? slash.display : (opts.display || undefined), ts: Date.now(), attachments: attachments.map(a => ({ name: a.name, size: a.size, kind: a.kind, chars: a.kind === 'text' ? (a.content || '').length : undefined, empty: a.kind === 'text' && !(a.content || '').trim(), note: a.note })), meta: opts.meta };
     if (attachments.length) {
@@ -445,35 +487,26 @@ When you have enough information, write a concrete, numbered implementation plan
     if (chat?.id === id) return;
     let c = live.get(id);                       // running (or recently run) chats live in memory: reuse the same object
     if (!c) { c = await H.db.getChat(id); if (!c || !c.id) { H.bus.emit('chat-updated'); return; } c.usage ||= { prompt: 0, completion: 0, cost: 0, requests: 0 }; settleInterrupted(c); }
-    chat = c; touchLive(c); H.bus.emit('chat-loaded', chat);
+    chat = c; touchLive(c); markPendingActive(false); H.bus.emit('chat-loaded', chat);
     /* a chat carries its own folder: opening one from last month must not aim its paths at today's project */
     await H.fs.use(c.folder ?? c.mounts ?? null).catch(e => console.warn('workspace restore', e));
   }
-  /* Set by the UI: "does this chat still hold text the user typed but never sent?" An empty chat with a draft in
-     it is not disposable. Without an answer, nothing is swept. */
-  let hasDraft = () => true;
-  /* A new chat is written to storage straight away so it is visible and switchable and keeps its draft — which
-     means a run of false starts leaves a column of "New chat (empty)" rows behind. Anything with no messages, no
-     draft, and nothing running is not history; it goes when the next new chat is made. */
-  async function sweepEmpty(keepIds) {
-    try {
-      const keep = new Set(keepIds.filter(Boolean));
-      for (const c of await H.db.listChats()) {
-        if (keep.has(c.id) || c.count || c.title !== 'New chat' || runs.has(c.id) || questions.has(c.id) || hasDraft(c.id)) continue;
-        forget(c.id); live.delete(c.id); H.perms.forget?.(c.id);
-        await H.db.delChat(c.id);
-        H.journal?.clear(c.id).catch(() => { });
-      }
-      H.bus.emit('chat-updated');
-    } catch (e) { console.warn('sweep empty chats', e); }
-  }
+  const markPendingActive = (on) => { if (!pending || pendingActive === on) return; pendingActive = on; savePending({ now: true }); };
+  /* "New chat" opens the unsent chat — the same one every time, with whatever was typed, staged or opened in it.
+     Nothing is written to `chats`, so the sidebar stays as it was until the first message is sent. */
   async function reset() {
-    const prev = chat;
-    chat = newChat(); touchLive(chat); H.perms.clearSession();
+    if (pending) {
+      if (chat?.id === pending.id) return chat;    // already here: leave the draft alone
+      chat = pending; touchLive(chat); markPendingActive(true);
+      H.bus.emit('chat-loaded', chat);
+      await H.fs.use(chat.folder ?? null).catch(e => console.warn('workspace restore', e));
+      return chat;
+    }
+    chat = newChat(); chat.pending = true; pending = chat; pendingActive = true;
+    touchLive(chat); H.perms.clearSession();
     await H.fs.use(null);                          // and the folder that was open belongs to the chat you just left
-    await H.db.putChat(chat);                      // exists right away: visible in the sidebar, switchable, keeps its draft
-    H.bus.emit('chat-loaded', chat); H.bus.emit('chat-updated', chat);
-    sweepEmpty([chat.id, prev?.id]);               // the one being left keeps its place; the abandoned ones do not
+    savePending({ now: true });
+    H.bus.emit('chat-loaded', chat);               // `chat-updated` is what lists a chat: an unsent one is not listed
     return chat;
   }
   async function remove(id) {
@@ -508,5 +541,5 @@ When you have enough information, write a concrete, numbered implementation plan
     return text || '(sub-agent produced no final text)';
   }
 
-  return { send, stop, run, regenerate, continueRun, load, reset, remove, rename, deleteMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runFolderOf, systemPrompt, setDraftCheck: (fn) => { hasDraft = fn; } };
+  return { send, stop, run, regenerate, continueRun, load, reset, remove, rename, deleteMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runFolderOf, systemPrompt, restorePending, sweepLegacyEmpty, isPending: (id) => !!pending && (id || chat?.id) === pending.id };
 })();

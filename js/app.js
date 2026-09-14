@@ -5,8 +5,12 @@
   await H.bridge.init();   // signing identity for the browser-session bridge (needed before the bookmarklet is shown)
   if (H.bridge.embedded()) { document.body.classList.add('embedded'); H.$('#sidebar').classList.add('collapsed'); }
   H.ui.updateWorkspaceBtn('');   // no folder until a chat is loaded: each one carries its own
+  const pending = await H.agent.restorePending();   // the unsent chat, if one was left open: it lives outside the chat list
+  await H.agent.sweepLegacyEmpty();                 // empty "New chat" rows written by older versions
   const recent = await H.db.recentChat();   // one index record via cursor: never reads message bodies at startup
-  if (recent) await H.agent.load(recent.id); else await H.agent.reset();   // reopen the most recent chat; create one only when there is none
+  /* reopen whatever was last on screen: the unsent chat if that is where you were, otherwise the most recent chat */
+  if (pending?.active || !recent) await H.agent.reset(); else await H.agent.load(recent.id);
+  await H.ui.restoreDraft();                // and what was typed into the unsent chat before the tab closed
   H.ui.renderChatList();
   if (H.settings.apiKey()) H.ui.refreshModels().catch(() => { });   // which also loads /model/info for prices and context windows
   else { H.ui.setStatus('', 'not configured'); H.ui.openSettings('general'); }

@@ -192,6 +192,11 @@ Chats are stored in IndexedDB in three parts: a small index record per chat (tit
 sidebar and startup read, the chat itself, and attached images in their own store, written once. Saving a tool result
 rewrites the chat text but never its images; opening the app reads one index record to pick the newest chat.
 
+*New chat* opens a window, not a history entry. Until you send the first message it is not written with the
+others and does not appear in the sidebar; it lives as a single record holding what you typed, the files you
+staged and the folder you opened for it, so clicking away and clicking *New* again — or reloading the tab —
+brings it back as you left it. The sidebar row appears with the first message.
+
 The model also receives a short usage guide for each enabled plugin (issue-key formats, which call comes before
 which, how to handle errors), and a loop guard blocks a tool call repeated with identical arguments and outcome
 more than three times in one turn, then asks the model to report instead.
