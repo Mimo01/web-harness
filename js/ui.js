@@ -774,7 +774,9 @@ H.ui = (() => {
   /* ---------------- topbar ---------------- */
   let modelPick = null, modePick = null;
   /** the model list as picker rows: name, plus what the proxy says it costs and how much it can hold */
-  function modelOptions(models, cur) {
+  /* `brief` is for the composer pill, which has a few dozen pixels to say which model is running; the settings
+     field is wide enough for the whole id. */
+  function modelOptions(models, cur, brief) {
     const list = (models || []).slice();
     if (cur && !list.includes(cur)) list.unshift(cur);
     const known = new Set(models || []);
@@ -785,11 +787,15 @@ H.ui = (() => {
       if (p.inPerTok != null) bits.push('$' + (p.inPerTok * 1e6).toFixed(2) + ' / 1M in');
       if (p.outPerTok != null) bits.push('$' + (p.outPerTok * 1e6).toFixed(2) + ' / 1M out');
       if (!known.has(m) && known.size) bits.unshift('not in the proxy list');
-      return { value: m, label: m, mono: true, sub: bits.join(' · ') || 'no pricing known' };
+      /* the pill drops the provider prefix — the part after it is what names the model; the full id stays on the
+         menu row, the tooltip and the aria-label */
+      const short = brief && m.includes('/') ? m.slice(m.lastIndexOf('/') + 1) : null;
+      const sub = bits.join(' · ') || 'no pricing known';
+      return { value: m, label: m, short, title: short ? m + ' · ' + sub : null, mono: true, sub };
     });
   }
   function setModelOptions(models, cur) {
-    modelPick?.setOptions(modelOptions(models, cur), cur);
+    modelPick?.setOptions(modelOptions(models, cur, true), cur);
   }
   async function refreshModels() {
     const cur = H.settings.get('model');
@@ -819,7 +825,10 @@ H.ui = (() => {
     if (g?.branch) {
       if (!tag) { tag = el('span', { class: 'ws-git' }); btn.append(tag); }
       const dirty = (g.dirty || 0) + (g.untracked || 0);
-      tag.textContent = '· ' + g.branch + (dirty ? ' ●' + dirty : '');
+      /* a long branch is shortened in the middle, not at the end: the tail of "feature/…-v2" is what tells two
+         branches apart, and the change count has to survive too. The full name stays in the tooltip. */
+      const br = g.branch.length > 24 ? g.branch.slice(0, 14) + '…' + g.branch.slice(-8) : g.branch;
+      tag.textContent = '· ' + br + (dirty ? ' ●' + dirty : '');
       btn.title = `${where}, on git branch ${g.branch}` + (g.dirty != null ? `, with ${g.dirty} changed and ${g.untracked} untracked file(s) at the last git_status` : '') + '.\nClick to work in a different folder.';
     } else { tag?.remove(); btn.title = where + '.\nClick to open a folder, or switch to one you used before.'; }
     btn.classList.toggle('needs-grant', !!(f && !f.granted));
@@ -1888,7 +1897,7 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     modelPick = picker({
       variant: 'pill', icon: 'cube', title: 'Model', search: true, searchPlaceholder: 'Filter models…',
       empty: 'No model matches', placeholder: 'No model', value: H.settings.get('model'),
-      options: modelOptions(H.settings.get('models'), H.settings.get('model')),
+      options: modelOptions(H.settings.get('models'), H.settings.get('model'), true),
       onpick: (v) => { H.settings.set({ model: v }); updateContextMeter(); },
     });
     modelPick.el.id = 'model-pick'; $('#model-pick').replaceWith(modelPick.el);

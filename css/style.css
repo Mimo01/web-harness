@@ -276,12 +276,14 @@ pre code.hljs, .hljs { background: transparent !important; padding: 0 !important
    Everything in the app that offers a choice has the same shape: a quiet trigger, and a floating list of rows that
    carry a name plus a muted sub-line saying what the choice means. The composer pills (folder, model, mode) are the
    small end of it, the settings fields the wide end; the rows themselves are one rule, used by both. */
-.pill-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; max-width: 260px; padding: 0 8px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background .12s, color .12s; }
+/* a pill states what it is set to, so it has to give way rather than grow: it clips its own text at whatever
+   width the strip can spare, down to a floor where the name is still worth reading. */
+.pill-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; min-width: 72px; max-width: 260px; padding: 0 8px; overflow: hidden; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background .12s, color .12s; }
 .pill-btn:hover { background: var(--surface-2); color: var(--fg-2); }
-.pill-btn .ico { width: 14px; height: 14px; }
+.pill-btn .ico { width: 14px; height: 14px; flex-shrink: 0; }
 .pill-btn .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #ws-btn.primary, #model-pick .pick { color: var(--fg-2); }   /* a folder is open / a model is chosen: a shade stronger than its neighbours */
-#ws-btn .ws-git { font-size: 11.5px; font-family: var(--mono); opacity: .72; white-space: nowrap; }
+#ws-btn .ws-git { min-width: 0; overflow: hidden; font-size: 11.5px; font-family: var(--mono); text-overflow: ellipsis; opacity: .72; white-space: nowrap; }
 #ws-btn.needs-grant { color: var(--warn); } #ws-btn.needs-grant .ws-git { color: var(--warn); opacity: 1; }
 body[data-mode="plan"] #mode-pick .pick { color: var(--warn); }
 body[data-mode="auto"] #mode-pick .pick { color: var(--ok); }
@@ -363,16 +365,23 @@ body.asking .composer-box { border-color: var(--warn); }
 #attach-list .chip { height: 22px; } #attach-list .chip a { color: var(--muted); margin-left: 2px; } #attach-list .chip a:hover { color: var(--fg); text-decoration: none; }
 #input { width: 100%; min-height: 50px; max-height: 260px; padding: 14px 16px 6px; border: 0; background: transparent; resize: none; font-size: 15px; line-height: 1.5; box-shadow: none; }
 #input:focus { box-shadow: none; }
-.composer-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 4px 8px 8px; }
+.composer-bar { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; padding: 4px 8px 8px; }
 .composer-bar .hint { display: none; }
-.pill-strip { display: contents; }
-#ctx-meter { display: inline-flex; align-items: center; gap: 6px; margin: 0 4px 0 2px; font-size: 11.5px; color: var(--muted); cursor: pointer; font-variant-numeric: tabular-nums; }
+.composer-bar > .btn { flex-shrink: 0; }
+/* the strip owns everything between the clip and the send button, so a long branch or model name is truncated
+   inside it instead of pushing the send button onto a second line */
+.pill-strip { display: flex; align-items: center; flex: 1 1 auto; gap: 4px; min-width: 0; }
+/* the wrapper is a flex box, not a plain block: that is what makes the pill inside it take the width the strip
+   actually gave it, instead of sitting at its own max-width and spilling over its neighbour */
+.pill-strip .menu-wrap { display: flex; min-width: 0; }
+#mode-pick { flex-shrink: 0; }   /* the mode names are three short words: it is the folder and the model that give way */
+#ctx-meter { display: inline-flex; align-items: center; flex-shrink: 0; gap: 6px; margin: 0 4px 0 2px; font-size: 11.5px; color: var(--muted); cursor: pointer; font-variant-numeric: tabular-nums; }
 #ctx-meter .ring { width: 18px; height: 18px; flex-shrink: 0; transform: rotate(-90deg); }
 #ctx-meter .ring circle { fill: none; stroke-width: 4; } #ctx-meter .ring .bg { stroke: var(--surface-3); }
 #ctx-meter .ring .fg { stroke: var(--fg-2); stroke-linecap: round; transition: stroke-dasharray .4s; }
 #ctx-meter.warn .ring .fg { stroke: var(--warn); } #ctx-meter.danger .ring .fg { stroke: var(--danger); }
 #ctx-meter .txt { font-weight: 500; color: var(--fg-2); } #ctx-meter.warn .txt { color: var(--warn); } #ctx-meter.danger .txt { color: var(--danger); }
-#usage { margin-right: 6px; font-size: 11.5px; cursor: pointer; font-variant-numeric: tabular-nums; }
+#usage { flex-shrink: 0; margin-right: 6px; font-size: 11.5px; cursor: pointer; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* the panel behind the ring: what fills the window, what the chat has cost, and the two things to do about it */
 .ctx-pop { position: fixed; z-index: 60; width: 328px; max-width: calc(100vw - 16px); background: var(--raised); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); animation: pop .12s ease; cursor: default; }
@@ -655,6 +664,7 @@ details.adv[open] > summary { margin-bottom: 4px; } details.adv[open] > summary 
   .pill-strip { grid-area: pills; display: flex; align-items: center; gap: 4px; padding: 0 2px; overflow-x: auto; scrollbar-width: none; }
   .pill-strip::-webkit-scrollbar { display: none; }
   .pill-strip .spacer { flex: 1; } .pill-strip #usage { display: none; }
+  .pill-strip .menu-wrap { flex-shrink: 0; }   /* here the strip scrolls instead of truncating, so the pills keep their width */
   .ctx-pop { width: auto; } .ctx-body { padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); }
   .pill-btn { height: 24px; max-width: 42vw; flex-shrink: 0; padding: 0 6px; font-size: 11.5px; } .pill-btn .ico { width: 12px; height: 12px; } .pill-btn .chev { width: 10px; height: 10px; }
   /* the strip scrolls sideways, so the menus are pinned to the viewport instead of to the pill inside it */

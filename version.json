@@ -1,6 +1,6 @@
 {
-  "version": "1.25.0",
+  "version": "1.25.1",
   "date": "2026-09-14",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "the ⋯ menu in the top bar keeps only what belongs to the chat in front of you: \"Files changed in this chat\" and \"Export chat as Markdown\". \"Report a bug\" is gone from it — the bug button in the sidebar footer does the same thing — and so is \"Usage & costs\", which lives in Settings, both as its own section and as a link from the context meter"
+  "notes": "the row of pills under the message box holds its line: a long git branch or a long model id is now truncated inside its own pill instead of spilling over the pill next to it or pushing the send button onto a second row. The branch is shortened in the middle so the change count still shows, and the model pill drops the provider prefix — the full id stays on the menu row and in the tooltip"
 }
