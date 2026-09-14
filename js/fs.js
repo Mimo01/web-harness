@@ -170,12 +170,15 @@ H.fs = (() => {
     return { name, kind: 'directory' };
   }
   /* skipDir(name, path) decides which directories a recursive walk descends into. H.code passes the
-     repository's .gitignore rules; without one the noise list below is used. */
-  const DEFAULT_SKIP = ['node_modules', '.git', 'dist', 'build', '.venv', '__pycache__'];
+     repository's .gitignore rules; without one the noise list is used — H.code's, so a walk started here and
+     one started there agree about what "noise" means. Its own list is only the fallback for a load order
+     where H.code is not there yet (js/fs.js loads first). */
+  const FALLBACK_SKIP = ['node_modules', '.git', 'dist', 'build', '.venv', '__pycache__'];
+  const noise = (name) => (H.code?.DEFAULT_SKIP || FALLBACK_SKIP).includes(name);
   async function list(path = '', { recursive = false, maxEntries = 500, skipDir = null } = {}) {
     const { parts, path: base } = resolve(path);
     await ensure();
-    const skip = skipDir || ((name) => DEFAULT_SKIP.includes(name));
+    const skip = skipDir || ((name) => noise(name));
     const out = [];
     async function walk(d, prefix) {
       for await (const [name, h] of d.entries()) {

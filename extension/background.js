@@ -4,6 +4,12 @@
    extension ships with none, so until the user adds a site it cannot read or touch anything. */
 const cfg = async () => chrome.storage.sync.get({ allowed: [], harness: [] });
 const originOf = (u) => { try { return new URL(u).origin; } catch { return ''; } };
+/* A harness opened from a file has an opaque origin, and the two ends disagree about how to spell it:
+   `sender.origin` and `location.origin` are "file://" in most Chrome builds but "null" in some, and "null" is
+   a truthy string, so the `sender.url` fallback below never ran. The options page stores "file://" (see
+   options.js `norm`), so both sides are folded to that — which is the value already on the allow-list, so this
+   widens nothing: an origin still has to be listed to be accepted. */
+const canonical = (origin, url) => (!origin || origin === 'null' ? (/^file:/i.test(url || '') ? 'file://' : originOf(url || '')) : origin);
 const granted = (origin) => chrome.permissions.contains({ origins: [origin + '/*'] }).catch(() => false);
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
@@ -13,8 +19,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'open-options') { chrome.runtime.openOptionsPage(); return; }
   (async () => {
     const { allowed, harness } = await cfg();
-    const senderOrigin = sender.origin || originOf(sender.url || '');
-    if (msg.type === 'is-harness-origin') { sendResponse({ ok: harness.includes(senderOrigin) && senderOrigin === msg.origin }); return; }
+    const senderOrigin = canonical(sender.origin, sender.url);
+    if (msg.type === 'is-harness-origin') { sendResponse({ ok: harness.includes(senderOrigin) && senderOrigin === canonical(msg.origin, sender.url) }); return; }
     if (msg.type !== 'harness-fetch') return;
     if (!harness.includes(senderOrigin)) { sendResponse({ error: 'NOT_HARNESS:' + senderOrigin }); return; }
     try {

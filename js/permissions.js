@@ -127,6 +127,8 @@ H.perms = (() => {
   return {
     check, willPrompt, policyFor, defaultFor, effectiveMode,
     setOverride: (m, chatId) => { const id = chatId ?? currentChat(); if (!id) return; if (m) overrides.set(id, m); else overrides.delete(id); H.bus.emit('mode', effectiveMode(id)); },
+    /* a deleted chat's lifted permissions have nothing left to apply to; H.agent calls this when it removes one */
+    forget: (chatId) => { overrides.delete(chatId); },
     rules: () => rules,
     setRule: (name, pol) => { if (pol === 'default') delete rules[name]; else rules[name] = pol; save(); },
     clearSession: () => session.clear(),

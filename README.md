@@ -236,6 +236,8 @@ Commands are matched before skills, so a skill cannot be named after one.
 ### Skills
 Skills are reusable markdown instruction sets — the ones you write; the app ships none. Type `/` in the chat box to
 pick one, or let the model load one itself through `use_skill` when a request matches its description.
+They are stored in this browser, not as files in a workspace: the `skills/` folder in this repository is one
+sample to import, nothing reads it at runtime.
 Create/edit in **Settings → Skills**, or import `.md` files with frontmatter:
 
 ```md
@@ -346,8 +348,12 @@ credentials live in the browser and there is no CORS issue.
   and only calls APIs you list there — and it holds no browser access to a site until you add it and Chrome grants it.
 - **Prompt injection.** Tool output is untrusted; the system prompt says so. Every outbound channel either asks or is
   closed: `web_fetch` and `http_request` prompt once per site (origin) in Default and Plan mode, with "allow this site
-  for session / always"; a request routed through a connected browser tab (your login session) prompts in every mode,
-  including Allow all; `run_*` tools and plugin writes ask in Default mode; `calculate`, `json_query` and plugin
+  for session / always", and prompt in every mode — Allow all included — when the request would go through a connected
+  browser tab (your login session). Plugin tools follow their own declared risk instead: their `write` and `danger`
+  tools ask in Default mode, their `safe` read tools do not, and that holds whatever route the plugin uses — so
+  enabling a bridge-routed plugin lets the assistant read whatever that login can read on that site without a prompt
+  each time. Per-tool `always ask` or `deny` in Settings → Permissions is how you narrow that. `run_*` tools ask in
+  Default mode; `calculate`, `json_query` and plugin
   manifest expressions run in a Worker with fetch, XHR, WebSocket, EventSource, importScripts and nested workers
   removed; HTML previews get an injected CSP (`connect-src 'none'`, no remote images or form posts); markdown images
   are click-to-load placeholders, never fetched on render. Use Plan mode when exploring untrusted content, and review
@@ -388,7 +394,7 @@ js/commands.js    system commands typed in the chat box (/compact, /copy)
 js/agent.js       agent loop
 js/ui.js          UI
 js/app.js         bootstrap
-skills/           example skills to import
+skills/           example skills to import (Settings → Skills → Import .md); not read at runtime
 dev/              optional dev helpers: serve.js (static server), mock-litellm.js (fake OpenAI API),
                   codetest.html (runs the code and git modules against a real .git and checks them against git itself)
 ```

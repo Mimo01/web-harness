@@ -142,7 +142,6 @@ H.db = (() => {
     clearChats: () => tx(CHAT_STORES, 'readwrite', t => { for (const s of CHAT_STORES) t.objectStore(s).clear(); known.clear(); }),
     kvGet: async (k) => (await tx('kv', 'readonly', s => s.get(k)))?.value,
     kvSet: (k, v) => tx('kv', 'readwrite', s => s.put({ key: k, value: v })),
-    kvDel: (k) => tx('kv', 'readwrite', s => s.delete(k)),
     folders: () => all('folders'),
     folderPut: (f) => tx('folders', 'readwrite', s => s.put(f)),
     /* a registry row holds a live directory handle, so "forget this folder" is a real revocation, not just tidying */

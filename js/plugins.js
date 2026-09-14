@@ -378,6 +378,9 @@ H.plugins = (() => {
     const tl = await mcpRpc(p, 'tools/list', {}, sid);
     const conn = { sessionId: sid, tools: tl.result?.tools || [], serverInfo: init.result?.serverInfo };
     mcpCache.set(p.id, conn);
+    /* the projected tool list is cached by toolsVersion and this just changed what it should contain —
+       including on the lazy connect from runMcp, which used to leave a stale list behind */
+    invalidateTools();
     return conn;
   }
   async function runMcp(p, toolName, args) {

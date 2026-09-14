@@ -493,7 +493,7 @@ H.git = (() => {
         const sha = hex(u8, i + 40);
         const flags = dv.getUint16(i + 60);
         i += 62;
-        if (version >= 3 && (flags & 0x4000)) i += 2;
+        if (version >= 3 && (flags & 0x4000)) i += 2;   // extended flags: the name starts two bytes later
         let name;
         if (version >= 4) {
           let strip = 0, s = 0, b;
@@ -504,7 +504,10 @@ H.git = (() => {
         } else {
           const nul = u8.indexOf(0, i);
           name = text(u8.subarray(i, nul));
-          i = start + Math.ceil((62 + (nul - (start + 62)) + 1) / 8) * 8;
+          /* An entry is padded with 1-8 NULs to a multiple of 8 bytes counted from the start of the entry,
+             so the length of the prefix before the name (62 bytes, or 64 with extended flags) does not come
+             into it at all — only where the name ended. */
+          i = start + Math.ceil((nul - start + 1) / 8) * 8;
         }
         prev = name;
         map.set(name, { sha, mode, size, mtime, stage: (flags >> 12) & 3 });
@@ -529,7 +532,7 @@ H.git = (() => {
       const doHash = thorough || auto;
 
       const modified = [], deleted = [], untracked = [], staged = [], unreadable = [];
-      let hashed = 0;
+      let hashed = 0, truncated = false;
       for (const [path, entry] of tracked) {
         /* git tracks a file even when .gitignore matches it, so a tracked path missing from the
            ignore-aware index is not necessarily gone: ask the file system before calling it deleted. */
@@ -552,7 +555,9 @@ H.git = (() => {
         if (changed) modified.push(path);
         if (idx.has(path) && headMap.has(path) && idx.get(path).sha !== headMap.get(path).sha) staged.push(path);
         else if (idx.has(path) && !headMap.has(path)) staged.push(path);
-        if (modified.length + deleted.length > maxFiles) break;   // untracked is collected after this loop, so it could never bound it
+        /* untracked is collected after this loop, so it could never bound it. A stop here means the answer
+           is partial, and a partial change list read as a complete one is worse than no answer at all. */
+        if (modified.length + deleted.length > maxFiles) { truncated = true; break; }
       }
       for (const f of files.files) if (!tracked.has(f.path)) untracked.push(f.path);
       label = { branch: h.branch || (h.sha || '').slice(0, 8), dirty: modified.length + deleted.length, untracked: untracked.length };
@@ -569,6 +574,8 @@ H.git = (() => {
         method: doHash ? 'content hash' : 'size + timestamp (fast); pass thorough:true to hash every file',
         hashedFiles: hashed,
         unreadable: unreadable.length ? unreadable : undefined,
+        truncated: truncated || undefined,
+        note: truncated ? `Stopped after ${maxFiles} changed or deleted files: this list is incomplete, and "clean" below only describes what was scanned. Narrow the question to a subdirectory with git_diff paths.` : undefined,
       };
     }
     async function statOf(path) { try { const s = await H.fs.stat(path); return s.kind === 'file' ? s : null; } catch { return null; } }
@@ -756,10 +763,12 @@ H.git = (() => {
       } catch { label = null; return null; }
     }
 
+    /* tree(), parseTag() and hashBlob() are building blocks for the ones below and are not part of the
+       surface: treeMap, commit and status are what callers actually want. */
     return {
-      detect, requireRepo, head, config, resolve, readObject, commit, tree, treeMap, blobText,
+      detect, requireRepo, head, config, resolve, readObject, commit, treeMap, blobText,
       readIndex, status, diffWorktree, diffRefs, commitChanges, log, blame, branches, quickBranch, state,
-      parseTag, hashBlob, resetCaches,
+      resetCaches,
     };
   }
 
@@ -777,8 +786,9 @@ H.git = (() => {
     while (inst.size > MAX_REPOS) inst.delete(inst.keys().next().value);
     return inst.get(id);
   };
+  /* Only resetCaches is folder-independent (dev/codetest.html uses it to force a re-read between fixtures);
+     inflate and isSha are internal and reachable nowhere else. */
   const shared = {
-    inflate, isSha,
     resetCaches: () => { for (const i of inst.values()) i.resetCaches(); },
   };
   return new Proxy(shared, { get: (t, k) => (k in t ? t[k] : of()[k]) });

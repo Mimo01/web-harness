@@ -347,12 +347,22 @@ async function run() {
     soft(pct >= 90, `${file}: ${pct}% of lines attributed to the same commit as git (approximate blame, no rename detection)`);
     return `${file}: ${pct}% identical attribution over ${want.length} lines`;
   });
-  await test('git: index (.git/index) lists the tracked files', async () => {
+  /* Names alone are a weak check: an entry read from the wrong offset can still land on a plausible-looking
+     string. The blob shas cannot, so they are compared too — which is what catches a mis-sized entry prefix.
+     The case that used to break this is `git add -N somefile` (intent-to-add) or a skip-worktree file: both
+     set the extended flag, which makes the entry two bytes longer than the fixed 62. Run this suite against a
+     checkout with one to exercise that path; without one the index has no extended entries to read. */
+  await test('git: index (.git/index) lists the tracked files with their shas', async () => {
     const want = (await git('ls-files')).trim().split('\n').filter(Boolean).sort();
-    const got = [...(await H.git.readIndex()).keys()].sort();
+    const idx = await H.git.readIndex();
+    const got = [...idx.keys()].sort();
     eq(got.length, want.length, 'tracked file count');
     for (let i = 0; i < want.length; i++) eq(got[i], want[i], 'entry ' + i);
-    return want.length + ' index entries';
+    const staged = new Map((await git('ls-files', '-s')).trim().split('\n').filter(Boolean)
+      .map(l => { const m = l.match(/^\d+ ([0-9a-f]{40}) \d+\t(.*)$/); return m ? [m[2], m[1]] : null; }).filter(Boolean));
+    let extended = 0;
+    for (const [path, sha] of staged) { eq(idx.get(path)?.sha, sha, 'sha of ' + path); if (idx.get(path)?.sha !== sha) extended++; }
+    return `${want.length} index entries, ${staged.size} shas match` + (extended ? ` (${extended} mismatched)` : '');
   });
 
   /* ---------------- code intelligence ---------------- */

@@ -653,9 +653,13 @@ H.tools = (() => {
     parameters: obj({}),
     run: async () => ok({ skills: H.skills.list().map(s => ({ name: s.name, description: s.description })) }),
   });
-  /* Writing a skill is a small edit to a file the user owns, so it is shaped like one: the permission prompt shows
-     the whole body before it lands, and the result carries a unified diff the tool card renders. */
-  const skillPath = (name) => `skills/${name}.md`;
+  /* Writing a skill is a small edit to something the user owns, so it is shaped like one: the permission prompt
+     shows the whole body before it lands, and the result carries a unified diff the tool card renders.
+     A skill is not a file, though — it lives in this browser's local storage, and the label below is only what
+     the diff header says. It is deliberately not returned as a `path`: a path in a tool result is an invitation
+     to tell the user to go and open it, and there is nothing there to open. */
+  const skillLabel = (name) => `${name}.md (skill, stored in this browser)`;
+  const SKILL_NOTE = 'Skills are stored in this browser, not as files in the workspace. The user manages and can revert them in Settings > Skills.';
   def({
     name: 'skill_write', group: 'Skills', risk: 'write',
     description: 'Create a skill, or replace an existing one with the same name. A skill is a reusable instruction set the user invokes by typing /name in the chat box, or that you load later with use_skill. Write the instructions in the second person, as concrete steps. Read an existing skill with use_skill first: this replaces it whole.',
@@ -669,10 +673,9 @@ H.tools = (() => {
       if (!v.ok) throw new Error(v.error);
       const old = H.skills.get(v.name);
       const next = { name: v.name, description: String(description || '').trim(), content: String(content || '').trim() };
-      const path = skillPath(v.name);
-      const patch = H.diff.unified(old ? H.skills.serialize(old) : null, H.skills.serialize(next), { path, context: 3 });
+      const patch = H.diff.unified(old ? H.skills.serialize(old) : null, H.skills.serialize(next), { path: skillLabel(v.name), context: 3 });
       H.skills.upsert(next, { by: 'model' });
-      return ok({ name: v.name, [old ? 'updated' : 'created']: true, path, patch, invoke: '/' + v.name, note: 'The user can revert this in Settings > Skills.' });
+      return ok({ name: v.name, [old ? 'updated' : 'created']: true, patch, invoke: '/' + v.name, note: SKILL_NOTE });
     },
   });
   def({
@@ -682,10 +685,9 @@ H.tools = (() => {
     run: async ({ name }) => {
       const s = H.skills.get(name);
       if (!s) throw new Error('Unknown skill: ' + name + '. Available: ' + (H.skills.list().map(x => x.name).join(', ') || 'none'));
-      const path = skillPath(s.name);
-      const patch = H.diff.unified(H.skills.serialize(s), null, { path, context: 3 });
+      const patch = H.diff.unified(H.skills.serialize(s), null, { path: skillLabel(s.name), context: 3 });
       H.skills.remove(s.name, { by: 'model' });
-      return ok({ deleted: s.name, path, patch, note: 'The user can revert this in Settings > Skills.' });
+      return ok({ deleted: s.name, patch, note: SKILL_NOTE });
     },
   });
 
@@ -715,5 +717,7 @@ H.tools = (() => {
   function enabled(chatId) { const dis = new Set(H.settings.get('disabledTools') || []); return all().filter(t => !dis.has(t.name) && H.perms.policyFor(t, chatId) !== 'deny' && (!t.plugin || H.plugins.get(t.plugin)?.enabled)); }
   function openaiSpecs(chatId) { return enabled(chatId).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters || { type: 'object', properties: {} } } })); }
   function groups() { const g = {}; for (const t of all()) (g[t.group || 'Other'] ||= []).push(t); return g; }
+  /* `def` is exported although nothing in the app calls it: it is the hook for adding a tool from outside
+     this file (a user script, a fork, the console), and the registry is not much use without it. */
   return { def, all, get, enabled, openaiSpecs, groups, fetchWithProxy };
 })();

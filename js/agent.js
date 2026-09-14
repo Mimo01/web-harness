@@ -3,7 +3,12 @@
 H.agent = (() => {
   let chat = null;
   const runs = new Map();    // chatId -> { abort }   (a chat keeps running in the background when you switch away)
-  const deleted = new Set(); // chat ids removed by the user: never write them back
+  /* chat ids removed by the user: never write them back. Its whole job is to outlive the in-flight writes of
+     a chat that was just deleted, so only the recent end of it matters — a Set keeps insertion order, and the
+     oldest ids go once there are more than a run could possibly still be holding. */
+  const deleted = new Set();
+  const DELETED_KEEP = 200;
+  const forget = (id) => { deleted.add(id); while (deleted.size > DELETED_KEEP) deleted.delete(deleted.values().next().value); };
   const questions = new Map(); // chatId -> { question, choices, toolMsg, resolve }   (ask_user waits for an answer from the chat UI)
   function askUser(chatId, toolMsg, question, choices, signal, images) {
     return new Promise((resolve) => {
@@ -100,11 +105,18 @@ When you have enough information, write a concrete, numbered implementation plan
   function persist(c = chat, { now = false } = {}) {
     if (!c || deleted.has(c.id)) return Promise.resolve();
     c.updated = Date.now();
-    if (now) { const t = pendingPersist.get(c.id); if (t) { clearTimeout(t.timer); pendingPersist.delete(c.id); } return H.db.putChat(c).then(() => H.bus.emit('chat-updated', c)); }
+    if (now) {
+      const t = pendingPersist.get(c.id); if (t) { clearTimeout(t.timer); pendingPersist.delete(c.id); }
+      /* this write covers whatever the debounced one was going to write, so its waiters are satisfied by it */
+      return H.db.putChat(c).then(() => { H.bus.emit('chat-updated', c); (t?.resolvers || []).forEach(r => r()); });
+    }
     return new Promise((resolve) => {
-      const prev = pendingPersist.get(c.id); if (prev) { clearTimeout(prev.timer); prev.resolvers.forEach(r => r()); }
-      const timer = setTimeout(async () => { pendingPersist.delete(c.id); if (!deleted.has(c.id)) { await H.db.putChat(c); H.bus.emit('chat-updated', c); } resolve(); }, 400);
-      pendingPersist.set(c.id, { timer, resolvers: [resolve] });
+      /* a superseded write carries its waiters forward rather than resolving them: `await persist()` has to
+         mean "it is written", not "a later write was scheduled" */
+      const prev = pendingPersist.get(c.id); if (prev) clearTimeout(prev.timer);
+      const resolvers = [...(prev?.resolvers || []), resolve];
+      const timer = setTimeout(async () => { pendingPersist.delete(c.id); if (!deleted.has(c.id)) { await H.db.putChat(c); H.bus.emit('chat-updated', c); } resolvers.forEach(r => r()); }, 400);
+      pendingPersist.set(c.id, { timer, resolvers });
     });
   }
 
@@ -206,7 +218,9 @@ When you have enough information, write a concrete, numbered implementation plan
         return { tc, toolMsg, sig: tc.function.name + '|' + (tc.function.arguments || '').trim() };
       });
       const execOne = async ({ tc, toolMsg, sig }) => {
-        if (signal?.aborted) { toolMsg.meta.running = false; toolMsg.content = JSON.stringify({ error: 'Cancelled by the user.' }); onEvent?.('tool-end', toolMsg); return; }
+        /* meta.error as well as the payload: without it the card falls through to the "ok" branch and shows
+           a green "done" over an error result */
+        if (signal?.aborted) { toolMsg.meta.running = false; toolMsg.meta.error = 'Cancelled by the user.'; toolMsg.content = JSON.stringify({ error: 'Cancelled by the user.' }); onEvent?.('tool-end', toolMsg); return; }
         const ctx = { signal, finishReason: res.finish_reason, images, chatId: chatId || chatIdOf(messages), toolMsg, subagent, runFolder, onStatus: (s) => { toolMsg.meta.status = s; onEvent?.('tool-status', toolMsg); } };
         const prev = seen.get(sig);
         let out;
@@ -446,7 +460,7 @@ When you have enough information, write a concrete, numbered implementation plan
       const keep = new Set(keepIds.filter(Boolean));
       for (const c of await H.db.listChats()) {
         if (keep.has(c.id) || c.count || c.title !== 'New chat' || runs.has(c.id) || questions.has(c.id) || hasDraft(c.id)) continue;
-        deleted.add(c.id); live.delete(c.id);
+        forget(c.id); live.delete(c.id); H.perms.forget?.(c.id);
         await H.db.delChat(c.id);
         H.journal?.clear(c.id).catch(() => { });
       }
@@ -463,7 +477,7 @@ When you have enough information, write a concrete, numbered implementation plan
     return chat;
   }
   async function remove(id) {
-    deleted.add(id); stop(id); live.delete(id);
+    forget(id); stop(id); live.delete(id); H.perms.forget?.(id);
     await H.db.delChat(id);
     H.journal?.clear(id).catch(() => { });      // the file history of a deleted chat has nothing left to undo
     H.bus.emit('chat-updated');            // sidebar index must forget it
@@ -482,11 +496,15 @@ When you have enough information, write a concrete, numbered implementation plan
   const runFolderOf = (id) => runs.get(id || chat?.id)?.folder || null;
 
   /* `chatId` is the parent chat: the sub-agent's own message list is not in `live`, so without it the file
-     history would fall back to whichever chat happens to be on screen. */
+     history would fall back to whichever chat happens to be on screen — and its requests, which the parent
+     chat pays for, would be counted nowhere at all. */
   async function runOnce({ task, maxIterations = 15, onStatus, signal, runFolder = null, chatId = null }) {
     const msgs = [{ role: 'user', content: task }];
     let steps = 0;
-    const text = await loop(msgs, { signal, maxIterations, subagent: true, runFolder, chatId, mode: H.perms.effectiveMode(chatId) === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
+    /* the sub-agent spends the parent chat's money, so it is billed to the parent chat: same path as the
+       main loop, so the ring, the per-chat cost and the all-time table all see it */
+    const onUsage = (u, cost, model) => { const c = live.get(chatId) || (chat?.id === chatId ? chat : null); if (c) addUsage(c, u, cost, model); else H.usage.record(model || H.settings.get('model'), u); };
+    const text = await loop(msgs, { signal, maxIterations, subagent: true, runFolder, chatId, onUsage, mode: H.perms.effectiveMode(chatId) === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
     return text || '(sub-agent produced no final text)';
   }
 

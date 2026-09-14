@@ -538,7 +538,19 @@ H.ui = (() => {
     if (!H.settings.apiKey() && !confirm('No API key configured. Send anyway?')) { openSettings('general'); return; }
     const att = attachments; attachments = []; renderAttachments();
     t.value = ''; autoresize(); hideSlash(); drafts.delete(H.agent.current()?.id);
+    askNotifications();
     await H.agent.send(text, att);
+  }
+  /* A run can take minutes and the two things that need the user back — a question from the assistant, a
+     permission prompt — only notify when the tab is hidden, which is exactly when nobody is looking at it.
+     Browsers only offer the permission from a user gesture, so it is asked once, from the first message
+     sent: before that there is nothing to be notified about, and asking on load is the behaviour everyone
+     has learned to refuse. A "denied" answer is final and is never asked about again. */
+  let askedNotifications = false;
+  function askNotifications() {
+    if (askedNotifications) return;
+    askedNotifications = true;
+    try { if (window.Notification && Notification.permission === 'default') Notification.requestPermission().catch(() => { }); } catch { }
   }
   function renderAttachments() {
     const box = $('#attach-list'); box.innerHTML = '';
@@ -1654,7 +1666,8 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
         el('li', {}, ['JavaScript runs in a Web Worker with no DOM or workspace access; Python runs in Pyodide (WebAssembly) in a Worker. Both can make network requests, so run_* tools ask for permission by default. calculate, json_query and plugin expressions run in a Worker with all network APIs removed.']),
         el('li', {}, ['HTML previews render in a sandboxed iframe (unique origin) with an injected Content Security Policy: no fetch/XHR/WebSocket, no form posts, no remote images; scripts only inline or from the two CDNs the app itself uses.']),
         el('li', {}, ['Markdown from the model is sanitized with DOMPurify; images are shown as click-to-load placeholders so a reply can never trigger a request on its own.']),
-        el('li', {}, ['web_fetch and http_request ask once per site (origin) in Default and Plan mode; "Allow this site for session" / "Always allow this site" remember the answer. A request routed through a connected browser tab (your login session) always asks, in every mode.']),
+        el('li', {}, ['web_fetch and http_request ask once per site (origin) in Default and Plan mode; "Allow this site for session" / "Always allow this site" remember the answer. When one of those two is routed through a connected browser tab (your login session), it asks in every mode, including Allow all.']),
+        el('li', {}, ['Plugin tools follow their own risk instead: once you enable a plugin, its "safe" read tools run without asking and its "write" / "danger" tools ask in Default mode — including when the plugin is routed through the bridge or the connector extension. Enabling a bridge plugin therefore lets the assistant read whatever that login can read on that site, without a prompt each time. Give a plugin "always ask" or "deny" per tool in Permissions if that is not what you want.']),
         el('li', {}, ['Tool output is treated as untrusted; the system prompt tells the model not to follow instructions embedded in fetched content. Review permission prompts for http_request and plugin write calls, which could exfiltrate data if the model is manipulated.']),
       ])], 'How exactly')]),
       sec('Danger zone', null, [el('div', { class: 'row gap wrap', id: 'set-wipe' }, [

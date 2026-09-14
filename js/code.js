@@ -159,7 +159,7 @@ H.code = (() => {
     /* ============================ file index ============================ */
     let generation = 0, idx = null, idxAt = 0, idxGen = -1;
     const INDEX_TTL = 60000;
-    const bump = () => { generation++; contentCache.clear(); };
+    const bump = () => { generation++; contentCache.clear(); cacheBytes = 0; };
 
     async function readIgnoreFiles() {
       ignoreRules = [];
@@ -207,6 +207,10 @@ H.code = (() => {
       const text = (await H.fs.readFile(path)).replace(/\r\n/g, '\n');
       if (text.length < 1_000_000) {
         if (cacheBytes > MAX_CACHE) { contentCache.clear(); cacheBytes = 0; }
+        /* re-reading a changed file replaces its entry, so the old length has to come off the total —
+           otherwise the ceiling is reached by a cache that is nowhere near that big, and a warm workspace
+           is thrown away for nothing */
+        cacheBytes -= hit?.text.length || 0;
         contentCache.set(path, { key, text }); cacheBytes += text.length;
       }
       return text;
@@ -256,7 +260,8 @@ H.code = (() => {
     async function find(glob, path = '', { refresh = false } = {}) {
       const { files } = await index({ refresh });
       const base = String(path || '').replace(/^\.?\/+/, '').replace(/\/+$/, '');
-      return files.filter(f => (!base || f.path.startsWith(base + '/')) && H.fs.globMatch(glob, f.path)).map(f => f.path);
+      // same scope test as search(): `path` may name a single file, not only a directory
+      return files.filter(f => (!base || f.path === base || f.path.startsWith(base + '/')) && H.fs.globMatch(glob, f.path)).map(f => f.path);
     }
 
     /* ============================ outline / symbols / imports ============================ */
@@ -524,10 +529,10 @@ H.code = (() => {
     refreshContext().catch(() => { });
   });
 
-  /* folder-independent helpers live on the target; everything else forwards to the current folder's instance */
-  const shared = {
-    promptSection, refreshContext, outlineText,
-    langOf, matchesIgnore, ignoredWith, searchable, DEFAULT_SKIP, BINARY_EXT, RULES,
-  };
+  /* Folder-independent helpers live on the target; everything else forwards to the current folder's instance.
+     Only what something outside this file actually reaches for: H.agent uses promptSection, H.fs uses
+     DEFAULT_SKIP, and dev/codetest.html checks matchesIgnore against real git. The rest (refreshContext,
+     outlineText, ignoredWith, langOf, searchable, BINARY_EXT, RULES) are internal and stay internal. */
+  const shared = { promptSection, DEFAULT_SKIP, matchesIgnore };
   return new Proxy(shared, { get: (t, k) => (k in t ? t[k] : of()[k]) });
 })();
