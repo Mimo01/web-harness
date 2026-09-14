@@ -6,8 +6,12 @@ H.usage = (() => {
 
   function loadTotal() {
     if (total) return Promise.resolve(total);
+    const empty = () => ({ prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} });
+    /* never rejects: record() awaits this from inside the agent loop, where a storage hiccup would become an
+       unhandled rejection that ends the turn. Counters that cannot be read start at zero instead. */
     return loading ||= H.db.kvGet(TOTAL_KEY)
-      .then(v => (total = v || { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }))
+      .catch((e) => { console.warn('usage totals unreadable', e); return null; })
+      .then(v => (total = v || empty()))
       .finally(() => { loading = null; });
   }
 
@@ -47,7 +51,7 @@ H.usage = (() => {
     add(t.byModel[model] ||= { prompt: 0, completion: 0, cost: 0, requests: 0 });
     const day = new Date().toISOString().slice(0, 10);
     add(t.byDay[day] ||= { prompt: 0, completion: 0, cost: 0, requests: 0 });
-    await H.db.kvSet(TOTAL_KEY, t);
+    await H.db.kvSet(TOTAL_KEY, t).catch(e => console.warn('usage totals not saved', e));   // counting is not worth ending a turn over
     H.bus.emit('usage-total', t);
     return c;
   }
@@ -126,6 +130,10 @@ H.usage = (() => {
           const mi = m.model_info || {};
           info[m.model_name] = { maxInput: mi.max_input_tokens || mi.max_tokens || null, maxOutput: mi.max_output_tokens || null, inCost: mi.input_cost_per_token ?? null, outCost: mi.output_cost_per_token ?? null, cacheReadCost: mi.cache_read_input_token_cost ?? null, provider: mi.litellm_provider || null };
         }
+        /* An empty answer is not an answer. /model/info can return 200 with no data (a key with no models
+           attached) or a shape this parser does not recognise, and storing {} then throws away every context
+           window and price the app had — silently, because this runs from refreshModels() at startup. */
+        if (!Object.keys(info).length) continue;
         H.settings.set({ modelInfo: info });
         H.bus.emit('usage');
         return info;

@@ -132,6 +132,22 @@ H.toast = (msg, kind = 'info', ms = 3500) => {
   return t;
 };
 
+/* The same red bar index.html shows when a module fails to load, for a failure that happens after loading —
+   a browser profile that will not open IndexedDB stops the bootstrap halfway, and a toast is no use when the
+   half that renders toasts may never have run. Idempotent: later calls append rather than replace. */
+H.fatal = (msg) => {
+  try {
+    let b = document.getElementById('startup-error');
+    if (!b) {
+      b = document.createElement('div'); b.id = 'startup-error'; b.setAttribute('role', 'alert');
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#b3261e;color:#fff;font:13px/1.45 system-ui,sans-serif;padding:10px 14px;white-space:pre-wrap;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+      document.body.appendChild(b);
+      b.textContent = 'LLM Harness could not start properly (version ' + (window.APP_VERSION || '?') + ').';
+    }
+    b.textContent += '\n' + String(msg);
+  } catch (e) { console.error('fatal', msg, e); }
+};
+
 H.download = (name, content, type = 'text/plain') => {
   const blob = content instanceof Blob ? content : new Blob([content], { type });
   const url = URL.createObjectURL(blob);

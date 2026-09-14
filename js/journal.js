@@ -12,7 +12,11 @@ H.journal = (() => {
   const enabled = () => H.settings.get('fileHistory') !== false;
   const chatId = () => { try { return H.agent.current()?.id || null; } catch { return null; } };
 
-  let suspended = false;              // a revert is not itself a change worth recording
+  /* A revert is not itself a change worth recording — but this used to be one boolean for the whole app, and a
+     chat keeps running when you switch away from it, so a background write landing during a revert was simply
+     not recorded and became un-revertable. Held per file instead: only the file being put back is exempt. */
+  const reverting = new Set();        // "<folderId>/<path>" currently being restored
+  const keyOf = (folderId, path) => folderId + '/' + path;
 
   /** read a file's current contents, or null when it does not exist / is not worth storing.
       "Does it exist?" is asked first even for binaries: a binary the chat *created* can still be undone by
@@ -32,9 +36,10 @@ H.journal = (() => {
       away from it, so the chat on screen is not necessarily the one making the change, and filing a write under
       the wrong chat puts it in the wrong "Files changed" list — where Revert would restore it. */
   async function capture(path, op, forChat) {
-    if (suspended || !enabled()) return;
+    if (!enabled()) return;
     const chat = forChat || chatId(), f = H.fs.folder();
     if (!chat || !f) return;
+    if (reverting.has(keyOf(f.id, path))) return;   // this write IS the revert
     try {
       if (op === 'delete') {
         let st = null; try { st = await H.fs.stat(path); } catch { }
@@ -132,7 +137,8 @@ H.journal = (() => {
     if (entry.elsewhere || entry.folderId !== (H.fs.folder()?.id || null)) {
       throw new Error(`"${entry.address}" was changed while this chat was working in "${entry.folderName}". Open that folder again to put it back.`);
     }
-    suspended = true;
+    const key = keyOf(entry.folderId, entry.path);
+    reverting.add(key);
     try {
       /* a file the chat created needs no stored contents to undo, so it is revertible even when there was
          nothing worth keeping (a binary, an oversized file, or history the pruner had to drop) */
@@ -141,7 +147,7 @@ H.journal = (() => {
       else await H.fs.writeFile(entry.address, entry.before);
       await forget(entry);
       return { ok: true };
-    } finally { suspended = false; H.bus.emit('journal', chatId()); }
+    } finally { reverting.delete(key); H.bus.emit('journal', chatId()); }
   }
   /** drop the records for one file (after a revert, there is nothing left to undo) */
   async function forget(entry) {

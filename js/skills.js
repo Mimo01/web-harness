@@ -68,6 +68,18 @@ H.skills = (() => {
       return true;
     },
     parse, serialize, validate,
+    /* Importing a markdown file is a third way to create a skill, next to the editor and the model's
+       skill_write — and it used to be the one that skipped validate(), so an imported "copy.md" produced a
+       skill that /copy could never reach (js/commands.js wins a name clash) and that the panel nevertheless
+       listed as if it worked. Parse, validate and store in one place, so the three paths cannot drift again.
+       Returns { ok, name, error }. */
+    importMarkdown: (md, fallbackName) => {
+      const parsed = H.skills.parse(md, fallbackName);
+      const v = H.skills.validate(parsed.name);
+      if (!v.ok) return { ok: false, name: parsed.name, error: v.error };
+      H.skills.upsert({ name: v.name, description: String(parsed.description || '').trim(), content: String(parsed.content || '').trim() });
+      return { ok: true, name: v.name, error: null };
+    },
     /* Expand "/name rest of message" into a message that carries the skill instructions */
     expandSlash: (text) => {
       const m = text.match(/^\/([a-z0-9_-]+)\s*([\s\S]*)$/i);

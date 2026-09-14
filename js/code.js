@@ -478,7 +478,7 @@ H.code = (() => {
 
     return {
       generation: () => generation, bump, index, read, search, find, outline, outlineGlob, symbol, deps,
-      overview, contextFile, snapshot, getSnapshot, snapKey, changes, ignoredBy,
+      overview, contextFile, snapshot, getSnapshot, snapKey, changes,
     };
   }
 

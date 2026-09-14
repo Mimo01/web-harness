@@ -120,23 +120,31 @@ H.runtime = (() => {
     };
     pyWorker.onerror = (e) => { for (const [id, p] of pyPending) { clearTimeout(p.timer); pyPending.delete(id); p.resolve({ error: 'Python worker error: ' + (e.message || 'unknown') + '. If Pyodide failed to load, check the network / Pyodide URL in Settings > Web access.', stdout: '', stderr: '' }); } pyWorker = null; pyReady = false; };
   }
-  function pyKill(reason) {
+  /* Killing the runtime ends every run it was carrying, not only the one that asked for it. `owner` is the run
+     whose timeout or Stop this was, so the others are told what actually happened to them instead of being
+     handed "your code timed out" for someone else's infinite loop. */
+  function pyKill(reason, owner) {
     if (!pyWorker) return;
     try { pyWorker.terminate(); } catch { }
     pyWorker = null; pyReady = false;
-    for (const [id, p] of pyPending) { clearTimeout(p.timer); pyPending.delete(id); p.resolve({ error: reason, stdout: '', stderr: '' }); }
+    const collateral = 'The Python runtime was restarted while this was running (another run was stopped or timed out), so this call produced no result. Run it again.';
+    for (const [id, p] of pyPending) { clearTimeout(p.timer); pyPending.delete(id); p.resolve({ error: owner == null || id === owner ? reason : collateral, stdout: '', stderr: '' }); }
   }
   function runPython(code, { packages = [], files = {}, timeout = 60000, onStatus, signal } = {}) {
     if (signal?.aborted) return Promise.resolve({ error: 'Cancelled by the user (Stop).', stdout: '', stderr: '' });
     if (!H.settings.get('allowPyodideCdn')) return Promise.resolve({ error: 'Python is disabled: downloading the Pyodide runtime is turned off in Settings > Web access. Ask the user to enable it, or use run_javascript instead.', stdout: '', stderr: '' });
+    /* the setting is a free-text field, and an old export restored without the key leaves it undefined —
+       either way the runtime has nowhere to come from, which is a result, not a TypeError out of the tool */
+    const url = H.settings.get('pyodideUrl') || H.settings.defaults.pyodideUrl;
+    if (!url) return Promise.resolve({ error: 'Python cannot start: no Pyodide URL is configured (Settings > Web access > Advanced: Python runtime). Ask the user to set one, or use run_javascript instead.', stdout: '', stderr: '' });
     if (!pyWorker) pyStart();
     const id = ++pyId;
-    const url = H.settings.get('pyodideUrl'); const indexURL = url.replace(/pyodide\.js$/, '');
+    const indexURL = url.replace(/pyodide\.js$/, '');
     // first run includes the runtime download; give it extra time
     const budget = timeout + (pyReady ? 0 : 120000);
     return new Promise((resolve) => {
-      const timer = setTimeout(() => pyKill(`Python timed out after ${Math.round(timeout / 1000)} s and was terminated (infinite loop or very slow code?). The runtime will reload on the next run. Increase timeoutMs or simplify the code.`), budget);
-      const onAbort = () => { if (pyPending.has(id)) pyKill('Cancelled by the user (Stop). The Python runtime was terminated and will reload on the next run.'); };
+      const timer = setTimeout(() => pyKill(`Python timed out after ${Math.round(timeout / 1000)} s and was terminated (infinite loop or very slow code?). The runtime will reload on the next run. Increase timeoutMs or simplify the code.`, id), budget);
+      const onAbort = () => { if (pyPending.has(id)) pyKill('Cancelled by the user (Stop). The Python runtime was terminated and will reload on the next run.', id); };
       signal?.addEventListener('abort', onAbort, { once: true });
       pyPending.set(id, { resolve: (v) => { signal?.removeEventListener('abort', onAbort); resolve(v); }, timer, onStatus });
       try { pyWorker.postMessage({ type: 'run', id, code, packages, files, url, indexURL }); }

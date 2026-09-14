@@ -368,12 +368,17 @@ When you have enough information, write a concrete, numbered implementation plan
   }
 
   /* ---------- public: main chat ---------- */
+  /* `c` is captured once, up front, and carried through every await: compaction is a full model round-trip and
+     persist() waits on storage, so the chat on screen can change underneath this. Reading the global again
+     afterwards (which run() used to do) starts the run on whichever chat the user clicked, while the message
+     went to the one they typed it in. */
   async function send(text, attachments = [], opts = {}) {
     if (!chat) chat = newChat();
-    if (questions.has(chat.id)) { answerQuestion(chat.id, text, attachments); return; }   // the model is waiting for this
-    if (runs.has(chat.id)) return;
+    const c = chat;
+    if (questions.has(c.id)) { answerQuestion(c.id, text, attachments); return; }   // the model is waiting for this
+    if (runs.has(c.id)) return;
     /* the first message is what makes a chat: from here it is history, written to `chats` and listed in the sidebar */
-    if (chat.pending) { delete chat.pending; if (pending?.id === chat.id) await dropPending(); }
+    if (c.pending) { delete c.pending; if (pending?.id === c.id) await dropPending(); }
     const slash = H.skills.expandSlash(text);
     const userMsg = { role: 'user', content: slash ? slash.content : text, display: slash ? slash.display : (opts.display || undefined), ts: Date.now(), attachments: attachments.map(a => ({ name: a.name, size: a.size, kind: a.kind, chars: a.kind === 'text' ? (a.content || '').length : undefined, empty: a.kind === 'text' && !(a.content || '').trim(), note: a.note })), meta: opts.meta };
     if (attachments.length) {
@@ -384,15 +389,15 @@ When you have enough information, write a concrete, numbered implementation plan
       if (images.length) userMsg.apiContent = [{ type: 'text', text: content }, ...images.map(a => ({ type: 'image_url', image_url: { url: a.content } }))];
       else userMsg.apiContent = content;
     }
-    await maybeAutoCompact(chat);               // shrink the history before adding to it, if the window is nearly full
-    chat.messages.push(userMsg);
-    H.bus.emit('message-added', userMsg, chat.id);
-    await persist(chat, { now: true });
-    await run();
+    await maybeAutoCompact(c);                  // shrink the history before adding to it, if the window is nearly full
+    c.messages.push(userMsg);
+    H.bus.emit('message-added', userMsg, c.id);
+    await persist(c, { now: true });
+    await run(c);
   }
 
-  async function run() {
-    const c = chat; if (!c || runs.has(c.id)) return;
+  async function run(target) {
+    const c = target || chat; if (!c || runs.has(c.id)) return;
     const ctl = new AbortController();
     const f = H.fs.folder();
     const runFolder = f ? { id: f.id, name: f.name } : null;   // the folder this run belongs to, for the whole run
@@ -454,9 +459,9 @@ When you have enough information, write a concrete, numbered implementation plan
 
   function stop(id) { runs.get(id || chat?.id)?.abort.abort(); }
   async function regenerate() {
-    if (!chat || runs.has(chat.id)) return;
-    while (chat.messages.length && chat.messages.at(-1).role !== 'user') chat.messages.pop();
-    H.bus.emit('chat-loaded', chat); await persist(); await run();
+    const c = chat; if (!c || runs.has(c.id)) return;   // same rule as send(): persist() awaits storage, so hold on to the chat
+    while (c.messages.length && c.messages.at(-1).role !== 'user') c.messages.pop();
+    H.bus.emit('chat-loaded', c); await persist(c); await run(c);
   }
   /* A run writes the chat to storage as each tool finishes, so a tab closed mid-run leaves messages marked
      `running` / `streaming` behind. Nothing will ever finish them, and a tool card stuck on "running" never

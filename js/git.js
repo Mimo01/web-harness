@@ -550,7 +550,7 @@ H.git = (() => {
         else if (!doHash && idx.has(path) && Math.abs(f.mtime - idx.get(path).mtime) < MTIME_SLOP) changed = false;
         else {
           try { changed = (await hashBlob(await bytesOf(path))) !== sha; hashed++; }
-          catch (e) { unreadable.push(path); continue; }
+          catch (e) { unreadable.push({ path, reason: e.message }); continue; }   // why it could not be hashed is the useful half
         }
         if (changed) modified.push(path);
         if (idx.has(path) && headMap.has(path) && idx.get(path).sha !== headMap.get(path).sha) staged.push(path);

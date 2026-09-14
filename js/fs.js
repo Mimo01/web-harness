@@ -130,7 +130,10 @@ H.fs = (() => {
     const f = await (await fileHandle(parts)).getFile();
     return binary ? f : await f.text();
   }
-  /* a change invalidates this folder's file index and content cache */
+  /* A change invalidates this folder's file index and content cache. It has to run AFTER the change has
+     landed, not before: a read racing a write (H.code.search sweeps files while a tool writes one) would
+     otherwise re-fill the cache with the pre-write contents and the invalidation would be undone by the very
+     thing it was meant to prevent. */
   const touched = () => { try { H.code.bump(); } catch { } };
   /* `opts.chatId` names the chat this write belongs to. H.fs is global and a chat keeps running when you switch
      away from it, so the file history cannot ask "which chat is on screen?" — the caller has to say. */
@@ -138,10 +141,10 @@ H.fs = (() => {
     const { parts, path: rel } = resolve(path);
     await ensure(true);
     await H.journal?.capture(rel, 'write', opts.chatId);
-    touched();
     const w = await (await fileHandle(parts, true)).createWritable();
     await w.write(content);
     await w.close();
+    touched();
     return { bytes: typeof content === 'string' ? new Blob([content]).size : content.size ?? content.byteLength };
   }
   /* append without reading or rewriting the existing content: keep the file, seek to its end, write the new part */
@@ -149,13 +152,13 @@ H.fs = (() => {
     const { parts, path: rel } = resolve(path);
     await ensure(true);
     await H.journal?.capture(rel, 'append', opts.chatId);
-    touched();
     const fh = await fileHandle(parts, true);
     const size = (await fh.getFile()).size;
     const w = await fh.createWritable({ keepExistingData: true });
     await w.seek(size);
     await w.write(content);
     await w.close();
+    touched();
     return { bytes: new Blob([content]).size, size: size + new Blob([content]).size };
   }
   async function exists(path) { try { await stat(path); return true; } catch { return false; } }
@@ -194,29 +197,41 @@ H.fs = (() => {
   async function mkdir(path) {
     const { parts } = resolve(path);
     await ensure(true);
-    touched();
     await dirHandle(parts, true);
+    touched();
     return { ok: true };
   }
   async function remove(path, { recursive = false, chatId } = {}) {
     const { parts, path: rel } = resolve(path);
     await ensure(true);
     await H.journal?.capture(rel, 'delete', chatId);
-    touched();
     const name = parts[parts.length - 1];
     const d = await dirHandle(parts.slice(0, -1));
     await d.removeEntry(name, { recursive });
+    touched();
     return { ok: true };
   }
   /* A move that lands on an existing file would silently destroy it, and the model has no way to notice.
-     `overwrite: true` is the deliberate way to say that is what was meant. */
+     `overwrite: true` is the deliberate way to say that is what was meant.
+     A move is copy-then-delete, so the destination has to be a different file — otherwise the delete takes
+     away what the copy just wrote. Two ways that happens, and neither looks wrong from the model's side:
+     the same path twice, and a case-only rename ("a.txt" -> "A.txt") on macOS or Windows, where the file
+     system treats both names as one entry. The second is the dangerous one: exists() answers true, so the
+     model is told to pass overwrite: true, and the file is then gone. Both are caught before anything runs. */
   async function move(from, to, { overwrite = false, chatId } = {}) {
-    const { path: dest } = resolve(to);
-    if (!overwrite && await exists(dest)) throw new Error(`"${dest}" already exists. Pass overwrite: true to replace it, or move to a different name.`);
-    const content = await readFile(from, { binary: true });
-    await writeFile(to, content, { chatId });
-    await remove(from, { chatId });
-    return { ok: true, from: resolve(from).path, to: dest, overwritten: overwrite };
+    const { path: src } = resolve(from), { path: dest } = resolve(to);
+    if (src === dest) throw new Error(`"${src}" is both the source and the destination; there is nothing to move.`);
+    const caseOnly = src.toLowerCase() === dest.toLowerCase();
+    if (!overwrite && !caseOnly && await exists(dest)) throw new Error(`"${dest}" already exists. Pass overwrite: true to replace it, or move to a different name.`);
+    const content = await readFile(src, { binary: true });
+    await writeFile(dest, content, { chatId });
+    /* a case-only rename addresses one and the same file on a case-insensitive file system: deleting the
+       old name would delete the new one too. The write above is all the rename there is to do. */
+    if (!caseOnly) await remove(src, { chatId });
+    return {
+      ok: true, from: src, to: dest, overwritten: overwrite && !caseOnly,
+      note: caseOnly ? 'Source and destination differ only in capitalisation. On a case-insensitive file system (macOS, Windows) they are the same file, so the contents were rewritten in place; the name may still show its old capitalisation.' : undefined,
+    };
   }
   /* glob -> regex. "**\/" spans any number of directories *including none*, so "src/**\/*.js" matches "src/a.js"
      as well as "src/deep/a.js"; a lone "*" stops at a slash. Falls back to matching the bare file name, so "*.md"

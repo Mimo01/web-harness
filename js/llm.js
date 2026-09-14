@@ -44,7 +44,9 @@ H.llm = (() => {
         const transient = r.status === 429 || (r.status >= 500 && r.status <= 504);
         if (!transient || attempt >= 3) throw new Error(`LLM HTTP ${r.status}: ${H.clamp(t, 2000)}`);
         const ra = parseFloat(r.headers.get('retry-after')); const wait = (isFinite(ra) ? ra * 1000 : 1000 * 2 ** attempt) + Math.random() * 300;
-        H.toast(`LiteLLM answered ${r.status}; retrying in ${Math.round(wait / 1000)} s (${attempt + 1}/3)…`, 'warn', wait);
+        /* the server's number decides the backoff, not how long a toast sits on screen: a Retry-After of 300
+           would otherwise pin a warning over the update notice and the reconnect cards for five minutes */
+        H.toast(`LiteLLM answered ${r.status}; retrying in ${Math.round(wait / 1000)} s (${attempt + 1}/3)…`, 'warn', Math.min(wait, 8000));
         await backoff(wait);
         attempt++;
       } catch (e) {
@@ -66,6 +68,7 @@ H.llm = (() => {
     const dec = new TextDecoder();
     let buf = '', raw = '', sawData = false, content = '', reasoning = '', usage = null, finish = null;
     const toolCalls = [];
+    let noIndexAt = 0;   // the slot fragments go to when the proxy sends no `index` (see handle())
     const errorOf = (j) => { const e = j?.error; if (!e) return null; return typeof e === 'string' ? e : (e.message || e.error?.message || JSON.stringify(e)); };
     const handle = (data) => {
       if (data === '[DONE]') return;
@@ -79,7 +82,12 @@ H.llm = (() => {
       if (d.content) { content += d.content; onDelta && onDelta({ content: d.content }); }
       if (d.reasoning_content) { reasoning += d.reasoning_content; onDelta && onDelta({ reasoning: d.reasoning_content }); }
       if (d.tool_calls) for (const tc of d.tool_calls) {
-        const i = tc.index ?? toolCalls.length;
+        /* `index` is what pairs a fragment with the call it belongs to. A proxy that omits it used to fall back
+           to toolCalls.length, which is the same value for every call in one chunk — three parallel calls
+           collapsed into one. Without an index, a fragment carrying a new id starts a new slot and everything
+           after it appends to that one. */
+        let i = tc.index;
+        if (i == null) { if (tc.id && tc.id !== toolCalls[noIndexAt]?.id && toolCalls[noIndexAt]) noIndexAt++; i = noIndexAt; }
         toolCalls[i] ||= { id: '', type: 'function', function: { name: '', arguments: '' } };
         const cur = toolCalls[i];
         if (tc.id && !cur.id) cur.id = tc.id;                                   // ids are not incremental

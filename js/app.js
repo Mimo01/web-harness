@@ -2,16 +2,31 @@
 (async function () {
   try { window.name = 'llm-harness'; } catch { }
   H.ui.init();
-  await H.bridge.init();   // signing identity for the browser-session bridge (needed before the bookmarklet is shown)
+  await H.bridge.init().catch((e) => console.warn('bridge identity', e));   // signing identity for the browser-session bridge (needed before the bookmarklet is shown)
   if (H.bridge.embedded()) { document.body.classList.add('embedded'); H.$('#sidebar').classList.add('collapsed'); }
   H.ui.updateWorkspaceBtn('');   // no folder until a chat is loaded: each one carries its own
-  const pending = await H.agent.restorePending();   // the unsent chat, if one was left open: it lives outside the chat list
-  await H.agent.sweepLegacyEmpty();                 // empty "New chat" rows written by older versions
-  const recent = await H.db.recentChat();   // one index record via cursor: never reads message bodies at startup
-  /* reopen whatever was last on screen: the unsent chat if that is where you were, otherwise the most recent chat */
-  if (pending?.active || !recent) await H.agent.reset(); else await H.agent.load(recent.id);
-  await H.ui.restoreDraft();                // and what was typed into the unsent chat before the tab closed
-  H.ui.renderChatList();
+
+  /* Everything that needs the database, in one place. A browser profile that refuses IndexedDB (a policy, a
+     private window, a corrupt store) used to reject here and throw out of this function, so the whole second
+     half below — models, plugins, the update check, the keyboard shortcuts — never ran, and nothing said so:
+     the startup banner in index.html only watches the module scripts load. The app is still worth opening
+     without storage (a chat that is not saved is better than a window that does nothing), so a failure is
+     reported in the banner and then stepped over. */
+  try {
+    const pending = await H.agent.restorePending();   // the unsent chat, if one was left open: it lives outside the chat list
+    await H.agent.sweepLegacyEmpty();                 // empty "New chat" rows written by older versions
+    const recent = await H.db.recentChat();   // one index record via cursor: never reads message bodies at startup
+    /* reopen whatever was last on screen: the unsent chat if that is where you were, otherwise the most recent chat */
+    if (pending?.active || !recent) await H.agent.reset(); else await H.agent.load(recent.id);
+    await H.ui.restoreDraft();                // and what was typed into the unsent chat before the tab closed
+    H.ui.renderChatList();
+  } catch (e) {
+    console.error('startup: storage unavailable', e);
+    H.fatal('Your chats could not be read from this browser profile, so this session starts empty and nothing in it will be saved: ' + (e?.message || e)
+      + '\nThis is usually a browser setting that blocks site data, a private window, or another tab of the harness holding an older database. Everything else still works.');
+    try { await H.agent.reset(); } catch (e2) { console.error('startup: could not open a chat at all', e2); }
+  }
+
   if (H.settings.apiKey()) H.ui.refreshModels().catch(() => { });   // which also loads /model/info for prices and context windows
   else { H.ui.setStatus('', 'not configured'); H.ui.openSettings('general'); }
   H.plugins.connectEnabledMcp();
@@ -28,4 +43,9 @@
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); H.agent.reset(); H.$('#input').focus(); }
     if ((e.metaKey || e.ctrlKey) && e.key === '/') { e.preventDefault(); H.ui.openSettings('general'); }
   });
-})();
+})().catch((e) => {
+  /* nothing above this line is allowed to fail silently either: the bootstrap is the only thing that wires
+     the UI up, so a throw anywhere in it leaves a window that looks finished and does nothing */
+  console.error('startup failed', e);
+  try { H.fatal('Startup did not finish: ' + (e?.message || e)); } catch { }
+});

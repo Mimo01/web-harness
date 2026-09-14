@@ -22,10 +22,16 @@ H.perms = (() => {
     const id = chatId ?? currentChat();
     return (id && overrides.get(id)) || H.settings.get('chatMode') || 'default';
   }
+  /* A per-tool rule the user set by hand beats the chat mode — that is what the Permissions panel promises
+     ("always ask: asks every time, even in Allow all"), and it used to be true only of "deny": the mode
+     branches below ran first, so an explicit "ask" was skipped in Allow all and in Plan mode. Both halves of
+     an explicit answer are honoured here, before the mode is consulted. Plan mode is the one thing that still
+     wins over "ask", and only by being stricter: a tool that writes must not run at all while investigating. */
   function policyFor(tool, chatId) {
     const mode = effectiveMode(chatId);
     const explicit = rules[tool.name];
     if (explicit === 'deny') return 'deny';
+    if (explicit === 'ask') return mode === 'plan' && tool.risk !== 'safe' ? 'deny' : 'ask';
     if (mode === 'plan') return tool.risk === 'safe' ? (H.settings.get('alwaysAsk') ? 'ask' : 'allow') : 'deny';
     if (mode === 'auto') return 'allow';
     if (H.settings.get('alwaysAsk')) return 'ask';
@@ -141,6 +147,5 @@ H.perms = (() => {
     rules: () => rules,
     setRule: (name, pol) => { if (pol === 'default') delete rules[name]; else rules[name] = pol; save(); },
     clearSession: () => session.clear(),
-    reset: () => { rules = {}; save(); },
   };
 })();

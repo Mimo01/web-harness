@@ -93,7 +93,12 @@ H.db = (() => {
        would otherwise poison every later call for the lifetime of this page */
     p.catch((e) => {
       if (dbp === p) dbp = null;
-      if (e?.blocked) try { H.toast(e.message, 'error', 15000); } catch { }
+      /* every failure is worth saying out loud, not only the "another tab holds an older version" one:
+         without the database there are no chats, no memories and no folder registry, and a silent failure
+         looks exactly like an app that works */
+      try {
+        H.toast(e?.blocked ? e.message : 'This browser profile would not open local storage (IndexedDB), so chats, memories and the list of folders you have opened cannot be read or saved: ' + (e?.message || e), 'error', 15000);
+      } catch { }
     });
     dbp = p;
     return dbp;

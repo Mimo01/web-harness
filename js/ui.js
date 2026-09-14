@@ -581,7 +581,9 @@ H.ui = (() => {
     if (H.agent.pendingQuestion()) {
       const ans = attachments; attachments = []; renderAttachments();
       H.agent.answerQuestion(H.agent.current().id, text, ans);
-      t.value = ''; autoresize(); hideSlash(); return;
+      /* clearing the box is not enough: the debounced draft writer still holds the old text and would put it
+         back on its next tick, so the draft is dropped the same way a sent message drops it */
+      t.value = ''; autoresize(); hideSlash(); clearDraft(H.agent.current()?.id); saveDraft(); return;
     }
     if (H.agent.isRunning()) return;
     if (!H.settings.apiKey() && !confirm('No API key configured. Send anyway?')) { openSettings('general'); return; }
@@ -1484,7 +1486,7 @@ H.ui = (() => {
       wrap.append(el('div', { class: 'row gap wrap', style: 'margin-top:12px' }, [
         el('button', { class: 'btn', onclick: () => skillEditor({ name: '', description: '', content: '' }, render) }, [H.icon('plus'), 'New skill']),
         el('button', { class: 'btn', onclick: () => { settingsClose?.(); $('#input').value = 'Write me a skill that '; autoresize(); $('#input').focus(); $('#input').setSelectionRange($('#input').value.length, $('#input').value.length); } }, [H.icon('bolt'), 'Ask in the chat']),
-        el('button', { class: 'btn', onclick: () => { const i = el('input', { type: 'file', accept: '.md,.txt', multiple: true }); i.onchange = async () => { for (const f of i.files) H.skills.upsert(H.skills.parse(await H.readFileAsText(f), f.name.replace(/\.\w+$/, ''))); render(); }; i.click(); } }, ['Import .md']),
+        el('button', { class: 'btn', onclick: () => { const i = el('input', { type: 'file', accept: '.md,.txt', multiple: true }); i.onchange = async () => { const bad = []; let n = 0; for (const f of i.files) { const r = H.skills.importMarkdown(await H.readFileAsText(f), f.name.replace(/\.\w+$/, '')); if (r.ok) n++; else bad.push(`${f.name}: ${r.error}`); } render(); if (bad.length) H.toast(`${bad.length} file(s) were not imported.\n` + bad.join('\n'), 'warn', 10000); else if (n) H.toast(`${n} skill${n === 1 ? '' : 's'} imported`, 'success'); }; i.click(); } }, ['Import .md']),
       ]));
     };
     render();
