@@ -1900,10 +1900,8 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     modePick.el.id = 'mode-pick'; $('#mode-pick').replaceWith(modePick.el);
     document.addEventListener('click', () => closeMenus());
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openMenus.size) { e.stopPropagation(); closeMenus(); } });
-    $('#usage-btn').onclick = () => openSettings('usage');
     $('#changes-btn').onclick = () => changesPanel();
     H.bus.on('compacting', (id, on) => { if (id === H.agent.current()?.id && on) H.toast('Compacting the conversation…', 'info', 3000); });
-    $('#bug-btn').onclick = bugReport;
     $('#chat-title').onclick = () => { const c = H.agent.current(); if (!c) return; const t = prompt('Chat title', c.title); if (t && t.trim()) { H.agent.rename(t.trim()).then(() => { updateTitle(); renderChatList(); }); } };
     $('#preview-close').onclick = () => $('#preview').classList.add('hidden');
     $('#preview-download').onclick = () => {   // the HTML as the model wrote it (without the injected preview policy)

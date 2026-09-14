@@ -1,6 +1,6 @@
 {
-  "version": "1.24.0",
+  "version": "1.25.0",
   "date": "2026-09-14",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "new chats are drafts until you send them: clicking New opens an empty chat window without adding a row to the sidebar, and the row appears with the first message. The unsent chat keeps what you typed, the files you staged and the folder you opened for it, so clicking into another chat and back to New — or reloading the tab — returns to it as you left it; clicking New again goes back to that same draft instead of piling up another. Staged files now belong to the chat they were staged in rather than following you into the next one, empty \"New chat\" rows left by earlier versions are cleared out on the first run, and the machinery that used to sweep them away is gone"
+  "notes": "the ⋯ menu in the top bar keeps only what belongs to the chat in front of you: \"Files changed in this chat\" and \"Export chat as Markdown\". \"Report a bug\" is gone from it — the bug button in the sidebar footer does the same thing — and so is \"Usage & costs\", which lives in Settings, both as its own section and as a link from the context meter"
 }
