@@ -1,6 +1,6 @@
 {
-  "version": "1.25.1",
+  "version": "1.26.0",
   "date": "2026-09-14",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "the row of pills under the message box holds its line: a long git branch or a long model id is now truncated inside its own pill instead of spilling over the pill next to it or pushing the send button onto a second row. The branch is shortened in the middle so the change count still shows, and the model pill drops the provider prefix — the full id stays on the menu row and in the tooltip"
+  "notes": "a security pass. A plugin routed through the browser bridge or the connector extension now asks before every session — its calls ride your login, so the confirmation no longer depends on what risk the manifest declared. Plugin request paths are checked: an argument can no longer carry the call to a different endpoint on that host. skill_write and skill_delete always ask, because a skill outlives the chat that wrote it. A link in an imported plugin manifest must be http(s). And 1.25.1's own version script was blocked by its Content-Security-Policy, which left the app reporting 0.0.0, serving untagged cached files and offering an update forever — fixed, with a check in the release script so it cannot happen quietly again"
 }

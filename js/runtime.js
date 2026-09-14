@@ -121,16 +121,33 @@ H.runtime = (() => {
      no fetch/XHR/WebSocket, no form posts, no frames, images/media only inline; scripts and styles inline or from the
      two CDNs the app already trusts. */
   const PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src data: https://fonts.gstatic.com; img-src data: blob:; media-src data: blob:; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'";
+  /* Where the policy goes. Matching /<head[^>]*>/ also matches a "<head>" written inside a comment, and a meta
+     placed there is not a policy at all — `<!-- <head> -->` was enough to ship the preview without one. So the
+     source is walked tag by tag, stepping over comments, and the first real <head>, <html> or doctype decides.
+     (The frame also inherits preview.html's own CSP, which is what actually enforces; this is the copy that
+     travels with the document, e.g. into the downloaded file's sibling contexts.) */
+  function cspAnchor(src) {
+    let i = 0, afterDoctype = -1;
+    while (i < src.length) {
+      const lt = src.indexOf('<', i);
+      if (lt < 0) break;
+      if (src.startsWith('<!--', lt)) { const end = src.indexOf('-->', lt + 4); if (end < 0) break; i = end + 3; continue; }
+      const m = /^<(!doctype|\/?[a-zA-Z][^\s>/]*)[^>]*>/.exec(src.slice(lt));
+      if (!m) { i = lt + 1; continue; }
+      const end = lt + m[0].length, name = m[1].toLowerCase();
+      if (name === 'head') return { at: end, wrap: false };
+      if (name === 'html') return { at: end, wrap: true };
+      if (name === '!doctype') { afterDoctype = end; i = end; continue; }
+      break;   // real content before any <html>/<head>
+    }
+    return afterDoctype >= 0 ? { at: afterDoctype, wrap: false } : null;
+  }
   function hardenHTML(html) {
     const meta = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`;
     const src = String(html || '');
-    let m = src.match(/<head[^>]*>/i);
-    if (m) return src.slice(0, m.index + m[0].length) + meta + src.slice(m.index + m[0].length);
-    m = src.match(/<html[^>]*>/i);
-    if (m) return src.slice(0, m.index + m[0].length) + '<head>' + meta + '</head>' + src.slice(m.index + m[0].length);
-    m = src.match(/^\s*<!doctype[^>]*>/i);
-    if (m) return m[0] + meta + src.slice(m[0].length);
-    return meta + src;
+    const a = cspAnchor(src);
+    if (!a) return meta + src;
+    return src.slice(0, a.at) + (a.wrap ? '<head>' + meta + '</head>' : meta) + src.slice(a.at);
   }
   function previewHTML(html, { title = 'Preview' } = {}) {
     H.bus.emit('preview', { title, html: hardenHTML(html), raw: String(html || '') });   // raw: what the model wrote, for Download   // sandboxed srcdoc iframe (unique origin) with an injected CSP; never a same-origin blob URL

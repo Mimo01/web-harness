@@ -116,6 +116,12 @@ H.htmlToText = (html, baseUrl) => {
   return (title ? '# ' + title + '\n\n' : '') + text;
 };
 
+/* An href that is safe to put in the page. Anything but an absolute http(s) URL — javascript:, data:, blob:,
+   file: — would run or open on the harness's own origin, which is where the API key and every plugin credential
+   live. Returns null for those, so the caller renders no link at all. Use it for every URL that came from
+   outside this file: a plugin manifest, the update feed, a tool result. */
+H.safeHref = (u) => (/^https?:\/\//i.test(String(u ?? '').trim()) ? String(u).trim() : null);
+
 H.icon = (name, cls = 'ico') => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('class', cls); const u = document.createElementNS('http://www.w3.org/2000/svg', 'use'); u.setAttribute('href', '#i-' + name); s.append(u); return s; };
 
 H.toast = (msg, kind = 'info', ms = 3500) => {

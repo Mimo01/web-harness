@@ -354,10 +354,12 @@ credentials live in the browser and there is no CORS issue.
 - **Prompt injection.** Tool output is untrusted; the system prompt says so. Every outbound channel either asks or is
   closed: `web_fetch` and `http_request` prompt once per site (origin) in Default and Plan mode, with "allow this site
   for session / always", and prompt in every mode — Allow all included — when the request would go through a connected
-  browser tab (your login session). Plugin tools follow their own declared risk instead: their `write` and `danger`
-  tools ask in Default mode, their `safe` read tools do not, and that holds whatever route the plugin uses — so
-  enabling a bridge-routed plugin lets the assistant read whatever that login can read on that site without a prompt
-  each time. Per-tool `always ask` or `deny` in Settings → Permissions is how you narrow that. `run_*` tools ask in
+  browser tab (your login session). A plugin routed through the bridge or the connector extension asks the same way,
+  once per plugin per session, in every mode — its calls ride your login there, so the confirmation does not depend
+  on what risk the manifest declared. Plugins on a direct or proxy route follow their declared risk: `write` and
+  `danger` tools ask in Default mode, `safe` read tools do not. Skills are a third case: `skill_write` and
+  `skill_delete` always ask, because a skill stays in the browser and its description joins the system prompt of
+  every later chat. Per-tool `always ask` or `deny` in Settings → Permissions narrows any of it. `run_*` tools ask in
   Default mode; `calculate`, `json_query` and plugin
   manifest expressions run in a Worker with fetch, XHR, WebSocket, EventSource, importScripts and nested workers
   removed; HTML previews get an injected CSP (`connect-src 'none'`, no remote images or form posts); markdown images
@@ -372,6 +374,10 @@ credentials live in the browser and there is no CORS issue.
   would open in an editor.
 - **Residual risks.** Anything stored in the browser profile is readable by other extensions or someone with access
   to your machine. Serve the app from a trusted origin; if you open it via `file://` the origin is `null`.
+  Give it an origin of its own: the connector extension's allow-list is per *origin*, so any other page served from
+  the same host can mark itself as the harness and inherit the extension's access to the APIs you allowed. The
+  Pyodide runtime is the one script fetched without an integrity hash (its URL is a setting, and it pulls its own
+  files); it lands in a Worker with no DOM, storage or secrets, but point that setting only at a host you trust.
 
 ## 🗂 Files
 ```

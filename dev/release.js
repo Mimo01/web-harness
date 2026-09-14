@@ -12,6 +12,13 @@ const crypto = require('crypto');
 const hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => "'sha256-" + crypto.createHash('sha256').update(m[1]).digest('base64') + "'").join(' ');
 // trimEnd matters: the old hashes are captured separately, so without it the gap before them grows by a space per release
 html = html.replace(/(script-src [^;]*?)('sha256-[^;]*)?;/, (all, pre) => `${pre.replace(/\s+'sha256-.*$/, '').trimEnd()} ${hashes};`);
+/* A hash that does not match is not a visible failure: the browser simply drops the script, APP_VERSION goes
+   undefined, every "?v=" cache tag empties and the update check reports 0.0.0 forever. 1.25.1 shipped that way.
+   So the rewrite is checked rather than assumed. */
+for (const m of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+  const h = "'sha256-" + crypto.createHash('sha256').update(m[1]).digest('base64') + "'";
+  if (!html.includes(h)) { console.error(`CSP rewrite failed: no hash in index.html for the inline script starting "${m[1].trim().slice(0, 40)}…". Nothing written.`); process.exit(1); }
+}
 fs.writeFileSync(idx, html);
 const v = JSON.parse(fs.readFileSync(vj, 'utf8')); v.version = ver; v.date = new Date().toISOString().slice(0, 10); if (notes) v.notes = notes;
 fs.writeFileSync(vj, JSON.stringify(v, null, 2) + '\n');

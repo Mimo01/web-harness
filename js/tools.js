@@ -660,8 +660,12 @@ H.tools = (() => {
      to tell the user to go and open it, and there is nothing there to open. */
   const skillLabel = (name) => `${name}.md (skill, stored in this browser)`;
   const SKILL_NOTE = 'Skills are stored in this browser, not as files in the workspace. The user manages and can revert them in Settings > Skills.';
+  /* A skill outlives the chat that wrote it: it stays in this browser and its name and description go into the
+     system prompt of every future chat. "Allow all" mode is a decision about one conversation, so it must not
+     silently hand a conversation that way of writing to all the others — these two always confirm, per skill. */
+  const skillAsk = (verb) => (a) => ({ key: `skill:${verb}:${String(a?.name || '')}`, note: `Skills are kept in this browser and every skill's name and description is added to the system prompt of every future chat, so this ${verb === 'write' ? 'change' : 'deletion'} outlives this conversation.` });
   def({
-    name: 'skill_write', group: 'Skills', risk: 'write',
+    name: 'skill_write', group: 'Skills', risk: 'write', mustAsk: skillAsk('write'),
     description: 'Create a skill, or replace an existing one with the same name. A skill is a reusable instruction set the user invokes by typing /name in the chat box, or that you load later with use_skill. Write the instructions in the second person, as concrete steps. Read an existing skill with use_skill first: this replaces it whole.',
     parameters: obj({
       name: str('Short kebab-case name; this is what the user types as /name'),
@@ -679,7 +683,7 @@ H.tools = (() => {
     },
   });
   def({
-    name: 'skill_delete', group: 'Skills', risk: 'danger',
+    name: 'skill_delete', group: 'Skills', risk: 'danger', mustAsk: skillAsk('delete'),
     description: 'Delete a skill by name. The user can revert this from Settings > Skills.',
     parameters: obj({ name: str('Skill name') }, ['name']),
     run: async ({ name }) => {

@@ -1346,7 +1346,10 @@ H.ui = (() => {
     let curAuth = setup.auth.find(a => a.type === p.auth?.type) || setup.auth[0];
     const renderCreds = () => {
       curAuth = setup.auth[+authPick.value] || setup.auth[0]; credBox.innerHTML = '';
-      if (curAuth.help || curAuth.link) credBox.append(el('p', { class: 'help' }, [curAuth.help || '', ' ', curAuth.link ? el('a', { href: curAuth.link.replace('{{baseUrl}}', url.value.replace(/\/+$/, '')), target: '_blank', rel: 'noopener' }, ['Open token page ', H.icon('external')]) : null]));
+      /* the link comes from the manifest, which may have been imported from anywhere: a "javascript:" href here
+         would run on this origin, where the API key and every plugin credential are. Only http(s) is rendered. */
+      const tokenPage = H.safeHref(String(curAuth.link || '').replace('{{baseUrl}}', url.value.replace(/\/+$/, '')));
+      if (curAuth.help || tokenPage) credBox.append(el('p', { class: 'help' }, [curAuth.help || '', ' ', tokenPage ? el('a', { href: tokenPage, target: '_blank', rel: 'noopener' }, ['Open token page ', H.icon('external')]) : null]));
       for (const f of curAuth.fields) {
         const existing = p.kind === 'mcp' ? (p.headers?.Authorization || '') : (p.auth?.[f.key] || '');
         credBox.append(el('label', { class: 'field' }, [el('span', {}, [f.label]), el('input', { type: f.secret ? 'password' : 'text', 'data-key': f.key, value: /^<.*>$/.test(existing) ? '' : existing, autocomplete: 'off' })]));

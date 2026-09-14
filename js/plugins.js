@@ -314,12 +314,31 @@ H.plugins = (() => {
     let a = { ...(t.defaults || {}), ...args };
     if (t.prepare) a = await H.runtime.evalExpr('prepare', t.prepare, { args: a });          // sandboxed: manifests never run in the page
     const req = t.request;
-    // values substituted into the path are percent-encoded (spaces, ?, #, &, %) but keep '/' so multi-segment values
-    // such as file paths or branch names still address nested resources; values that are already encoded are left alone
-    const encSeg = (v) => /%[0-9A-Fa-f]{2}/.test(v) ? v : encodeURIComponent(v).replace(/%2F/gi, '/');
-    const pathArgs = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, typeof v === 'string' ? encSeg(v) : v]));
+    /* Values substituted into the path are percent-encoded (spaces, ?, #, &) but keep '/', so multi-segment values
+       such as file paths or branch names still address nested resources. A value that is already percent-encoded is
+       left alone — the GitLab manifests encode ids like "group%2Fproject" themselves in `prepare` — but then it has
+       to be ONE encoded segment: a raw '/', '?' or '#' next to an escape would steer the request somewhere the
+       manifest never named. Either way a ".." segment is refused, encoded or not. Without these two checks a tool
+       the user approved as a read of one endpoint (jira__get_issue is risk 'safe', so it never even prompts) is a
+       call to any endpoint on that host, with their token or session — steerable by anything the model read. */
+    const encSeg = (k, v) => {
+      const s = String(v);
+      let dec = s; try { dec = decodeURIComponent(s); } catch { }
+      if (dec.split(/[/\\]/).includes('..')) throw new Error(`${p.name} ${t.name}: parameter "${k}" contains a ".." path segment, which would point the request at a different endpoint than this tool is for. Pass the plain value the API expects (an issue key, a file path, an id).`);
+      const pre = /%[0-9A-Fa-f]{2}/.test(s);
+      if (pre && /[/?#]/.test(s)) throw new Error(`${p.name} ${t.name}: parameter "${k}" mixes percent-encoding with a raw "/", "?" or "#". Pass it either fully decoded, or as a single already-encoded segment.`);
+      return pre ? s : encodeURIComponent(s).replace(/%2F/gi, '/');
+    };
+    const pathArgs = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, typeof v === 'string' ? encSeg(k, v) : v]));
     let path = t.pathFn ? await H.runtime.evalExpr('pathFn', t.pathFn, { args: pathArgs }) : H.template(req.path, pathArgs);
+    const baseU = new URL(p.baseUrl.replace(/\/+$/, ''));
+    const basePath = baseU.pathname.replace(/\/+$/, '');
     const url = new URL(p.baseUrl.replace(/\/+$/, '') + (path.startsWith('/') ? path : '/' + path));
+    /* last line of defence, after the browser has normalised the URL: whatever the templating and pathFn produced,
+       the request still has to land on the host and below the base path the user configured for this plugin */
+    if (url.origin !== baseU.origin || !(url.pathname === basePath || url.pathname.startsWith(basePath + '/'))) {
+      throw new Error(`${p.name} ${t.name}: the request path resolved to ${url.origin}${url.pathname}, which is outside this plugin's base URL (${baseU.origin}${basePath || '/'}). Refusing to send it. Check the arguments.`);
+    }
     for (const [k, v] of Object.entries(req.query || {})) { const val = H.template(String(v), a); if (val !== '') url.searchParams.set(k, val); }
     if (p.auth?.type === 'query' && p.auth.name) url.searchParams.set(p.auth.name, p.auth.value || '');
     const route = resolveRoute(p, url.toString());
@@ -396,13 +415,28 @@ H.plugins = (() => {
 
   /* ----------------------------- TOOL PROJECTION ----------------------------- */
   const cachedTools = { key: '', list: [] };
+  /* A bridge- or extension-routed call is performed by the user's own logged-in tab (or by the connector
+     extension, which sends their cookies). That is the act web_fetch and http_request always stop to confirm
+     (H.tools' bridgeAsk) — reading whatever that account can read — so a plugin tool taking the same route
+     confirms too, once per plugin per session, whatever risk the manifest declares and whatever mode the chat is
+     in. Without this the shipped Jira and GitLab templates, whose reads are risk 'safe' and whose default route
+     is the bridge, used the user's session silently and forever. */
+  function sessionAsk(p) {
+    const r = p.route?.type;
+    if (r !== 'bridge' && r !== 'extension') return undefined;
+    let origin = p.id; try { origin = new URL(p.kind === 'mcp' ? p.url : p.baseUrl).origin; } catch { }
+    const via = r === 'bridge' ? `your connected browser tab for ${origin}` : `the connector extension, with your cookies for ${origin}`;
+    const forced = { key: `plugin:${p.id}@${origin}`, note: `${p.name} is routed through ${via}, using your login session there. Calls from this plugin can reach whatever that account can. Approve only if you expect the assistant to act on ${origin} as you.` };
+    return () => forced;
+  }
   function tools() {
     const key = toolsVersion;
     if (cachedTools.key === key) return cachedTools.list;
     const list = [];
     for (const p of plugins) {
-      if (p.kind === 'rest') for (const t of p.tools || []) list.push({ name: `${p.id}__${t.name}`, group: 'Plugin: ' + p.name, plugin: p.id, risk: t.risk || 'write', description: `[${p.name}] ${t.description}`, parameters: t.parameters || { type: 'object', properties: {} }, run: (args) => runRest(p, t, args) });
-      if (p.kind === 'mcp') for (const t of mcpCache.get(p.id)?.tools || []) list.push({ name: `${p.id}__${t.name}`, group: 'Plugin: ' + p.name, plugin: p.id, risk: t.annotations?.readOnlyHint ? 'safe' : (t.annotations?.destructiveHint ? 'danger' : 'write'), description: `[${p.name}] ${t.description || ''}`, parameters: t.inputSchema || { type: 'object', properties: {} }, run: (args) => runMcp(p, t.name, args) });
+      const mustAsk = sessionAsk(p);
+      if (p.kind === 'rest') for (const t of p.tools || []) list.push({ name: `${p.id}__${t.name}`, group: 'Plugin: ' + p.name, plugin: p.id, risk: t.risk || 'write', mustAsk, description: `[${p.name}] ${t.description}`, parameters: t.parameters || { type: 'object', properties: {} }, run: (args) => runRest(p, t, args) });
+      if (p.kind === 'mcp') for (const t of mcpCache.get(p.id)?.tools || []) list.push({ name: `${p.id}__${t.name}`, group: 'Plugin: ' + p.name, plugin: p.id, risk: t.annotations?.readOnlyHint ? 'safe' : (t.annotations?.destructiveHint ? 'danger' : 'write'), mustAsk, description: `[${p.name}] ${t.description || ''}`, parameters: t.inputSchema || { type: 'object', properties: {} }, run: (args) => runMcp(p, t.name, args) });
     }
     cachedTools.key = key; cachedTools.list = list;
     return list;
