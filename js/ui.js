@@ -328,6 +328,24 @@ H.ui = (() => {
     if (m.meta?.interrupted) es.append(el('div', { class: 'row gap wrap truncated-box' }, [el('span', { class: 'muted small', style: 'flex:1' }, ['This reply was still being written when the tab was closed.']), el('button', { class: 'btn sm', onclick: () => H.agent.regenerate() }, [H.icon('refresh'), 'Retry'])]));
     if (m.meta?.truncated && !m.meta.streaming) es.append(el('div', { class: 'row gap wrap truncated-box' }, [el('span', { class: 'muted small', style: 'flex:1' }, ['The reply was cut off at the output limit.']), el('button', { class: 'btn sm primary', onclick: () => H.agent.continueRun() }, ['Continue'])]));
     const turn = turnOf.get(node); if (turn) updateTurnStats(turn);
+    /* The tool-call limit is a pause, not a conclusion. The bar goes at the end of the turn — under the tool
+       cards that used the last of the budget, not above them — and picks the work up with whatever the task
+       list still has open. */
+    if (turn) {
+      const has = !!m.meta?.limitReached && !m.meta.streaming;
+      let bar = turn.body.querySelector(':scope > .limit-bar');
+      if (!has) bar?.remove();
+      else if (!bar) {
+        const c = taskCounts(H.agent.taskList());
+        bar = el('div', { class: 'plan-bar limit-bar' }, [
+          el('div', { class: 'plan-title' }, [H.icon('bolt'), el('b', {}, ['Stopped at the tool-call limit']),
+            el('span', { class: 'muted small' }, [c.total ? `${c.done} of ${c.total} steps done.` : 'It ran out of tool calls for this turn.'])]),
+          el('span', { class: 'spacer' }),
+          el('button', { class: 'btn sm primary', onclick: (e) => { e.currentTarget.disabled = true; H.agent.continueSteps(); } }, [H.icon('send'), 'Continue']),
+        ]);
+        turn.body.append(bar);
+      }
+    }
     const ps = node.querySelector('.plan-slot'); ps.innerHTML = '';
     if (m.meta?.plan && !m.meta.streaming) {
       const isLast = H.agent.current()?.messages.at(-1) === m;
@@ -352,6 +370,18 @@ H.ui = (() => {
       el('div', { class: 'row gap', style: 'margin-top:6px' }, [el('button', { class: 'btn sm primary', onclick: send }, ['Answer']), el('button', { class: 'btn sm ghost', onclick: () => H.agent.answerQuestion(chatId, '(The user chose not to answer. Proceed with your best judgement or explain what you need.)') }, ['Skip'])]),
     ]);
   }
+  /* The task list, drawn the same way wherever it appears: in the tool card that changed it and in the strip
+     above the message box. `steps` is what the model committed to, not a rendering of its prose. */
+  const TASK_LABEL = { todo: 'to do', doing: 'doing', done: 'done', skipped: 'skipped' };
+  function taskSteps(list) {
+    return el('ol', { class: 'task-list' }, (list || []).map(s => el('li', { class: 'task ' + (s.status || 'todo') }, [
+      el('span', { class: 'tick', 'aria-hidden': 'true' }, [s.status === 'done' ? '✓' : s.status === 'doing' ? '▸' : s.status === 'skipped' ? '–' : '']),
+      el('span', { class: 'ttl' }, [s.title]),
+      el('span', { class: 'sr-only' }, [' (' + (TASK_LABEL[s.status] || 'to do') + ')']),
+    ])));
+  }
+  const taskCounts = (list) => ({ done: (list || []).filter(s => s.status === 'done' || s.status === 'skipped').length, total: (list || []).length, doing: (list || []).find(s => s.status === 'doing') || null });
+
   /* Tool results that carry unified diffs (git_diff, git_show, workspace_changes…) are worth looking at,
      not reading as JSON. fs_edit gets the same treatment, reconstructed from its own arguments. */
   function patchesOf(m) {
@@ -392,6 +422,17 @@ H.ui = (() => {
       node.classList.toggle('running', m.meta.question.answered === undefined); node.classList.toggle('ok', m.meta.question.answered !== undefined);
       node.querySelector('.targs').textContent = m.meta.question.text;
       if (bodyChanged) { const body = node.querySelector('.tbody'); body.innerHTML = ''; body.append(questionCard(m)); }
+      return;
+    }
+    /* task_list: the card is the list. The arguments are the interesting part and they are already readable —
+       showing them again as JSON under a "Result" heading would say the same thing twice, badly. */
+    if (m.name === 'task_list' && Array.isArray(m.meta?.args?.steps) && !m.meta?.error) {
+      const steps = m.meta.args.steps;
+      const c = taskCounts(steps);
+      node.classList.add('tasks'); node.classList.remove('running', 'error', 'denied'); node.classList.add('ok');
+      node.querySelector('.tstate').textContent = `${c.done} / ${c.total}`;
+      node.querySelector('.targs').textContent = c.doing ? c.doing.title : (c.done === c.total ? 'all done' : 'plan updated');
+      if (bodyChanged) { const body = node.querySelector('.tbody'); body.innerHTML = ''; body.append(taskSteps(steps)); }
       return;
     }
     const st = node.querySelector('.tstate'); const args = node.querySelector('.targs');
@@ -811,6 +852,31 @@ H.ui = (() => {
     };
   }
 
+  /* The task list, where the eye already is while the work runs. One line — how far along, and which step is
+     open — expanding to the whole list on click. It goes when there is no list or nothing left to do: a strip
+     that stays behind after the job is finished is just furniture. */
+  let taskStripOpen = false;
+  function renderTaskStrip() {
+    const strip = $('#task-strip');
+    const steps = H.agent.taskList();
+    const c = taskCounts(steps);
+    const show = !!c.total && c.done < c.total;
+    strip.classList.toggle('hidden', !show);
+    if (!show) { strip.innerHTML = ''; taskStripOpen = false; return; }
+    strip.innerHTML = '';
+    const head = el('button', {
+      type: 'button', class: 'task-head', 'aria-expanded': taskStripOpen ? 'true' : 'false',
+      title: taskStripOpen ? 'Hide the steps' : 'Show every step',
+      onclick: () => { taskStripOpen = !taskStripOpen; renderTaskStrip(); },
+    }, [
+      H.icon('chev', 'ico chev' + (taskStripOpen ? ' open' : '')),
+      el('b', {}, [`${c.done} / ${c.total}`]),
+      el('span', { class: 'cur' }, [c.doing ? c.doing.title : 'nothing in progress']),
+    ]);
+    strip.append(head);
+    if (taskStripOpen) strip.append(taskSteps(steps));
+  }
+
   /* ---------------- topbar ---------------- */
   let modelPick = null, modePick = null;
   /** the model list as picker rows: name, plus what the proxy says it costs and how much it can hold */
@@ -829,9 +895,14 @@ H.ui = (() => {
       if (!known.has(m) && known.size) bits.unshift('not in the proxy list');
       /* the pill drops the provider prefix — the part after it is what names the model; the full id stays on the
          menu row, the tooltip and the aria-label */
-      const short = brief && m.includes('/') ? m.slice(m.lastIndexOf('/') + 1) : null;
+      /* the reasoning effort has no pill of its own: the model pill carries it, since it is the model's setting
+         and the place the eye already goes to check what is running */
+      const eff = brief && m === cur ? (H.settings.get('reasoningEffort') || 'auto') : 'auto';
+      if (eff !== 'auto') bits.push('effort: ' + eff);
+      const base = brief && m.includes('/') ? m.slice(m.lastIndexOf('/') + 1) : (brief ? m : null);
+      const short = base && eff !== 'auto' ? base + ' · ' + eff : base;
       const sub = bits.join(' · ') || 'no pricing known';
-      return { value: m, label: m, short, title: short ? m + ' · ' + sub : null, mono: true, sub };
+      return { value: m, label: m, short, title: short && short !== m ? m + ' · ' + sub : null, mono: true, sub };
     });
   }
   function setModelOptions(models, cur) {
@@ -1180,6 +1251,14 @@ H.ui = (() => {
       ]),
     ]);
   }
+  /* What the last few replies actually reported, not what was asked for: a proxy that drops the marker looks
+     exactly like a working one until you count cache hits. */
+  function cacheState(model) {
+    if (!H.usage.cachesPrompts(model)) return H.settings.get('promptCache') === 'off' ? 'markers off — the model caches on its own or not at all' : 'no markers needed for this model';
+    const replies = (H.agent.current()?.messages || []).filter(m => m.role === 'assistant' && m.meta?.usage && (m.meta.model || model) === model).slice(-4);
+    if (!replies.length) return 'markers sent — no reply in this chat to judge by yet';
+    return replies.some(m => H.usage.cachedOf(m.meta.usage) > 0) ? 'active — this chat is reading from cache' : 'markers sent, but no cache hits reported';
+  }
   function modelPanel() {
     const s = H.settings.get();
     const pick = picker({
@@ -1187,13 +1266,21 @@ H.ui = (() => {
       searchPlaceholder: 'Filter models…', empty: 'No model matches', placeholder: 'No models loaded',
       onpick: (v) => { H.settings.set({ model: v }); modelPick?.set(v); info(); updateContextMeter(); },
     });
-    const repaint = (models) => { const m = H.settings.get('model'); pick.setOptions(modelOptions(models ?? H.settings.get('models'), m), m); setModelOptions(models ?? H.settings.get('models'), m); info(); };
+    /* an empty value is a real choice here, not a missing one: "whatever this chat is using" */
+    const subOptions = (models) => [{ value: '', label: 'Same as the chat', sub: 'sub-agents run on the model the chat is using' }, ...modelOptions(models ?? s.models, H.settings.get('subagentModel'))];
+    const subPick = picker({
+      value: s.subagentModel || '', title: 'Sub-agent model', options: subOptions(), search: true,
+      searchPlaceholder: 'Filter models…', empty: 'No model matches',
+      onpick: (v) => H.settings.set({ subagentModel: v }),
+    });
+    const repaint = (models) => { const m = H.settings.get('model'); pick.setOptions(modelOptions(models ?? H.settings.get('models'), m), m); subPick.setOptions(subOptions(models), H.settings.get('subagentModel') || ''); setModelOptions(models ?? H.settings.get('models'), m); info(); };
     const infoBox = el('div', { class: 'kv-card' });
     const info = () => { const m = H.settings.get('model'); const p = H.usage.priceFor(m); const mi = H.settings.get('modelInfo')?.[m]; infoBox.innerHTML = ''; infoBox.append(el('div', { class: 'kv' }, [
       el('span', {}, ['Context window']), el('b', {}, [p.context ? p.context.toLocaleString() + ' tokens' : 'unknown']),
       el('span', {}, ['Input price']), el('b', {}, [p.inPerTok != null ? '$' + (p.inPerTok * 1e6).toFixed(2) + ' / 1M' + (p.cachedPerTok != null ? ` (cached: $${(p.cachedPerTok * 1e6).toFixed(2)})` : '') : 'unknown']),
       el('span', {}, ['Output price']), el('b', {}, [p.outPerTok != null ? '$' + (p.outPerTok * 1e6).toFixed(2) + ' / 1M' : 'unknown']),
       el('span', {}, ['Source']), el('b', {}, [p.source === 'litellm' ? 'LiteLLM /model/info' : p.source === 'manual' ? 'manual override' : 'not available' + (mi?.provider ? ' · ' + mi.provider : '')]),
+      el('span', {}, ['Prompt caching']), el('b', {}, [cacheState(m)]),
     ])); };
     info();
     const custom = el('input', { type: 'text', placeholder: 'e.g. my-private-deployment', onchange: (e) => { const v = e.target.value.trim(); if (v) { H.settings.set({ model: v }); repaint(); e.target.value = ''; } } });
@@ -1215,6 +1302,14 @@ H.ui = (() => {
         infoBox,
       ]),
       sec('Generation', null, [
+        selectField('Reasoning effort', 'reasoningEffort', [
+          ['auto', 'Model default', 'nothing is sent; the model decides how much it thinks'],
+          ['minimal', 'Minimal', 'barely any thinking — fastest and cheapest'],
+          ['low', 'Low', 'a little thinking'],
+          ['medium', 'Medium', 'a balance of thought and cost'],
+          ['high', 'High', 'thinks hard: better on difficult work, slower and dearer'],
+        ], () => { setModelOptions(H.settings.get('models') || [], H.settings.get('model')); updateContextMeter(); }),
+        el('p', { class: 'help' }, ['Models that cannot reason ignore this. Thinking is paid for out of the output budget, so leave Max output tokens well above what the answer itself needs — a high effort with a small budget comes back empty. Auto-titling and compaction never use it.']),
         slider('Temperature', 'temperature', { min: 0, max: 2, step: 0.1, ends: ['precise, repeatable', 'varied, creative'], format: (v) => v.toFixed(1) }),
         stepper('Max output tokens', 'maxTokens', { min: 256, max: 200000, step: 1000, unit: 'tokens', help: 'The longest single reply. Too low and long answers get cut off mid-sentence.' }),
         stepper('Max tool calls per turn', 'maxToolIterations', { min: 1, max: 100, unit: 'calls', help: 'A stop so a confused model cannot loop forever. It is told when it runs out.' }),
@@ -1228,6 +1323,19 @@ H.ui = (() => {
           stepper('Full tool results for the last', 'keepToolTurns', { min: 0, max: 20, unit: 'user turns' }),
           stepper('Older tool results shortened to', 'toolStubChars', { min: 80, max: 4000, step: 40, unit: 'characters' }),
         ]),
+      ]),
+      sec('Prompt caching', 'Providers charge a fraction of the price for a prompt they have seen before. The app keeps the front of every request identical from turn to turn so that can happen; some models also need to be told where the reusable part ends.', [
+        selectField('Send cache markers', 'promptCache', [
+          ['auto', 'When the model needs them', 'Claude-family models (which cache nothing without a marker); everything else is left alone'],
+          ['always', 'Always', 'for a proxy that serves a caching model under a name this cannot recognise'],
+          ['off', 'Never', 'if your proxy rejects requests that carry them'],
+        ], () => info()),
+        el('p', { class: 'help' }, ['The reply\'s token line says how much of a request was served from cache. No hits on a Claude model usually means the proxy is dropping the marker.']),
+      ]),
+      sec('Sub-agents', 'run_subagent hands a self-contained job to a fresh context — reading its way through a big repository without filling this conversation. Several independent jobs in one call run at the same time.', [
+        el('div', { class: 'field', id: 'set-subagentModel' }, [el('span', {}, ['Sub-agent model']), subPick.el]),
+        el('p', { class: 'help' }, ['Exploring is mostly reading, which a smaller model does well and far more cheaply. Their tokens are billed to this chat, priced at whatever that model costs.']),
+        stepper('Run at once', 'subagentConcurrency', { min: 1, max: 6, unit: 'sub-agents', help: 'How many tasks of a single call run in parallel. Each one is a full request; more is faster and more expensive at the same moment.' }),
       ]),
       sec('Media', 'Images are resized in this browser before they are sent. Video becomes a few sampled frames plus a transcript, audio becomes a transcript — both need a speech-to-text model on your proxy.', [
         field('Transcription model', 'transcriptionModel', 'text', { placeholder: 'whisper-1 — empty turns transcription off' },
@@ -2016,6 +2124,9 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
       $('#input').value = d.text; attachments = d.attachments; autoresize(); renderAttachments();
     });
     H.bus.on('chat-updated', () => { renderChatList(); updateTitle(); });
+    H.bus.on('tasks', (id) => { if (id === H.agent.current()?.id) renderTaskStrip(); });
+    H.bus.on('chat-loaded', renderTaskStrip);
+    renderTaskStrip();
     H.bus.on('run-state', () => renderChatList());
     H.bus.on('message-added', onMessageAdded);
     H.bus.on('message-updated', onMessageUpdated);
@@ -2039,7 +2150,13 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     H.bus.on('workspace', (n) => { updateWorkspaceBtn(n); renderChatList(); if (!$('#ws-menu').classList.contains('hidden')) renderWorkspaceMenu(); });
     H.bus.on('git-state', () => updateWorkspaceBtn());
     H.bus.on('preview', showPreview);
-    H.bus.on('settings', (s) => { if (modePick?.value !== s.chatMode) updateModeUI(); if (modelPick?.value !== s.model) setModelOptions(s.models || [], s.model); });
+    /* the pill carries the effort as well as the name, so it has to be rebuilt when either changes — wherever
+       the change came from (the settings panel, another tab, a reset) */
+    let shownEffort = H.settings.get('reasoningEffort');
+    H.bus.on('settings', (s) => {
+      if (modePick?.value !== s.chatMode) updateModeUI();
+      if (modelPick?.value !== s.model || shownEffort !== s.reasoningEffort) { shownEffort = s.reasoningEffort; setModelOptions(s.models || [], s.model); }
+    });
     H.bus.on('perm-prompt', () => { try { if (document.hidden && Notification.permission === 'granted') new Notification('Permission needed', { body: 'The assistant is waiting for your approval.' }); } catch { } });
   }
 

@@ -93,8 +93,11 @@ H.agent = (() => {
 You are in plan mode. Investigate using read-only tools only (reading files, searching, fetching, listing). Do NOT modify anything, and do not try to call tools that change state; they are unavailable.
 When you have enough information, write a concrete, numbered implementation plan under a heading "## Plan". Each step must say exactly what will be done (files, commands, API calls) and how success is verified. List assumptions and risks. Finish your message after the plan; the user will review it and choose to execute it.`;
 
-  /* Stable ordering: static rules first, then plugin guides and skills (sorted), mode, and only at the very end the
-     parts that change between turns (workspace, date). Proxies with prompt caching can reuse the long stable prefix. */
+  /* The system prompt holds nothing that changes between turns. What it used to carry at the end — the open
+     folder, the git state, the date — moved into envBlock(), which is stamped onto each user message when it
+     is written and never rewritten afterwards. Anything volatile in the system message ends the common prefix
+     at the very front of the request, so a single git_status that changed the dirty count used to throw away
+     the prompt cache for the whole conversation behind it. */
   function systemPrompt(mode) {
     const s = H.settings.get();
     mode = mode || H.perms.effectiveMode();
@@ -105,37 +108,76 @@ When you have enough information, write a concrete, numbered implementation plan
       `Prefer calling tools over guessing. Keep answers concise; use markdown.`,
       `Files the user attaches are delivered inline as <attached_file> blocks inside their message and remain in the conversation history: refer back to them in later turns and never ask the user to send a file again unless the block says no text could be extracted.`,
       `Tool discipline: never repeat a call with identical arguments. If a call fails, read the error (it says why and how to fix it), change something, or stop and ask the user. After two failures of the same kind, stop and report. When a tool returns an empty result, say so instead of retrying variations endlessly.`,
+      `Work of more than about three steps: call task_list once at the start with the steps you intend to take, then call it again as you go — exactly one step "doing" at a time, finished ones "done". Short work needs no list.`,
     ].join('\n');
+    return (s.systemPrompt ? s.systemPrompt + '\n\n' : '') + env + H.plugins.promptSection() + H.skills.promptSection() + H.code.promptSection() + (mode === 'plan' ? '\n\n' + PLAN_PROMPT : '');
+  }
+
+  /* Where the folder, the git state, the task list and the date live now. It is stamped onto a user message
+     when that message is written and travels with it unchanged for the rest of the chat: a turn's environment
+     is what it was at the time, the newest turn always carries the current one, and no earlier part of the
+     request is ever rewritten — which is what makes the prefix cacheable. */
+  function envBlock(c) {
     const git = H.git.state();
-    const tail = [
+    const lines = [
       H.fs.describe()
       + (git?.branch ? `\nThe open folder is a git repository on branch "${git.branch}"${git.dirty != null ? ` with ${git.dirty} changed and ${git.untracked} untracked file(s) as of the last git_status` : ''}.` : ''),
       `Older tool results in this conversation may appear as short stubs marked [tool result truncated]; call the tool again if you need the full data.`,
       `Date: ${new Date().toISOString().slice(0, 10)}. Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}.`,
-    ].join('\n');
-    return (s.systemPrompt ? s.systemPrompt + '\n\n' : '') + env + H.plugins.promptSection() + H.skills.promptSection() + H.code.promptSection() + (mode === 'plan' ? '\n\n' + PLAN_PROMPT : '') + '\n\n' + tail;
+    ];
+    const t = tasksText(c);
+    if (t) lines.push(t);
+    return lines.join('\n');
+  }
+  const STATUS_MARK = { todo: '[ ]', doing: '[>]', done: '[x]', skipped: '[-]' };
+  function tasksText(c) {
+    const steps = (c || chat)?.tasks?.steps;
+    if (!steps?.length) return '';
+    return `Task list (yours, kept by task_list — update it as you go):\n`
+      + steps.map((s, i) => `${i + 1}. ${STATUS_MARK[s.status] || '[ ]'} ${s.title}`).join('\n');
   }
 
-  /* What the model sees: compacted messages are replaced by their summary; old tool results become stubs. */
-  function apiMessages(msgs) {
+  /* What the model sees: compacted messages are replaced by their summary; old tool results become stubs, and
+     each user turn carries the environment as it was when it was written.
+     `cacheMark` sets the rolling cache breakpoint: the last message that can never be rewritten again, which is
+     the last one whose tool results have already been stubbed. Everything up to it is a byte-identical prefix
+     from one request to the next, so a provider that needs an explicit breakpoint can cache all of it. */
+  function apiMessages(msgs, { cacheMark = false, withEnv = true } = {}) {
     const s = H.settings.get();
     const totalTurns = msgs.filter(m => m.role === 'user' && !m.meta?.compacted).length;
-    let turn = 0;
-    return msgs.filter(m => !m.meta?.local && !m.meta?.compacted).map(m => {
+    const keep = s.keepToolTurns ?? 2;
+    let turn = 0, settled = -1;
+    const out = msgs.filter(m => !m.meta?.local && !m.meta?.compacted).map(m => {
       if (m.role === 'user') turn++;
+      const frozen = totalTurns - turn >= keep;
       const o = { role: m.role };
       if (m.role === 'tool') {
         o.tool_call_id = m.tool_call_id;
         let c = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-        const old = totalTurns - turn >= (s.keepToolTurns ?? 2);
-        if (old && c.length > (s.toolStubChars || 240) + 60) c = c.slice(0, s.toolStubChars || 240) + ` …[tool result truncated: ${c.length} chars total; re-run ${m.name} for the full result]`;
+        if (frozen && c.length > (s.toolStubChars || 240) + 60) c = c.slice(0, s.toolStubChars || 240) + ` …[tool result truncated: ${c.length} chars total; re-run ${m.name} for the full result]`;
         o.content = c; return o;
       }
       o.content = m.apiContent ?? m.content ?? '';
+      if (withEnv && m.role === 'user' && m.meta?.env) {
+        const env = `<environment>\n${m.meta.env}\n</environment>`;
+        if (Array.isArray(o.content)) o.content = [...o.content, { type: 'text', text: env }];
+        else o.content = (o.content ? o.content + '\n\n' : '') + env;
+      }
       if (m.tool_calls?.length) o.tool_calls = m.tool_calls;
       if (m.role === 'assistant' && !o.content && !o.tool_calls) o.content = '';
+      o._frozen = frozen;
       return o;
     });
+    /* The breakpoint has to land somewhere that can actually carry it: a marked message becomes a text content
+       block, which rules out tool results (their content must stay a plain string), messages that are already a
+       list of parts (an image turn) and empty ones. The last frozen message that qualifies is usually a user
+       turn, and everything before it is the prefix a provider can serve from cache. */
+    for (let i = 0; i < out.length; i++) {
+      const o = out[i]; const frozen = o._frozen; delete o._frozen;
+      if (frozen && o.role !== 'tool' && !o.tool_calls && typeof o.content === 'string' && o.content) settled = i;
+    }
+    if (cacheMark && settled >= 2) out[settled]._cache = true;
+    return out;
   }
 
   /* writes are coalesced: many tool results in a row produce one storage write (trailing 400 ms), the final one is immediate */
@@ -204,9 +246,9 @@ When you have enough information, write a concrete, numbered implementation plan
   }
 
   const chatIdOf = (messages) => { for (const c of live.values()) if (c.messages === messages) return c.id; return chat?.id; };
-  async function loop(messages, { onEvent, signal, maxIterations, onUsage, mode, subagent = false, runFolder = null, chatId = null }) {
+  async function loop(messages, { onEvent, signal, maxIterations, onUsage, mode, subagent = false, runFolder = null, chatId = null, model: useModel = null }) {
     const tools = H.tools.openaiSpecs(chatId || chatIdOf(messages));
-    const model = H.settings.get('model');
+    const model = useModel || H.settings.get('model');
     let finalText = '';
     const seen = new Map();   // "name|args" -> { count, lastResult } for the loop guard
     let stalled = false;
@@ -218,8 +260,10 @@ When you have enough information, write a concrete, numbered implementation plan
       let res;
       try {
         res = await H.llm.chat({
-          messages: [{ role: 'system', content: systemPrompt(mode) }, ...apiMessages(messages.slice(0, -1))],
-          tools, signal,
+          /* two breakpoints: the system message (which covers the tool schemas in front of it — the single
+             largest stable block in the request) and the last settled message in the history */
+          messages: [{ role: 'system', content: systemPrompt(mode), _cache: true }, ...apiMessages(messages.slice(0, -1), { cacheMark: true })],
+          tools, signal, model,
           onDelta: (d) => {
             if (d.content) assistant.content += d.content;
             if (d.reasoning) assistant.reasoning += d.reasoning;
@@ -298,6 +342,9 @@ When you have enough information, write a concrete, numbered implementation plan
       }
       if (signal?.aborted) break;
       if (iter === maxIterations - 1) {
+        /* the limit is a stop, not an ending: the assistant message carries the flag the UI turns into a
+           Continue button, and the task list (if there is one) says what is left to pick up */
+        assistant.meta.limitReached = true; onEvent?.('assistant-end', assistant);
         messages.push({ role: 'user', content: `[system] Tool iteration limit (${maxIterations}) reached. Summarize progress and stop.`, ts: Date.now(), meta: { system: true } });
         onEvent?.('user-added', messages.at(-1));   // like the loop-guard message: visible now, not only after a reload
       }
@@ -337,13 +384,15 @@ When you have enough information, write a concrete, numbered implementation plan
     if (!older.length) return false;
     compacting.add(c.id); H.bus.emit('compacting', c.id, true);
     try {
-      const transcript = apiMessages(older).map(m => `${m.role.toUpperCase()}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}${m.tool_calls ? '\nCALLS: ' + m.tool_calls.map(t => t.function.name + ' ' + t.function.arguments).join('; ') : ''}`).join('\n\n');
+      /* without the environment blocks: a summary of the conversation is not helped by being told five times
+         over which folder was open and what the date was on each of those turns */
+      const transcript = apiMessages(older, { withEnv: false }).map(m => `${m.role.toUpperCase()}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}${m.tool_calls ? '\nCALLS: ' + m.tool_calls.map(t => t.function.name + ' ' + t.function.arguments).join('; ') : ''}`).join('\n\n');
       const prev = older.find(m => m.meta?.summary);
       const res = await H.llm.chat({
         messages: [
           { role: 'system', content: 'You compress conversation history for an AI assistant that will continue the work. Write a dense summary in markdown: goal and context; decisions and user preferences; facts discovered (file paths, identifiers, issue keys, URLs, values, errors); what was done (tools used, files changed); current state and open items; anything the user asked to remember. Be exhaustive on specifics, terse in wording. No preamble.' },
           { role: 'user', content: (prev ? 'An earlier summary already exists; merge it with the new material.\n\n' : '') + H.clamp(transcript, 120000) + '\n\nSummary:' },
-        ], maxTokens: 2000, temperature: 0.1,
+        ], maxTokens: 2000, temperature: 0.1, effort: 'auto',   // never pay a reasoning model to write a summary
       });
       const text = (res.content || '').trim();
       if (!text) throw new Error('empty summary');
@@ -380,7 +429,7 @@ When you have enough information, write a concrete, numbered implementation plan
     /* the first message is what makes a chat: from here it is history, written to `chats` and listed in the sidebar */
     if (c.pending) { delete c.pending; if (pending?.id === c.id) await dropPending(); }
     const slash = H.skills.expandSlash(text);
-    const userMsg = { role: 'user', content: slash ? slash.content : text, display: slash ? slash.display : (opts.display || undefined), ts: Date.now(), attachments: attachments.map(a => ({ name: a.name, size: a.size, kind: a.kind, chars: a.kind === 'text' ? (a.content || '').length : undefined, empty: a.kind === 'text' && !(a.content || '').trim(), note: a.note })), meta: opts.meta };
+    const userMsg = { role: 'user', content: slash ? slash.content : text, display: slash ? slash.display : (opts.display || undefined), ts: Date.now(), attachments: attachments.map(a => ({ name: a.name, size: a.size, kind: a.kind, chars: a.kind === 'text' ? (a.content || '').length : undefined, empty: a.kind === 'text' && !(a.content || '').trim(), note: a.note })), meta: { ...(opts.meta || {}), env: envBlock(c) } };
     if (attachments.length) {
       const texts = attachments.filter(a => a.kind === 'text');
       const images = attachments.filter(a => a.kind === 'image');
@@ -432,8 +481,36 @@ When you have enough information, write a concrete, numbered implementation plan
     if (!chat || runs.has(chat.id)) return;
     const id = chat.id;   // the override belongs to this chat, and has to be lifted from this chat even if the user moved on
     H.perms.setOverride(permMode || H.settings.get('planExecuteMode') || 'default', id);
-    try { await send('Execute the plan above step by step. After each step, briefly confirm what was done. When everything is complete, summarize the result and any deviations from the plan.', [], { display: '▶ Execute the plan', meta: { planExec: true } }); }
+    try { await send('Record the plan\'s numbered steps with task_list first, then execute them step by step, keeping the list up to date as you go. After each step, briefly confirm what was done. When everything is complete, summarize the result and any deviations from the plan.', [], { display: '▶ Execute the plan', meta: { planExec: true } }); }
     finally { H.perms.setOverride(null, id); }
+  }
+
+  /* ---------- task list ---------- */
+  /* The list belongs to the chat, so it survives a reload, is cleared with the chat, and — because envBlock
+     re-sends it with every user turn — outlives both tool-result stubbing and compaction, which is what
+     otherwise erases the model's own sense of where it is in a long job. */
+  function setTaskList(chatId, steps) {
+    const c = live.get(chatId) || (chat?.id === chatId ? chat : null);
+    if (!c) return null;
+    c.tasks = { steps, updated: Date.now() };
+    persist(c);
+    H.bus.emit('tasks', c.id);
+    return c.tasks;
+  }
+  const taskList = (id) => { const c = live.get(id ?? chat?.id) || chat; return c?.tasks?.steps || null; };
+  /* Continue after the tool-call limit stopped a run. Same shape as continueRun(): a system-tagged message,
+     not something the user has to type. */
+  async function continueSteps() {
+    if (!chat || runs.has(chat.id)) return;
+    /* the bar belongs to the moment it appeared: once the work is picked up again it has to go, and the message
+       it hangs on is not re-rendered by anything else */
+    for (const m of chat.messages) if (m.meta?.limitReached) { m.meta.limitReached = false; H.bus.emit('message-updated', m, chat.id); }
+    const left = (chat.tasks?.steps || []).filter(s => s.status !== 'done' && s.status !== 'skipped');
+    await send(
+      left.length
+        ? `Continue where you stopped. Remaining steps: ${left.map(s => s.title).join('; ')}. Keep the task list up to date as you go.`
+        : 'Continue where you stopped and finish the work.',
+      [], { display: '▶ Continue', meta: { system: true } });
   }
 
   /* Name the chat from its first exchange. Uses the model (2 attempts), falls back to the first words of the message. */
@@ -447,7 +524,7 @@ When you have enough information, write a concrete, numbered implementation plan
     let title = '';
     for (let attempt = 0; attempt < 2 && !title; attempt++) {
       try {
-        const res = await H.llm.chat({ messages: [{ role: 'system', content: 'You name chat conversations. Reply with a short title of 3 to 6 words, plain text, no quotes, no punctuation at the end, nothing else.' }, { role: 'user', content: `First message:\n${H.clamp(text, 800)}${reply ? `\n\nAssistant reply (excerpt):\n${H.clamp(reply.content, 400)}` : ''}\n\nTitle:` }], maxTokens: 30, temperature: 0.2 });
+        const res = await H.llm.chat({ messages: [{ role: 'system', content: 'You name chat conversations. Reply with a short title of 3 to 6 words, plain text, no quotes, no punctuation at the end, nothing else.' }, { role: 'user', content: `First message:\n${H.clamp(text, 800)}${reply ? `\n\nAssistant reply (excerpt):\n${H.clamp(reply.content, 400)}` : ''}\n\nTitle:` }], maxTokens: 30, temperature: 0.2, effort: 'auto' });
         title = cleanTitle(res.content);
         if (res.usage) addUsage(c, res.usage);
       } catch (e) { console.warn('auto-title attempt failed', e); }
@@ -552,14 +629,18 @@ When you have enough information, write a concrete, numbered implementation plan
      history would fall back to whichever chat happens to be on screen — and its requests, which the parent
      chat pays for, would be counted nowhere at all. */
   async function runOnce({ task, maxIterations = 15, onStatus, signal, runFolder = null, chatId = null }) {
-    const msgs = [{ role: 'user', content: task }];
+    const c = live.get(chatId) || (chat?.id === chatId ? chat : null);
+    const msgs = [{ role: 'user', content: task, meta: { env: envBlock(c) } }];
+    /* a sub-agent explores; it does not have to be the model that answers the user. An empty setting means
+       the chat's own model, which is what every chat did before there was a choice. */
+    const model = H.settings.get('subagentModel') || null;
     let steps = 0;
     /* the sub-agent spends the parent chat's money, so it is billed to the parent chat: same path as the
        main loop, so the ring, the per-chat cost and the all-time table all see it */
     const onUsage = (u, cost, model) => { const c = live.get(chatId) || (chat?.id === chatId ? chat : null); if (c) addUsage(c, u, cost, model); else H.usage.record(model || H.settings.get('model'), u); };
-    const text = await loop(msgs, { signal, maxIterations, subagent: true, runFolder, chatId, onUsage, mode: H.perms.effectiveMode(chatId) === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
+    const text = await loop(msgs, { signal, maxIterations, subagent: true, runFolder, chatId, onUsage, model, mode: H.perms.effectiveMode(chatId) === 'plan' ? 'plan' : 'default', onEvent: (ev, m) => { if (ev === 'tool-start') { steps++; onStatus?.(`sub-agent: ${m.name} (${steps})`); } } });
     return text || '(sub-agent produced no final text)';
   }
 
-  return { send, stop, run, regenerate, continueRun, load, reset, remove, rename, deleteMessage, editMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, current: () => chat, isRunning, runFolderOf, systemPrompt, restorePending, sweepLegacyEmpty, isPending: (id) => !!pending && (id || chat?.id) === pending.id };
+  return { send, stop, run, regenerate, continueRun, continueSteps, load, reset, remove, rename, deleteMessage, editMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, setTaskList, taskList, current: () => chat, isRunning, runFolderOf, systemPrompt, envBlock, restorePending, sweepLegacyEmpty, isPending: (id) => !!pending && (id || chat?.id) === pending.id };
 })();

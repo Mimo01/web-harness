@@ -10,18 +10,38 @@ H.llm = (() => {
     return (j.data || []).map(m => m.id).sort();
   }
 
+  /* Prompt caching. Providers that cache on their own (OpenAI) need nothing but a stable prefix, which the
+     agent's prompt layout gives them. The Anthropic family caches only what a `cache_control` breakpoint
+     marks, so the agent flags the messages that end a stable prefix with `_cache` and this is where that flag
+     becomes wire format — a text content block instead of a plain string. For every other model the flag is
+     dropped, so nothing unusual is ever sent to a proxy that would not understand it. */
+  function applyCache(messages, model) {
+    const on = H.usage.cachesPrompts(model);
+    return messages.map(m => {
+      if (!m._cache) return m;
+      const { _cache, ...rest } = m;
+      if (!on || typeof rest.content !== 'string' || !rest.content) return rest;
+      return { ...rest, content: [{ type: 'text', text: rest.content, cache_control: { type: 'ephemeral' } }] };
+    });
+  }
+
   /**
    * chat({messages, tools, signal, onDelta}) -> {content, tool_calls, usage, finish_reason}
    */
-  async function chat({ messages, tools, signal, onDelta, model, temperature, maxTokens }) {
+  async function chat({ messages, tools, signal, onDelta, model, temperature, maxTokens, effort }) {
     const s = H.settings.get();
+    const useModel = model || s.model;
     const body = {
-      model: model || s.model,
-      messages,
+      model: useModel,
+      messages: applyCache(messages, useModel),
       temperature: temperature ?? s.temperature,
       max_tokens: maxTokens ?? s.maxTokens,
       stream: !!s.streaming,
     };
+    /* `auto` means "say nothing about it", which is what every caller that must not pay for thinking
+       (auto-title, compaction) passes explicitly rather than inheriting the setting. */
+    const eff = effort === undefined ? s.reasoningEffort : effort;
+    if (eff && eff !== 'auto') body.reasoning_effort = eff;
     if (tools && tools.length) { body.tools = tools; body.tool_choice = 'auto'; }
     if (body.stream) body.stream_options = { include_usage: true };
 

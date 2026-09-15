@@ -73,7 +73,10 @@ Don't want the check? Turn it off in Settings → Web access; it only ever fetch
 - **Browser session bridge**: APIs that block browsers (Jira!) still work: a bookmarklet turns your logged-in tab
   into a relay. No admin, no proxy, no token. A connector extension is available where extensions are allowed.
 - **Permissions you control**: per-tool allow / ask / deny, session grants, re-runnable tool cards.
-- **Usage & costs**: context meter, per-chat and all-time totals, prices from LiteLLM or your own table.
+- **Usage & costs**: context meter, per-chat and all-time totals, prices from LiteLLM or your own table, prompt
+  caching so a long chat is not re-read at full price on every turn.
+- **Keeps its place**: a task list the model maintains as it works, shown over the message box; sub-agents that fan
+  out over independent jobs at once, on a cheaper model if you like.
 - **Security first**: no backend, no telemetry, no third-party fetch services by default, secrets in a separate
   store you can keep session-only, sandboxed code and previews.
 
@@ -119,7 +122,7 @@ thing to match on.
 | Interaction | `ask_user` (the question appears in the chat; answer with a click or by typing in the message box), `notify_user`, `clipboard_write` |
 | Utility | `get_datetime`, `sleep`, `browser_info` |
 | Skills | `use_skill`, `list_skills`, `skill_write`, `skill_delete` |
-| Agent | `run_subagent` (fresh context, same tools) |
+| Agent | `task_list` (the steps it means to take, kept up to date as it works), `run_subagent` (fresh context, same tools; several independent tasks in one call run at the same time, optionally on a cheaper model) |
 
 The **folder button under the message box** names the folder this chat is working in; click it to open one, switch
 to a folder you used before, or make it read-only. File tools operate inside that folder and nowhere else: absolute paths and `..` are refused.
@@ -228,8 +231,46 @@ Long chats stay within the model's window and costs stay roughly linear:
   older part of the conversation is summarised by the model and replaced, for the model, by that summary; the last 3
   turns stay verbatim. The chat itself keeps every message: compacted ones are greyed and a "compacted" card shows the
   summary. Run it by hand by typing `/compact`.
-- **Stable system prompt**: static rules, plugin guides and skills come first in a deterministic order; the workspace
-  line and the date sit at the end, so proxies with prompt caching can reuse the long prefix between turns.
+- **A request that repeats itself**: everything a provider could cache is byte-identical from one turn to the next.
+  The system prompt holds only what does not change (rules, plugin guides, skills, in a fixed order); the parts that
+  do — the open folder, the git state, the date, the task list — are stamped onto each message as it is written and
+  never rewritten afterwards. So the front of every request, tool schemas included, is a prefix of the last one.
+
+### Prompt caching
+Providers charge a fraction of the input price for a prompt they have already seen. That needs two things: a prefix
+that does not move (above), and, for the Claude family, an explicit marker saying where the reusable part ends —
+those models cache nothing without one. The harness sends two markers: after the system prompt (which covers the
+tool schemas in front of it, the largest stable block in the request) and at the last message that can no longer
+change. Models that cache by themselves are sent nothing unusual.
+
+Settings → Model → *Prompt caching* decides when markers go out: for models that need them (the default, detected
+from the proxy's `/model/info` provider or the model name), always, or never. The same card says whether the last
+few replies actually reported cache hits — a proxy that drops the marker looks exactly like one that honours it
+until you count. Cached tokens are shown under each reply and priced at the cached rate.
+
+### Reasoning effort
+Settings → Model → *Reasoning effort* is sent as `reasoning_effort` (minimal / low / medium / high); *Model default*
+sends nothing, which is what every chat did before. Models that cannot reason ignore it. It is paid for out of the
+output budget, so Max output tokens has to leave room for the thinking as well as the answer. The model pill under
+the message box shows the effort next to the model name. Auto-titling and compaction never use it.
+
+### Sub-agents
+`run_subagent` hands a self-contained job to a fresh context that has the same tools and its own context window.
+Several independent jobs go in one call and run at the same time (Settings → Model → *Run at once*, up to six); one
+that fails comes back as an error beside the others' answers rather than sinking the batch. Settings → Model →
+*Sub-agent model* points them at a cheaper model — exploring is mostly reading — and their tokens are billed to the
+chat at that model's price. Sub-agents cannot ask you anything, so a task has to carry its own context.
+
+### Knowing where it is in a long job
+For work of more than about three steps the model calls `task_list` with the steps it means to take, and again as
+it goes. The list appears as a card in the conversation and as a strip over the message box saying how far along it
+is and which step is open; it is stored with the chat, so it survives a reload, and it is re-sent with every turn,
+so neither tool-result stubbing nor compaction can make the model lose the thread. Executing a plan from Plan mode
+starts by recording the plan's steps in it.
+
+When a turn runs out of tool calls (Settings → Model → *Max tool calls per turn*), the reply now ends with a bar
+saying how many steps are done and a **Continue** button that picks the work up with the ones that are left,
+instead of leaving you to describe where it stopped.
 
 ### Usage & costs
 The message box shows the estimated context in use versus the model's window, and the chat's tokens and cost. Prices and
@@ -458,7 +499,13 @@ another repository's path in the box at the top to run the same suite against it
 (`git clone --local … && git repack -a -d`) is the one worth trying, since it exercises packfiles and deltas.
 
 Then set base URL `http://localhost:4000`, any API key, model `mock-gpt`. Messages containing "calc" trigger a
-`calculate` tool call; messages containing "ask" trigger `fs_write` (exercises the permission prompt).
+`calculate` tool call; "ask" triggers `fs_write` (exercises the permission prompt); "question" asks you one;
+"steps" walks a four-step `task_list`, one step per turn (set *Max tool calls per turn* low to see the limit bar
+and its Continue button); "fanout" sends three sub-agents at once; "slow" delays a reply by three seconds;
+"parallel", "loop" and "flaky" exercise parallel calls, the loop guard and retries. The model `mock-claude` is
+there to see prompt-cache markers: the mock logs one line per request with the model, the reasoning effort, where
+the cache breakpoints landed and a hash of the prefix up to the last one — two requests with the same hash would
+hit the cache. `DUMP=<dir> node dev/mock-litellm.js` writes every request body there to diff by hand.
 Libraries (marked, DOMPurify, highlight.js, fonts) load from public CDNs so the folder works out of the box with no
 build step; Pyodide is fetched from jsDelivr on first Python use. Without network access to the CDNs the app still
 runs (plain-text markdown, no Python).

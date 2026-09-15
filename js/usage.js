@@ -31,6 +31,18 @@ H.usage = (() => {
       source: man?.in != null ? 'manual' : info?.inCost != null ? 'litellm' : 'unknown',
     };
   }
+  /* Which models need an explicit cache breakpoint. OpenAI-style providers cache a repeated prefix by
+     themselves and ignore the marker; the Anthropic family caches nothing without one. "auto" asks the
+     proxy's own model info first (litellm_provider) and falls back to the name, so a model served under a
+     private id still gets caching when it is obviously a Claude. */
+  function cachesPrompts(model) {
+    const mode = H.settings.get('promptCache') || 'auto';
+    if (mode === 'off') return false;
+    if (mode === 'always') return true;
+    const m = model || H.settings.get('model') || '';
+    const provider = H.settings.get('modelInfo')?.[m]?.provider || '';
+    return /anthropic|bedrock|vertex/i.test(provider) || /claude/i.test(m);
+  }
   function cost(model, promptTok, completionTok, cachedTok = 0) {
     const p = priceFor(model);
     if (p.inPerTok == null && p.outPerTok == null) return null;
@@ -73,7 +85,8 @@ H.usage = (() => {
   /* contextBreakdown runs on every message the UI adds — once per tool card — and the system prompt is assembled
      from the plugin guides, the skill list and the project context file each time. Measure it when it changes. */
   let promptMemo = { text: null, tokens: 0 };
-  function promptEstimate() { const t = H.agent.systemPrompt(); if (promptMemo.text !== t) promptMemo = { text: t, tokens: H.estTokens(t) }; return promptMemo.tokens; }
+  /* both halves: the stable system message and the environment block that rides along with the newest turn */
+  function promptEstimate() { const t = H.agent.systemPrompt() + '\n\n' + H.agent.envBlock(); if (promptMemo.text !== t) promptMemo = { text: t, tokens: H.estTokens(t) }; return promptMemo.tokens; }
   const msgTokens = (m) => H.estTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + (m.tool_calls ? H.estTokens(JSON.stringify(m.tool_calls)) : 0) + 4;
   const contextEstimate = (chat) => contextBreakdown(chat).total;
   /* the same estimate, split into the parts the popup shows: what is always sent (system prompt + tool
@@ -159,5 +172,5 @@ H.usage = (() => {
     return out;
   }
 
-  return { priceFor, cost, costOfUsage, costOfChatUsage, cachedOf, chatCost, chatTokens, fmtCost, fmtTok, record, contextEstimate, contextBreakdown, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { loading = null; total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
+  return { priceFor, cost, costOfUsage, costOfChatUsage, cachedOf, cachesPrompts, chatCost, chatTokens, fmtCost, fmtTok, record, contextEstimate, contextBreakdown, refreshModelInfo, loadTotal, aggregateChats, resetTotal: async () => { loading = null; total = { prompt: 0, completion: 0, cost: 0, requests: 0, byModel: {}, byDay: {} }; await H.db.kvSet(TOTAL_KEY, total); H.bus.emit('usage-total', total); } };
 })();

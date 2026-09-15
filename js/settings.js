@@ -42,6 +42,10 @@ H.settings = (() => {
     temperature: 0.7,
     maxTokens: 16000,
     maxToolIterations: 25,
+    reasoningEffort: 'auto',       // auto = send nothing; minimal | low | medium | high are passed as reasoning_effort
+    promptCache: 'auto',           // auto = explicit cache breakpoints only for models that need them | always | off
+    subagentModel: '',             // '' = sub-agents run on the chat's model
+    subagentConcurrency: 3,        // how many tasks of one run_subagent call run at once
     systemPrompt: '',
     chatMode: 'default',           // default | auto | plan
     alwaysAsk: false,              // ask even for safe tools (strict)

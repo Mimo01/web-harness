@@ -497,15 +497,26 @@ H.code = (() => {
   };
 
   /* ============================ system prompt ============================ */
-  let contextCache = null, contextFor = null;
-  async function refreshContext() {
+  let contextCache = null, contextFor = null, inFlight = null;
+  function refreshContext() {
     const id = H.fs.folder()?.id || 'none';
+    /* This runs on every `workspace` event, and reading files can itself produce one. Two guards keep that from
+       becoming a loop: a read already under way for this folder is shared rather than started again, and a
+       folder the browser has not granted is not read at all — the grant emits `workspace` of its own, which is
+       when there is finally something to read. */
+    if (inFlight && inFlight.id === id) return inFlight.p;
     const movedFolder = id !== contextFor;         // a different project with an AGENTS.md is still worth announcing
-    contextFor = id;
     const prev = contextCache;
-    contextCache = await of().contextFile();
-    if (contextCache && (movedFolder || !prev || prev.name !== contextCache.name)) H.toast(`Loaded ${contextCache.name} from the workspace as project instructions.`, 'info', 6000);
-    return contextCache;
+    if (movedFolder) { contextFor = id; contextCache = null; }   // never leave another project's instructions in the prompt
+    const f = H.fs.folder();
+    if (f && !f.granted) return Promise.resolve(contextCache);
+    const p = (async () => {
+      contextCache = await of().contextFile();
+      if (contextCache && (movedFolder || !prev || prev.name !== contextCache.name)) H.toast(`Loaded ${contextCache.name} from the workspace as project instructions.`, 'info', 6000);
+      return contextCache;
+    })().finally(() => { if (inFlight?.p === p) inFlight = null; });
+    inFlight = { id, p };
+    return p;
   }
   function promptSection() {
     if (!H.fs.hasRoot()) return '';
@@ -515,7 +526,7 @@ H.code = (() => {
 - Refer to code as \`path/to/file.js:123\` so the user can open it.
 - Git tools (git_status, git_diff, git_log, git_show, git_blame) read the repository directly and are read-only: they can show history and uncommitted changes but cannot commit, push or check out. If the folder is not a repository, workspace_changes reports what changed since the last snapshot instead.
 - Before editing, read the exact region you are changing; after editing, re-read it to confirm. Match the surrounding style and reuse what the project already has instead of adding new patterns.
-- Delegate wide sweeps over many files to run_subagent so the main conversation keeps its context.
+- Delegate wide sweeps over many files to run_subagent so the main conversation keeps its context; when the sweeps are independent of each other, pass them all in one call's "tasks" so they run at the same time.
 - The previous contents of every file you change are kept, and the user can revert them from "Files changed in this chat"; that is not a reason to be careless, but a mistaken edit is recoverable.`;
     if (contextCache) s += `\n\n# Project instructions (${contextCache.name})\nThe user keeps this file in the project root; treat it as their standing instructions for this codebase. A direct request from the user overrides it.\n<project_context source="${contextCache.name}">\n${contextCache.content}\n</project_context>`;
     return s;

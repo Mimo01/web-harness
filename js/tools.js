@@ -702,14 +702,63 @@ H.tools = (() => {
     },
   });
 
+  /* ===================== TASK LIST ===================== */
+  def({
+    name: 'task_list', group: 'Agent', risk: 'safe',
+    description: 'Record or update your plan for a multi-step job. Send the WHOLE list every time — it replaces the previous one. Keep exactly one step "doing", mark finished steps "done", and update the list as you go so the user can see where you are. Use it for work of more than about three steps; short work needs no list.',
+    parameters: obj({
+      steps: {
+        type: 'array', description: 'Every step, in order',
+        items: obj({ title: str('Short imperative description of the step'), status: str('todo | doing | done | skipped', { enum: ['todo', 'doing', 'done', 'skipped'] }) }, ['title', 'status']),
+      },
+      note: str('Optional one-line note about the current state'),
+    }, ['steps']),
+    run: async ({ steps, note }, ctx) => {
+      const clean = (Array.isArray(steps) ? steps : []).slice(0, 50)
+        .map(s => ({ title: String(s?.title || '').trim().slice(0, 200), status: ['todo', 'doing', 'done', 'skipped'].includes(s?.status) ? s.status : 'todo' }))
+        .filter(s => s.title);
+      if (!clean.length) throw new Error('steps must be a non-empty array of { title, status } objects.');
+      const doing = clean.filter(s => s.status === 'doing').length;
+      const saved = H.agent.setTaskList(ctx.chatId, clean);
+      if (!saved) throw new Error('There is no chat to attach a task list to (a sub-agent has no list of its own: report your steps in your answer instead).');
+      if (note) ctx.onStatus?.(note);
+      return ok({
+        steps: clean, done: clean.filter(s => s.status === 'done').length, total: clean.length,
+        _note: doing > 1 ? 'More than one step is marked "doing"; keep exactly one.' : undefined,
+      });
+    },
+  });
+
   /* ===================== SUB-AGENT ===================== */
   def({
     name: 'run_subagent', group: 'Agent', risk: 'write',
-    description: 'Delegate a self-contained task to a fresh sub-agent (same model, same tools) with its own context window. Returns its final answer. Useful for long research or big file exploration.',
-    parameters: obj({ task: str('Complete task description with all needed context'), maxIterations: num('Max tool iterations (default 15)') }, ['task']),
-    run: async ({ task, maxIterations = 15 }, ctx) => {
-      const res = await H.agent.runOnce({ task, maxIterations, onStatus: ctx.onStatus, signal: ctx.signal, runFolder: ctx.runFolder, chatId: ctx.chatId });
-      return ok({ answer: res });
+    description: 'Delegate self-contained work to fresh sub-agents (same tools, their own context window, optionally a cheaper model). Pass several independent tasks in "tasks" and they run at the same time — one call for "find every caller of X", "summarize the test setup", "list the API routes" is far faster and cheaper than three. Returns each final answer. Sub-agents cannot ask the user anything, so give each task all the context it needs.',
+    parameters: obj({
+      task: str('A single task, with all the context it needs'),
+      tasks: { type: 'array', description: 'Several independent tasks to run at the same time', items: str('One complete task description') },
+      maxIterations: num('Max tool iterations per sub-agent (default 15)'),
+    }),
+    run: async ({ task, tasks, maxIterations = 15 }, ctx) => {
+      const list = (Array.isArray(tasks) ? tasks : []).map(t => String(t || '').trim()).filter(Boolean);
+      if (task && String(task).trim()) list.unshift(String(task).trim());
+      if (!list.length) throw new Error('Give either "task" (one task) or "tasks" (several independent ones).');
+      const one = async (t, i) => {
+        const label = list.length > 1 ? `sub-agent ${i + 1}/${list.length}` : 'sub-agent';
+        try {
+          const answer = await H.agent.runOnce({
+            task: t, maxIterations, signal: ctx.signal, runFolder: ctx.runFolder, chatId: ctx.chatId,
+            onStatus: (s) => ctx.onStatus?.(`${label}: ${String(s).replace(/^sub-agent:\s*/, '')}`),
+          });
+          return { task: H.clamp(t, 120), answer };
+        } catch (e) { return { task: H.clamp(t, 120), error: e?.message || String(e) }; }   // one failure must not sink the batch
+      };
+      if (list.length === 1) { const r = await one(list[0], 0); if (r.error) throw new Error(r.error); return ok({ answer: r.answer }); }
+      const limit = Math.max(1, Math.min(6, H.settings.get('subagentConcurrency') || 3));
+      const answers = new Array(list.length);
+      let next = 0;
+      const worker = async () => { while (next < list.length) { const i = next++; answers[i] = await one(list[i], i); } };
+      await Promise.all(Array.from({ length: Math.min(limit, list.length) }, worker));
+      return ok({ answers, failed: answers.filter(a => a.error).length || undefined });
     },
   });
 

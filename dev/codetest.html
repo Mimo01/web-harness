@@ -195,6 +195,42 @@ async function run() {
     return checked + ' random cases round-tripped';
   });
 
+  /* ---------------- project instructions ---------------- */
+  /* AGENTS.md / CLAUDE.md is reloaded whenever the workspace changes, and reading a file can itself report a
+     workspace change — which once made opening a chat on an ungranted folder loop until the tab died. These
+     stand in for the folder so both halves can be checked without a real directory handle. */
+  async function withFolder({ granted, files = {} }, fn) {
+    const saved = { folder: H.fs.folder, hasRoot: H.fs.hasRoot, readFile: H.fs.readFile };
+    let reads = 0;
+    /* only the candidate instruction files are counted: the same event also asks git for the branch, which is
+       one read of .git/HEAD and not what these tests are about */
+    const isContext = (p) => /^(AGENTS\.md|CLAUDE\.md|HARNESS\.md|\.harness\/context\.md)$/i.test(p);
+    H.fs.folder = () => ({ id: 'test-ctx-' + granted, name: 'fixture', mode: 'readwrite', granted });
+    H.fs.hasRoot = () => true;
+    H.fs.readFile = async (p) => {
+      if (isContext(p)) reads++;
+      if (!granted) throw new Error('The browser has not granted access');
+      if (p in files) return files[p];
+      throw Object.assign(new Error('missing'), { name: 'NotFoundError' });
+    };
+    try { return await fn(() => reads); } finally { Object.assign(H.fs, saved); }
+  }
+  await test('context: an ungranted folder is not read at all (no reload loop)', () =>
+    withFolder({ granted: false }, async (reads) => {
+      for (let i = 0; i < 20; i++) H.bus.emit('workspace', 'fixture');
+      await new Promise(r => setTimeout(r, 300));
+      eq(reads(), 0, 'a folder the browser has not granted must not be read');
+      return '20 workspace events, 0 reads';
+    }));
+  await test('context: a burst of workspace events reads the file once', () =>
+    withFolder({ granted: true, files: { 'CLAUDE.md': '# Fixture rules' } }, async (reads) => {
+      for (let i = 0; i < 20; i++) H.bus.emit('workspace', 'fixture');
+      await new Promise(r => setTimeout(r, 400));
+      if (reads() > 4) throw new Error(`${reads()} reads for 20 events: the refresh is not being coalesced`);
+      if (!H.code.promptSection().includes('Fixture rules')) throw new Error('the file did not reach the system prompt');
+      return `20 workspace events, ${reads()} reads, instructions in the prompt`;
+    }));
+
   /* ---------------- git plumbing ---------------- */
   const headSha = (await git('rev-parse', 'HEAD')).trim();
   await test('git: repository detected', async () => { const d = await H.git.detect(); if (!d.ok) throw new Error('detect() says ' + d.reason); return 'ok'; });

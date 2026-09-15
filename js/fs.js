@@ -92,9 +92,13 @@ H.fs = (() => {
     if (write && folder.mode !== 'readwrite') throw new Error(`The folder "${folder.name}" is open read-only. Ask the user to allow writing to it from the folder button under the message box.`);
     let p = 'denied';
     try { p = await folder.handle.queryPermission({ mode: folder.mode }); } catch { }
-    if (p === 'granted') { if (!folder.granted) { folder.granted = true; changed(); } return; }
-    try { if ((await folder.handle.requestPermission({ mode: folder.mode })) === 'granted') { folder.granted = true; changed(); return; } } catch { }
-    folder.granted = false; changed();
+    /* Only a change is announced. A failed check used to emit every single time, and `workspace` is what makes
+       the project-instructions file reload — so one ungranted folder turned "read a file" into "emit, reload,
+       read four more files, emit four times", which is a loop that takes the tab with it. */
+    const grantedNow = (on) => { if (folder.granted !== on) { folder.granted = on; changed(); } };
+    if (p === 'granted') { grantedNow(true); return; }
+    try { if ((await folder.handle.requestPermission({ mode: folder.mode })) === 'granted') { grantedNow(true); return; } } catch { }
+    grantedNow(false);
     throw new Error(`The browser has not granted access to the folder "${folder.name}" in this session. Ask the user to click the folder button under the message box and choose "Grant access" — browsers only allow that from a click, so it cannot be done from a tool.`);
   }
 

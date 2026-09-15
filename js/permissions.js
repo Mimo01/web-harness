@@ -89,10 +89,22 @@ H.perms = (() => {
     return denied(decision, ctx);
   }
 
+  /* One prompt at a time. Nothing in the main loop could ask twice at once — calls that prompt are kept out of
+     the parallel batches — but sub-agents running side by side can, and two modals stacked on top of each other
+     is a decision made about the wrong tool call. They queue instead; a run stopped while its turn is still
+     waiting drops out of the queue rather than opening a modal for a call that is no longer going to happen. */
+  let promptQueue = Promise.resolve();
+  function prompt(tool, args, ctx, opts = {}) {
+    const run = () => (ctx?.signal?.aborted ? Promise.resolve('deny') : showPrompt(tool, args, ctx, opts));
+    const mine = promptQueue.then(run, run);
+    promptQueue = mine.catch(() => { });
+    return mine;
+  }
+
   /* Modal prompt; resolves to 'once' | 'session' | 'always' | 'deny' | 'never' | 'msg:<text>'.
      Stop has to reach it: a run cancelled while this is open would otherwise wait forever for an answer to a
      call that is no longer going to happen, leaving the chat wedged behind a modal nobody wants to read. */
-  function prompt(tool, args, ctx, { scope, note, noAlways } = {}) {
+  function showPrompt(tool, args, ctx, { scope, note, noAlways } = {}) {
     return new Promise((resolve) => {
       if (ctx?.signal?.aborted) return resolve('deny');
       const argStr = JSON.stringify(args, null, 2);
