@@ -451,6 +451,10 @@ body.asking .composer-box { border-color: var(--warn); }
 #preview { width: 45%; min-width: 320px; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface); }
 #preview header { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
 #preview iframe { flex: 1; border: 0; background: #fff; }
+/* the pages of a PDF, on the app's canvas rather than in a viewer chrome of their own */
+#preview-pdf-view { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; align-items: center; gap: 12px; background: var(--bg); }
+#preview-pdf-view .pdf-page, #preview-pdf-view .pdf-slot { width: 100%; background: #fff; border: 1px solid var(--border); border-radius: 2px; }
+#preview-pdf-view .pdf-slot { opacity: .5; }
 
 /* ---------- Dialogs ---------- */
 #backdrop { position: fixed; inset: 0; z-index: 19; background: var(--overlay); }

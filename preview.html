@@ -15,7 +15,10 @@
 <!-- No allow-popups: the CSP below closes every other way out of the frame, but it does not govern window.open,
      which would let a rendered page carry data to a URL of its choosing on one click. "Open in tab" is a harness
      button, not something the preview needs to do for itself. No allow-modals either: render_html is a tool that
-     never asks, and alert()/confirm() in a loop would hold the whole tab. -->
+     never asks, and alert()/confirm() in a loop would hold the whole tab.
+     The one exception is "Save as PDF" (print: true), which only ever opens in a tab of its own: printing IS a
+     modal, so that frame — and only that frame — is given allow-modals. A runaway alert() there costs a throwaway
+     tab; the harness, and the preview panel embedded in it, are never given that power. -->
 <iframe id="f" sandbox="allow-scripts allow-forms" title="preview"></iframe>
 <script>
 (() => {
@@ -29,6 +32,10 @@
     const m = e.data || {};
     if (m.type !== 'preview' || typeof m.html !== 'string') return;
     if (m.title) document.title = String(m.title);
+    if (m.print && window.opener) {   // a print tab, never the embedded panel: see the comment above the frame
+      f.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+      f.onload = () => setTimeout(() => f.contentWindow.postMessage({ type: 'print' }, '*'), 150);   // let fonts and layout settle
+    }
     f.srcdoc = m.html;
   });
   app.postMessage({ type: 'preview-ready' }, origin);

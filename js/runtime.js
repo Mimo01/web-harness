@@ -177,12 +177,51 @@ H.runtime = (() => {
     }
     return afterDoctype >= 0 ? { at: afterDoctype, wrap: false } : null;
   }
+  /* "Save as PDF" is the browser's own print-to-PDF, which needs the *frame* to call print(): the preview frame is
+     a sandboxed, opaque origin, so the harness cannot reach its print() (not on the cross-origin allowlist), and
+     printing the host page instead would clip the fixed-height frame to a single page. So the preview copy of the
+     document carries this listener. It answers its embedder and nothing else, and it never travels with the file
+     the Download button saves — that is `raw`, the HTML as the model wrote it. */
+  /* Printing a page is not a screenshot of it, and three differences account for almost all of the "but it looked
+     like this on screen": the browser drops every background colour unless the user finds the "Background graphics"
+     checkbox; the page is laid out again at paper width, so a design wider than the sheet reflows or is cut; and
+     boxes are sliced wherever a page happens to end. The agent answers those before it calls print() —
+     print-color-adjust keeps the colours the page asked for, `zoom` fits a wide layout to the sheet by scaling the
+     layout itself (so it still paginates, unlike a transform), and the break rules keep cards, images, tables and
+     listings whole. It changes nothing on screen: the stylesheet is entirely inside @media print, the zoom is set
+     for the duration of the print and undone afterwards, and the model's own @media print rules come first, so a
+     page that has thought about printing still wins.
+     FIT is the printable width of the narrower common sheet (A4, 210mm) inside the 10mm margins set below, in CSS
+     pixels at 96dpi. Only ever scales down. */
+  const PRINT_AGENT = `<script>(function(){var FIT=714,PRINT_CSS='@media print{'
++'@page{margin:10mm}'
++'html,body{height:auto!important;min-height:0!important;overflow:visible!important}'
++'*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}'
++'pre,table,figure,img,svg,blockquote,tr,li,canvas{break-inside:avoid;page-break-inside:avoid}'
++'h1,h2,h3,h4{break-after:avoid;page-break-after:avoid}'
++'}';
+var style=null,prepared=false;
+/* guarded: print() fires beforeprint too, and measuring a second time — with the zoom already applied —
+   would scale the page again */
+function before(){if(prepared)return;prepared=true;
+if(!style){style=document.createElement('style');style.textContent=PRINT_CSS;(document.head||document.documentElement).appendChild(style);}
+var d=document.documentElement,b=document.body,w=Math.max(d.scrollWidth,b?b.scrollWidth:0,d.getBoundingClientRect().width);
+if(w>FIT)d.style.zoom=FIT/w;}
+function after(){if(!prepared)return;prepared=false;document.documentElement.style.zoom='';}
+addEventListener('beforeprint',before);addEventListener('afterprint',after);
+addEventListener('message',function(e){if(e.source!==parent||!e.data||e.data.type!=='print')return;before();print();after();});})();<\/script>`;
   function hardenHTML(html) {
-    const meta = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`;
+    const head = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">` + PRINT_AGENT;
     const src = String(html || '');
     const a = cspAnchor(src);
-    if (!a) return meta + src;
-    return src.slice(0, a.at) + (a.wrap ? '<head>' + meta + '</head>' : meta) + src.slice(a.at);
+    if (!a) return head + src;
+    return src.slice(0, a.at) + (a.wrap ? '<head>' + head + '</head>' : head) + src.slice(a.at);
+  }
+  /* A generated PDF goes to the same panel as rendered HTML, so "here is what I made" looks the same whichever
+     kind of document it is. The bytes travel as they are; the panel draws them with pdf.js. */
+  function previewPDF(bytes, { title = 'Document', filename = 'document.pdf' } = {}) {
+    H.bus.emit('preview', { kind: 'pdf', title, bytes, filename });
+    return 'preview';
   }
   function previewHTML(html, { title = 'Preview' } = {}) {
     H.bus.emit('preview', { title, html: hardenHTML(html), raw: String(html || '') });   // raw: what the model wrote, for Download   // sandboxed srcdoc iframe (unique origin) with an injected CSP; never a same-origin blob URL
@@ -196,5 +235,5 @@ H.runtime = (() => {
     if (r.error) throw new Error(`${kind} expression failed: ${String(r.error).split('\n')[0]}`);
     return r.result;
   }
-  return { runJS, runPython, previewHTML, evalExpr, pyodideLoaded: () => pyReady };
+  return { runJS, runPython, previewHTML, previewPDF, evalExpr, pyodideLoaded: () => pyReady };
 })();

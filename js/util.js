@@ -148,6 +148,36 @@ H.fatal = (msg) => {
   } catch (e) { console.error('fatal', msg, e); }
 };
 
+/* Lazily loaded third-party libraries (pdf.js, JSZip, SheetJS, pdf-lib, fontkit) share these two.
+   Everything they pull in runs with full page privileges or lands in a document the user will send on, so a file
+   that is not byte-for-byte the pinned one must simply fail rather than run. Scripts get SRI from the browser;
+   bytes fetched with fetch() carry none, so they are hashed here by hand. Bump hash and version together. */
+H.loadScript = (() => {
+  const inflight = {};   // url -> Promise, so two callers at once share one <script> tag
+  return (url, get, integrity) => {
+    if (get()) return Promise.resolve(get());
+    return inflight[url] ||= new Promise((res, rej) => {
+      const s = H.el('script', { src: url });
+      if (integrity) { s.integrity = integrity; s.crossOrigin = 'anonymous'; }
+      s.onload = () => (get() ? res(get()) : rej(new Error(url + ' loaded but did not define what was expected (wrong build?)')));
+      s.onerror = () => { delete inflight[url]; s.remove(); rej(new Error('Could not load ' + url + ' (offline, CDN blocked, or the file did not match its expected checksum)')); };
+      document.head.append(s);
+    });
+  };
+})();
+/** Fetch bytes and refuse them unless they hash to `integrity` ("sha512-<base64>"). Returns a Uint8Array. */
+H.fetchVerified = async (url, integrity) => {
+  const r = await fetch(url, { cache: 'force-cache' });
+  if (!r.ok) throw new Error(`Could not download ${url} (HTTP ${r.status}).`);
+  const buf = await r.arrayBuffer();
+  if (integrity) {
+    if (!crypto?.subtle) throw new Error(`${url} cannot be verified: this browser has no Web Crypto (a secure context — https or localhost — is required).`);
+    const digest = 'sha512-' + btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-512', buf))));
+    if (digest !== integrity) throw new Error(`${url} does not match its expected checksum and was not used.`);
+  }
+  return new Uint8Array(buf);
+};
+
 H.download = (name, content, type = 'text/plain') => {
   const blob = content instanceof Blob ? content : new Blob([content], { type });
   const url = URL.createObjectURL(blob);

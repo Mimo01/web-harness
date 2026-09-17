@@ -50,6 +50,16 @@ Don't want the check? Turn it off in Settings → Web access; it only ever fetch
 - **Attach anything**: PDF, Word, PowerPoint, Excel/CSV, code and text files become text; images are resized and
   sent as vision input; videos become sampled frames plus a transcript; audio becomes a transcript (transcription
   uses a speech model on your proxy, e.g. whisper). All of it happens in the browser; nothing is uploaded elsewhere.
+- **Write documents, not just text**: `create_pdf` typesets markdown into a real PDF — headings, tables, code,
+  lists, images, links, page numbers — with selectable text rather than a screenshot of a page, in the harness's own
+  typography and with the fonts embedded so Slovak, Czech, Polish or Cyrillic come out right. It lands in your
+  preview panel beside the chat, page by page, so you can see what was written and ask for changes — and it can be
+  saved into your workspace folder at a path you name. It cannot put anything in your Downloads folder — that is what
+  the panel's Download button is for, and it is yours to press. HTML the model rendered is printed to PDF from the
+  preview, and it
+  comes out looking like the preview: background colours are kept (no hunting for the "Background graphics"
+  checkbox), a layout wider than the sheet is scaled to fit instead of reflowing, and cards, tables, images and
+  listings are not sliced across a page break.
 - **Code projects, understood**: one call orients the model in an unfamiliar repo (languages, structure, manifests,
   entry points); it navigates by symbol rather than by string, follows the import graph, and greps a `.gitignore`-aware
   index instead of re-reading every file.
@@ -111,11 +121,11 @@ thing to match on.
 ### Tools (built in)
 | Group | Tools |
 |---|---|
-| Documents & media | chat attachments, `fs_upload_from_user` and `fs_read` convert PDF (pdf.js), .docx / .pptx (JSZip + XML), .xlsx / .xls / .ods / .csv (SheetJS) to text, client-side. Images are downscaled (max 1600 px) and sent as vision input; `view_image` lets the model look at an image in the workspace. Videos: up to 6 sampled frames + transcript; audio: transcript (needs a transcription model set in Settings → Model). HEIC and legacy .doc/.ppt are reported as unsupported. |
-| Files (workspace folder you pick) | `fs_list`, `fs_read` (one file, a line range, or several at once), `fs_write`, `fs_edit`, `fs_append`, `fs_mkdir`, `fs_delete`, `fs_move` (refuses to overwrite unless asked), `fs_stat`, `fs_search` (grep with context lines, globs and `.gitignore` rules), `fs_find` (glob), `fs_upload_from_user`, `download_file` |
+| Documents & media | chat attachments, `fs_upload_from_user` and `fs_read` convert PDF (pdf.js), .docx / .pptx (JSZip + XML), .xlsx / .xls / .ods / .csv (SheetJS) to text, client-side. `create_pdf` goes the other way: markdown becomes a typeset PDF (pdf-lib + fontkit) with embedded, subsetted fonts and real selectable text. Images are downscaled (max 1600 px) and sent as vision input; `view_image` lets the model look at an image in the workspace. Videos: up to 6 sampled frames + transcript; audio: transcript (needs a transcription model set in Settings → Model). HEIC and legacy .doc/.ppt are reported as unsupported. |
+| Files (workspace folder you pick) | `fs_list`, `fs_read` (one file, a line range, or several at once), `fs_write`, `fs_edit`, `fs_append`, `fs_mkdir`, `fs_delete`, `fs_move` (refuses to overwrite unless asked), `fs_stat`, `fs_search` (grep with context lines, globs and `.gitignore` rules), `fs_find` (glob), `fs_upload_from_user`, `download_file`, `create_pdf` (markdown → a typeset PDF, shown in the preview panel and optionally written to a workspace path; it cannot reach your Downloads folder) |
 | Code intelligence | `project_overview` (languages, structure, manifests, entry points, tests, CI, README, git state — the first call in an unfamiliar project), `code_outline` (a file's classes/functions/imports with line numbers, without reading it), `code_symbol` (definitions and references of a name), `code_deps` (what a file imports, and what imports it), `workspace_snapshot` / `workspace_changes` (diff a folder against a baseline when it is not a repository) |
 | Git (read-only) | `git_status`, `git_diff` (working tree or between refs; pipe the patch to `download_file` to save it), `git_log`, `git_show`, `git_show_file` (a file at any commit), `git_file_history`, `git_branches`, `git_blame` |
-| Code | `run_javascript` (sandboxed Web Worker), `run_python` (Pyodide, numpy/pandas etc.), `run_file` (.js/.py/.html/.json), `render_html` (preview panel), `calculate` |
+| Code | `run_javascript` (sandboxed Web Worker), `run_python` (Pyodide, numpy/pandas etc.), `run_file` (.js/.py/.html/.json), `render_html` (preview panel, which can save the page as HTML or print it to PDF), `calculate` |
 | Web | `web_fetch` (direct, HTML → text), `web_search` (needs a configured provider), `http_request` (call any API), `open_url` |
 | Data | `json_query`, `regex_extract`, `csv_parse`, `text_stats`, `base64`, `hash_text` |
 | Memory | `memory_save`, `memory_get`, `memory_list`, `memory_delete` (persistent across chats) |
@@ -374,8 +384,9 @@ credentials live in the browser and there is no CORS issue.
   the model is told to use `open_url` instead. `web_search` is disabled until you configure a provider (a self-hosted
   SearXNG keeps queries in-house). The optional r.jina.ai reader and CORS proxy are off and clearly labelled as
   third parties. The only other hosts contacted are CDNs that serve static code and fonts at startup (cdnjs for
-  marked / DOMPurify / highlight.js, Google Fonts) and jsDelivr for Pyodide on first Python use; none of your data is
-  sent to them.
+  marked / DOMPurify / highlight.js, Google Fonts), jsDelivr for Pyodide on first Python use, and — the first time a
+  PDF is written — pdf-lib, fontkit and the document fonts. None of your data is sent to them: documents are built in
+  the browser, and a PDF never embeds an image fetched from the web (only workspace files and `data:` URLs).
 - **Storage.** Settings, policies, skills and plugin manifests: `localStorage`. Chats, memories, usage and workspace
   snapshots: IndexedDB.
   API key, plugin credentials and the web-search API key: a separate secret store, either `localStorage`
@@ -388,7 +399,11 @@ credentials live in the browser and there is no CORS issue.
 - **Sandboxing.** JavaScript runs in a Web Worker (no DOM, no workspace); Python in Pyodide/WebAssembly inside its
   own Worker, so a timeout terminates runaway code instead of freezing the page; HTML previews render inside
   `preview.html`, a same-origin host page with its own strict CSP, in a sandboxed `srcdoc` frame with a unique origin
-  ("Open in tab" opens the same host page, never a same-origin blob URL); plugin manifest expressions (`transform`, `prepare`, `pathFn`) run in the same Worker sandbox
+  ("Open in tab" opens the same host page, never a same-origin blob URL); a generated PDF is drawn page by page into
+  canvases with pdf.js rather than handed to the browser's viewer through a `blob:` frame, for the same reason.
+  "Save as PDF" prints through the browser's
+  own print dialog: printing is a modal, so that one tab — never the panel embedded in the harness — gets
+  `allow-modals`, and a runaway `alert()` there costs a throwaway tab rather than the app. Plugin manifest expressions (`transform`, `prepare`, `pathFn`) run in the same Worker sandbox
   with no access to the page, storage or secrets, and importing a manifest that contains them shows a warning;
   CDN scripts and stylesheets carry Subresource Integrity hashes; model markdown is sanitized with DOMPurify; `<meta name="referrer" content="no-referrer">`
   keeps your page URL out of outbound requests. Workspace access requires you to pick the folder and stays inside it
@@ -465,6 +480,7 @@ js/diff.js        text diff engine (line diff, unified patches)
 js/code.js        the workspace as a codebase: ignore rules, file index, grep, outlines, symbols, imports, snapshots
 js/git.js         read-only git: inflate, loose objects and packfiles, refs, index, trees, status, diff, log, blame
 js/runtime.js     JS worker sandbox, Pyodide, HTML preview
+js/pdf.js         markdown → PDF: layout engine, embedded subsetted fonts (pdf-lib + fontkit), page viewer
 js/tools.js       built-in tools registry
 js/plugins.js     REST plugin engine, MCP client, Jira/GitHub manifests
 js/skills.js      skills
@@ -519,8 +535,10 @@ when the result changes, the sidebar works from a small in-memory index, and sto
 workspace is walked once into a cached file index (invalidated whenever a file tool writes) that search, globbing and
 the code tools share, with a bounded cache of file contents on top; git objects, trees and refs are cached per
 repository state, and packfiles are read through byte ranges rather than loaded whole. The heavy
-optional parts are Pyodide (Python, ~10 MB download and a few seconds of CPU on first use) and parsing very large
-PDFs; both happen only when you use them.
+optional parts are Pyodide (Python, ~10 MB download and a few seconds of CPU on first use), parsing very large
+PDFs, and writing one (~1.3 MB of library plus the document fonts, downloaded once and then cached by the browser);
+all of them happen only when you use them. Generated PDFs stay small — the fonts are subsetted to the characters the
+document actually uses, so a two-page memo is a few tens of kilobytes.
 
 ## 💻 Platform notes (macOS / Windows / Linux)
 

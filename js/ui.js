@@ -1797,7 +1797,8 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
       ...(s.jinaFallback ? [['r.jina.ai', 'https://r.jina.ai', 'third-party reader: receives the URLs the model fetches']] : []),
       ...(s.searchTemplate ? [['Search provider', s.searchTemplate, 'receives search queries']] : []),
       ...(s.checkUpdates ? [['GitHub (update check)', H.ABOUT.versionUrl, 'a small version file fetched on startup and every hour; no data is sent']] : []),
-      ['cdnjs.cloudflare.com', 'https://cdnjs.cloudflare.com', 'UI libraries (marked, DOMPurify, highlight.js) at startup, and pdf.js / JSZip / SheetJS only when you attach a PDF, Office or spreadsheet file; files are parsed locally, nothing is uploaded'],
+      ['cdnjs.cloudflare.com', 'https://cdnjs.cloudflare.com', 'UI libraries (marked, DOMPurify, highlight.js) at startup, and pdf.js / JSZip / SheetJS / pdf-lib only when you attach a PDF, Office or spreadsheet file or a PDF is written; files are parsed and built locally, nothing is uploaded'],
+      ['cdn.jsdelivr.net', 'https://cdn.jsdelivr.net', 'fontkit and the document fonts (Instrument Sans, JetBrains Mono, DejaVu Sans), downloaded the first time a PDF is written; nothing is sent'],
       ['fonts.googleapis.com', 'https://fonts.googleapis.com', 'Instrument Sans, Instrument Serif and JetBrains Mono fonts loaded at startup; no data is sent'],
       ...(s.allowPyodideCdn ? [['Pyodide (jsDelivr)', s.pyodideUrl, 'downloaded only when Python is first used (code and data stay in the browser)']] : []),
     ];
@@ -1987,14 +1988,40 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     });
     previewReady.set(win, pr); return pr;
   }
-  async function showPreview({ url, title, html, raw }) {
+  /* The panel shows one of two things, and the header follows it: HTML lives in the sandboxed frame and can be
+     saved or printed; a PDF is already the finished document, so it is drawn into the panel and only saved. */
+  let pdfView = null;                    // the open document, so its observers are dropped when another replaces it
+  function previewKind(kind) {
+    const p = $('#preview');
+    p.dataset.kind = kind;
+    p.querySelector('iframe').classList.toggle('hidden', kind === 'pdf');
+    $('#preview-pdf-view').classList.toggle('hidden', kind !== 'pdf');
+    $('#preview-pdf').classList.toggle('hidden', kind === 'pdf');        // "Save as PDF": it already is one
+    $('#preview-open').classList.toggle('hidden', kind === 'pdf');       // model HTML is never opened on this origin
+    if (kind !== 'pdf') { pdfView?.destroy(); pdfView = null; $('#preview-pdf-view').innerHTML = ''; }
+  }
+  async function showPreview({ url, title, html, raw, kind, bytes, filename }) {
     const p = $('#preview'); p.classList.remove('hidden');
-    p.querySelector('.ptitle').textContent = title; p.dataset.html = html; p.dataset.raw = raw ?? html;
+    p.querySelector('.ptitle').textContent = title;
+    if (kind === 'pdf') {
+      previewKind('pdf');
+      pdfView?.destroy();
+      p.dataset.filename = filename || 'document.pdf';
+      pdfBytes = bytes;
+      const host = $('#preview-pdf-view');
+      host.innerHTML = '';
+      try { pdfView = await H.pdf.view(bytes, host); }
+      catch (e) { host.append(el('p', { class: 'small muted', style: 'padding:16px' }, ['The document could not be rendered: ' + (e?.message || e)])); }
+      return;
+    }
+    previewKind('html');
+    p.dataset.html = html; p.dataset.raw = raw ?? html;
     const fr = p.querySelector('iframe');
     if (!fr.getAttribute('src')) { fr.src = previewURL(); }
     await waitPreview(fr.contentWindow);
     fr.contentWindow.postMessage({ type: 'preview', title, html }, previewTarget());
   }
+  let pdfBytes = null;   // the bytes behind the panel's Download button while a PDF is shown
   function effectiveTheme() { const t = H.settings.get('theme'); return t === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : t; }
   function applyTheme() {
     const t = H.settings.get('theme');
@@ -2099,16 +2126,28 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     $('#chat-title').onclick = () => { const c = H.agent.current(); if (!c) return; const t = prompt('Chat title', c.title); if (t && t.trim()) { H.agent.rename(t.trim()).then(() => { updateTitle(); renderChatList(); }); } };
     $('#preview-close').onclick = () => $('#preview').classList.add('hidden');
     $('#preview-download').onclick = () => {   // the HTML as the model wrote it (without the injected preview policy)
-      const p = $('#preview'); const html = p.dataset.raw || p.dataset.html || ''; if (!html) return H.toast('Nothing to download yet.', 'info');
+      const p = $('#preview');
+      if (p.dataset.kind === 'pdf') {
+        if (!pdfBytes) return H.toast('Nothing to download yet.', 'info');
+        const name = p.dataset.filename || 'document.pdf';
+        H.download(name, H.pdf.blob(pdfBytes)); return H.toast(`Saved ${name}`, 'success');
+      }
+      const html = p.dataset.raw || p.dataset.html || ''; if (!html) return H.toast('Nothing to download yet.', 'info');
       const name = ((p.querySelector('.ptitle').textContent || 'preview').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'preview') + '.html';
       H.download(name, html, 'text/html'); H.toast(`Saved ${name}`, 'success');
     };
-    $('#preview-open').onclick = async () => {   // never open model HTML on this origin: preview.html hosts it in a sandboxed frame with a strict CSP
+    /* never open model HTML on this origin: preview.html hosts it in a sandboxed frame with a strict CSP.
+       `print` asks that tab to start the browser's print dialog, which is where "Save as PDF" lives — the page
+       is printed by the engine that rendered it, so the PDF keeps every bit of its CSS. */
+    const openPreviewTab = async (print = false) => {
       const html = $('#preview').dataset.html || ''; const title = $('#preview .ptitle').textContent || 'Preview';
+      if (!html) return H.toast('Nothing to show yet.', 'info');
       const w = window.open(previewURL(), '_blank'); if (!w) return H.toast('Popup blocked by the browser.', 'warn');
       await waitPreview(w);
-      w.postMessage({ type: 'preview', title, html }, previewTarget());
+      w.postMessage({ type: 'preview', title, html, print }, previewTarget());
     };
+    $('#preview-open').onclick = () => openPreviewTab(false);
+    $('#preview-pdf').onclick = () => { openPreviewTab(true); H.toast('Choose "Save as PDF" as the destination in the print dialog.', 'info', 6000); };
     $('#export-chat').onclick = () => { const c = H.agent.current(); if (!c) return; H.download((c.title || 'chat').replace(/[^\w-]+/g, '_') + '.md', H.chatMarkdown(c), 'text/markdown'); };
     $('#messages').addEventListener('scroll', () => { const b = $('#messages'); stick = b.scrollHeight - b.scrollTop - b.clientHeight < 80; updateScrollBtn(); });
     $('#scroll-bottom').onclick = () => { stick = true; scrollBottom(true); };

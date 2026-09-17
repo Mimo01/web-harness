@@ -186,6 +186,57 @@ H.tools = (() => {
     run: async ({ filename, content, mimeType }) => { H.download(filename, content, mimeType || 'text/plain'); return ok({ downloaded: filename }); },
   });
 
+  /* Writing a PDF is the same kind of act as download_file — a file lands in the workspace or in the user's
+     Downloads folder — so it carries the same risk level and is refused in Plan mode. */
+  def({
+    name: 'create_pdf', group: 'Files', risk: 'write',
+    description: 'Write a real PDF document from markdown: headings, paragraphs, bold/italic/links, bullet, numbered and task lists, tables, code blocks, quotes, rules and images. The text is drawn as text (selectable and searchable, not a picture), typeset in the harness\'s own typography, with a title block and page numbers. It opens in the preview panel beside the chat, where the user can read it and save it with the panel\'s Download button; pass `path` to also write it into the workspace. Images are embedded from workspace paths (PNG/JPEG) — never from URLs. `<!-- pagebreak -->` starts a new page.',
+    parameters: obj({
+      markdown: str('The document, in markdown'),
+      fromPath: str('Instead of `markdown`: a markdown file in the workspace to convert'),
+      path: str('Where to save the PDF in the workspace, e.g. "docs/report.pdf" (optional)'),
+      preview: bool('Show the finished document in the preview panel (default true)'),
+      title: str('Document title, set in the title block and the PDF metadata'),
+      subtitle: str('A line under the title'),
+      author: str('Author, shown with the date and set in the metadata'),
+      date: str('Date line, e.g. "17 September 2026" (optional)'),
+      coverPage: bool('Put the title block on a page of its own'),
+      headerText: str('Running header on every page after the first (default: the title)'),
+      pageNumbers: bool('Page numbers in the footer (default true)'),
+      pageSize: str('a4 (default), letter, legal, a5 or a3', { enum: ['a4', 'letter', 'legal', 'a5', 'a3'] }),
+      orientation: str('portrait (default) or landscape', { enum: ['portrait', 'landscape'] }),
+      margin: num('Page margin in millimetres (default 20)'),
+      fontSize: num('Body text size in points (default 10.5)'),
+    }),
+    run: async ({ markdown, fromPath, path, preview, ...rest }, ctx) => {
+      let md = markdown;
+      if (!md && fromPath) md = await H.fs.readFile(fromPath);
+      if (!md || !String(md).trim()) throw new Error('create_pdf needs either "markdown" (the document) or "fromPath" (a markdown file in the workspace).');
+      if (path && !/\.pdf$/i.test(path)) path += '.pdf';
+      /* Images come from the workspace only. A document build that fetched URLs would be a network call the user
+         never asked for, out of a tool whose whole job is to write a file. */
+      const resolveImage = async (src) => {
+        const f = await H.fs.readFile(src, { binary: true });
+        const bytes = new Uint8Array(await (f instanceof Blob ? f.arrayBuffer() : Promise.resolve(f)));
+        const png = bytes[0] === 0x89 && bytes[1] === 0x50, jpg = bytes[0] === 0xff && bytes[1] === 0xd8;
+        return png || jpg ? bytes : null;
+      };
+      const r = await H.pdf.fromMarkdown(md, { ...rest, resolveImage, onStatus: ctx?.onStatus });
+      const blob = H.pdf.blob(r.bytes);
+      const name = (path || rest.title || 'document').split('/').pop().replace(/[^\w.-]+/g, '-').replace(/\.pdf$/i, '') + '.pdf';
+      const out = { pages: r.pages, bytes: blob.size, font: r.font, warnings: r.warnings.length ? r.warnings : undefined };
+      if (path) { await H.fs.writeFile(path, blob, { chatId: ctx?.chatId }); out.path = H.fs.resolve(path).path; }
+      /* Shown by default: a document the user cannot see is hard to ask for changes to.
+         There is deliberately no way for this tool to put a file in the user's Downloads folder. That folder is
+         theirs, it is outside the workspace, and nothing that lands there can be taken back — while the preview
+         panel offers a Download button right next to the document, which is one click when they want the file and
+         nothing at all when they do not. Given the choice as a parameter, a model sets it as a matter of course. */
+      if (preview ?? true) { H.runtime.previewPDF(r.bytes, { title: rest.title || name, filename: name }); out.previewed = true; }
+      else if (!path) throw new Error('With preview turned off and no "path", the document would be built and then thrown away. Give a path to save it in the workspace, or leave the preview on so the user can see it and save it themselves.');
+      return ok(out);
+    },
+  });
+
   def({
     name: 'view_image', group: 'Files', risk: 'safe',
     description: 'Look at an image file from the workspace (png, jpg, gif, webp, bmp, svg). The image is shown to you in the next turn as vision input (requires a multimodal model).',

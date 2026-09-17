@@ -13,18 +13,7 @@ H.extract = (() => {
     jszip: ['https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', () => window.JSZip, 'sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg=='],
     xlsx: ['https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', () => window.XLSX, 'sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA=='],
   };
-  const loading = {};
-  function lib(name) {
-    const [url, get, integrity] = CDN[name];
-    if (get()) return Promise.resolve(get());
-    return loading[name] ||= new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = url; if (integrity) { s.integrity = integrity; s.crossOrigin = 'anonymous'; }
-      s.onload = () => res(get());
-      s.onerror = () => { delete loading[name]; s.remove(); rej(new Error('Could not load ' + url + ' (offline, CDN blocked, or the file did not match its expected checksum)')); };
-      document.head.append(s);
-    });
-  }
+  const lib = (name) => H.loadScript(...CDN[name]);
 
   const TEXT_EXT = /\.(txt|md|markdown|json|jsonl|csv|tsv|xml|html?|css|js|mjs|cjs|ts|tsx|jsx|py|rb|java|kt|go|rs|c|h|cpp|hpp|cs|php|sh|bash|zsh|ps1|bat|yaml|yml|toml|ini|cfg|conf|env|sql|graphql|proto|log|rtf|svg|tex|r|m|swift|scala|lua|pl|dart|vue|svelte|properties|gradle|dockerfile|makefile|gitignore|editorconfig)$/i;
   const kindOf = (name, type = '') => {
@@ -58,18 +47,23 @@ H.extract = (() => {
     if (workerBlob !== null) return workerBlob;
     const [url, , integrity] = CDN.pdfWorker;
     try {
-      const buf = await (await fetch(url, { cache: 'force-cache' })).arrayBuffer();
-      const digest = 'sha512-' + btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-512', buf))));
-      if (digest !== integrity) throw new Error('checksum mismatch');
-      workerBlob = URL.createObjectURL(new Blob([buf], { type: 'application/javascript' }));
+      const bytes = await H.fetchVerified(url, integrity);
+      workerBlob = URL.createObjectURL(new Blob([bytes], { type: 'application/javascript' }));
     } catch (e) { console.warn('pdf worker not verified, parsing on the main thread', e); workerBlob = ''; }
     return workerBlob;
   }
-  async function pdf(buf, onStatus) {
-    onStatus?.('Loading PDF reader…');
+  /** pdf.js, loaded and pointed at its verified worker. Shared with the preview panel, which renders the pages
+      this module reads the text out of — one copy of the library, one checksum to keep current. */
+  async function pdfjs() {
     const lib_ = await lib('pdf');
     const src = await verifiedWorker();
     if (src) lib_.GlobalWorkerOptions.workerSrc = src;
+    return { lib: lib_, worker: !!src };
+  }
+  async function pdf(buf, onStatus) {
+    onStatus?.('Loading PDF reader…');
+    const { lib: lib_, worker } = await pdfjs();
+    const src = worker;
     const doc = await lib_.getDocument({ data: buf, disableWorker: !src }).promise;
     const parts = []; let empty = 0;
     for (let i = 1; i <= doc.numPages; i++) {
@@ -201,5 +195,5 @@ H.extract = (() => {
     } catch (e) { return { kind: 'unsupported', content: '', note: `${file.name}: could not extract text (${e.message}).` }; }
   }
   const isDocument = (name) => ['pdf', 'docx', 'pptx', 'sheet'].includes(kindOf(name));
-  return { fromFile, kindOf, isDocument };
+  return { fromFile, kindOf, isDocument, pdfjs };
 })();
