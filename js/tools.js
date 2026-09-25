@@ -45,14 +45,15 @@ H.tools = (() => {
       });
     },
   });
+  /* H.fs.readFile(…, { binary: true }) hands back the File from getFile(). Its `name` is a read-only getter, so
+     assigning one throws; name a copy instead (and only when the name actually differs). */
+  const asNamedFile = (f, path) => { const name = path.split('/').pop(); return f instanceof File && f.name === name ? f : new File([f], name, { type: f.type || '' }); };
   async function readOneFile(path, startLine, endLine, ctx, budget = 60000) {
     let text;
     if (H.extract.kindOf(path) === 'image') throw new Error(`${path} is an image. Use view_image to look at it.`);
     if (['video', 'audio', 'binary', 'heic'].includes(H.extract.kindOf(path))) throw new Error(`${path} is a ${H.extract.kindOf(path)} file; it has no text to read. (Videos/audio can be attached by the user in the chat for frame sampling / transcription.)`);
     if (H.extract.isDocument(path)) {
-      const file = await H.fs.readFile(path, { binary: true });
-      const blob = file instanceof Blob ? file : new Blob([file]);
-      const r = await H.extract.fromFile(Object.assign(blob, { name: path.split('/').pop() }), { onStatus: ctx?.onStatus });
+      const r = await H.extract.fromFile(asNamedFile(await H.fs.readFile(path, { binary: true }), path), { onStatus: ctx?.onStatus });
       if (r.kind !== 'text') throw new Error(r.note || 'No text could be extracted');
       text = r.text ?? r.content; if (r.note) text = `[${r.note}]\n` + text;
     } else text = (await H.fs.readFile(path)).replace(/\r\n/g, '\n');
@@ -242,10 +243,8 @@ H.tools = (() => {
     description: 'Look at an image file from the workspace (png, jpg, gif, webp, bmp, svg). The image is shown to you in the next turn as vision input (requires a multimodal model).',
     parameters: obj({ path: str('Image file path in the workspace') }, ['path']),
     run: async ({ path }, ctx) => {
-      const file = await H.fs.readFile(path, { binary: true });
-      const blob = file instanceof Blob ? file : new Blob([file]);
-      const named = Object.assign(blob, { name: path.split('/').pop() });
-      const r = /\.svg$/i.test(path) ? { kind: 'image', content: 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(await blob.text()))) } : await H.extract.fromFile(named, { onStatus: ctx?.onStatus });
+      const named = asNamedFile(await H.fs.readFile(path, { binary: true }), path);
+      const r = /\.svg$/i.test(path) ? { kind: 'image', content: 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(await named.text()))) } : await H.extract.fromFile(named, { onStatus: ctx?.onStatus });
       if (r.kind !== 'image') throw new Error(r.note || 'Not a decodable image');
       (ctx.images ||= []).push({ name: path, content: r.content });
       return ok({ queued: path, note: 'The image will be shown to you as vision input in the next turn.' + (r.note ? ' ' + r.note : '') });

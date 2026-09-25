@@ -1,6 +1,6 @@
 {
-  "version": "1.30.2",
-  "date": "2026-09-17",
+  "version": "1.30.3",
+  "date": "2026-09-25",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "New: create_pdf turns markdown into a typeset PDF with real selectable text, embedded fonts (Slovak and Cyrillic included) and page numbers, shown in the preview panel and optionally saved into your workspace. HTML previews can be printed to PDF, keeping their colours and layout."
+  "notes": "Fix: reading PDF, Word and Excel files and viewing images from the workspace works again. Both failed with \"Cannot set property name of #<File>\"."
 }
