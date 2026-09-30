@@ -48,15 +48,25 @@ H.tools = (() => {
   /* H.fs.readFile(…, { binary: true }) hands back the File from getFile(). Its `name` is a read-only getter, so
      assigning one throws; name a copy instead (and only when the name actually differs). */
   const asNamedFile = (f, path) => { const name = path.split('/').pop(); return f instanceof File && f.name === name ? f : new File([f], name, { type: f.type || '' }); };
+  /* Paging through a long document with startLine/endLine would otherwise parse the whole file again for every page. */
+  const docCache = new Map();   // "path|size|mtime" -> extracted text
+  async function readDocument(path, ctx) {
+    const f = await H.fs.readFile(path, { binary: true });
+    const key = f.lastModified ? `${path}|${f.size}|${f.lastModified}` : null;
+    if (key && docCache.has(key)) return docCache.get(key);
+    const r = await H.extract.fromFile(asNamedFile(f, path), { onStatus: ctx?.onStatus, maxChars: 5000000 });
+    if (r.kind !== 'text') throw new Error(r.note || 'No text could be extracted');
+    const note = [r.note, r.images?.length ? `To look at one, call view_image with "${path}#<image path>", e.g. "${path}#${r.images[0]}".` : ''].filter(Boolean).join(' ');
+    const text = (note ? `[${note}]\n` : '') + r.content;
+    if (key) { docCache.set(key, text); if (docCache.size > 4) docCache.delete(docCache.keys().next().value); }
+    return text;
+  }
   async function readOneFile(path, startLine, endLine, ctx, budget = 60000) {
     let text;
     if (H.extract.kindOf(path) === 'image') throw new Error(`${path} is an image. Use view_image to look at it.`);
     if (['video', 'audio', 'binary', 'heic'].includes(H.extract.kindOf(path))) throw new Error(`${path} is a ${H.extract.kindOf(path)} file; it has no text to read. (Videos/audio can be attached by the user in the chat for frame sampling / transcription.)`);
-    if (H.extract.isDocument(path)) {
-      const r = await H.extract.fromFile(asNamedFile(await H.fs.readFile(path, { binary: true }), path), { onStatus: ctx?.onStatus });
-      if (r.kind !== 'text') throw new Error(r.note || 'No text could be extracted');
-      text = r.text ?? r.content; if (r.note) text = `[${r.note}]\n` + text;
-    } else text = (await H.fs.readFile(path)).replace(/\r\n/g, '\n');
+    if (H.extract.isDocument(path)) text = await readDocument(path, ctx);
+    else text = (await H.fs.readFile(path)).replace(/\r\n/g, '\n');
     const lines = text.split('\n');
     const s = Math.max(1, startLine || 1), e = Math.min(lines.length, endLine || lines.length);
     const slice = lines.slice(s - 1, e).map((l, i) => `${String(s + i).padStart(5)}| ${l}`).join('\n');
@@ -64,7 +74,7 @@ H.tools = (() => {
   }
   def({
     name: 'fs_read', group: 'Files', risk: 'safe',
-    description: 'Read a file from the workspace as text, with line numbers. PDF, Word (.docx), PowerPoint (.pptx) and spreadsheets (.xlsx/.xls/.ods/.csv) are converted to text automatically. Optionally a line range; pass `paths` to read several files in one call ("src/a.js" or "src/a.js:120-260").',
+    description: 'Read a file from the workspace as text, with line numbers. PDF, Word (.docx/.doc), PowerPoint (.pptx/.ppt) and spreadsheets (.xlsx/.xlsm/.xlsb/.xls/.ods/.csv) are converted to text automatically, in full: Word with headings, lists, tables, headers/footers, footnotes, comments and tracked changes; PowerPoint slide by slide in deck order with speaker notes and comments; Excel sheet by sheet as a table with row numbers and column letters, followed by formulas, cell comments and merged/hidden ranges. Charts are given as their data; embedded pictures are listed as [Image: <path>] and can be opened with view_image. Long documents are paged like any file: read on with startLine/endLine. Optionally a line range; pass `paths` to read several files in one call ("src/a.js" or "src/a.js:120-260").',
     parameters: obj({
       path: str('File path'), startLine: num('1-based first line (optional)'), endLine: num('1-based last line inclusive (optional)'),
       paths: { type: 'array', items: { type: 'string' }, description: 'Several files at once, each "path" or "path:startLine-endLine". Use instead of path.' },
@@ -240,10 +250,12 @@ H.tools = (() => {
 
   def({
     name: 'view_image', group: 'Files', risk: 'safe',
-    description: 'Look at an image file from the workspace (png, jpg, gif, webp, bmp, svg). The image is shown to you in the next turn as vision input (requires a multimodal model).',
-    parameters: obj({ path: str('Image file path in the workspace') }, ['path']),
+    description: 'Look at an image file from the workspace (png, jpg, gif, webp, bmp, svg), or a picture inside a Word, PowerPoint or Excel file: "<document path>#<image path>" with a path from the [Image: …] lines fs_read shows, e.g. "deck.pptx#ppt/media/image3.png". The image is shown to you in the next turn as vision input (requires a multimodal model).',
+    parameters: obj({ path: str('Image file path in the workspace, or "document.docx#word/media/image1.png" for a picture inside a document') }, ['path']),
     run: async ({ path }, ctx) => {
-      const named = asNamedFile(await H.fs.readFile(path, { binary: true }), path);
+      const inner = path.match(/^(.+?\.(?:docx|docm|dotx|dotm|pptx|pptm|potx|potm|ppsx|ppsm|xlsx|xlsm|xltx|xltm))#(.+)$/i);
+      const named = inner ? await H.extract.embedded(asNamedFile(await H.fs.readFile(inner[1], { binary: true }), inner[1]), inner[2])
+        : asNamedFile(await H.fs.readFile(path, { binary: true }), path);
       const r = /\.svg$/i.test(path) ? { kind: 'image', content: 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(await named.text()))) } : await H.extract.fromFile(named, { onStatus: ctx?.onStatus });
       if (r.kind !== 'image') throw new Error(r.note || 'Not a decodable image');
       (ctx.images ||= []).push({ name: path, content: r.content });
