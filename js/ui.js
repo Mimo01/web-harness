@@ -682,9 +682,34 @@ H.ui = (() => {
     askedNotifications = true;
     try { if (window.Notification && Notification.permission === 'default') Notification.requestPermission().catch(() => { }); } catch { }
   }
+  const BIG_ATTACHMENT_CHARS = 25000;   // ~6k tokens, about ten pages: past this the resend starts to add up
   function renderAttachments() {
     const box = $('#attach-list'); box.innerHTML = '';
-    attachments.forEach((a, i) => box.append(el('span', { class: 'chip' }, [H.icon('clip'), `${a.name} `, el('a', { href: '#', onclick: (e) => { e.preventDefault(); attachments.splice(i, 1); renderAttachments(); saveDraft(); } }, ['✕'])])));
+    const isBig = (a) => a.kind === 'text' && (a.content || '').length > BIG_ATTACHMENT_CHARS;
+    attachments.forEach((a, i) => box.append(el('span', { class: 'chip' + (isBig(a) ? ' risk-write' : ''), title: isBig(a) ? `${(a.content || '').length.toLocaleString()} characters of text` : '' }, [H.icon('clip'), `${a.name} `, el('a', { href: '#', onclick: (e) => { e.preventDefault(); attachments.splice(i, 1); renderAttachments(); saveDraft(); } }, ['✕'])])));
+    /* an attachment rides along in the history and is paid for again on every turn; a file in the folder is read
+       once, and only as far as the model needs. Big ones say so, and offer the folder when there is none. */
+    const big = attachments.filter(isBig);
+    if (big.length) {
+      const f = H.fs.folder();
+      const it = big.length === 1 ? 'it' : 'them';
+      const what = big.length === 1 ? `${big[0].name} is large` : `${big.length} of these files are large`;
+      box.append(el('div', { class: 'attach-hint' }, [
+        H.icon('folder'),
+        el('div', { class: 'body' }, [
+          el('b', {}, [`${what}: better read from the folder`]),
+          el('span', {}, [f
+            ? `An attachment is sent again with every message. Put ${big.length === 1 ? 'the file' : 'them'} in "${H.fs.name()}" and ask the model to read ${it} by name instead.`
+            : `An attachment is sent again with every message. This chat has no folder open: open the one that holds ${big.length === 1 ? 'the file' : 'them'}, then ask the model to read ${it} by name.`]),
+        ]),
+        f ? null : el('button', {
+          class: 'btn sm', onclick: async () => {
+            try { const name = await H.fs.pick(); H.toast('Working in ' + name, 'success'); }
+            catch (err) { if (err.name !== 'AbortError') H.toast(err.message, 'error', 6000); }
+          },
+        }, ['Open folder…']),
+      ]));
+    }
   }
   async function addFiles(files) {
     for (const f of files) {
@@ -2186,7 +2211,7 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
       if (broken.length) return openSettings('plugins');
       H.toast('All plugins connected ✓', 'success', 2500);
     };
-    H.bus.on('workspace', (n) => { updateWorkspaceBtn(n); renderChatList(); if (!$('#ws-menu').classList.contains('hidden')) renderWorkspaceMenu(); });
+    H.bus.on('workspace', (n) => { updateWorkspaceBtn(n); renderChatList(); renderAttachments(); if (!$('#ws-menu').classList.contains('hidden')) renderWorkspaceMenu(); });
     H.bus.on('git-state', () => updateWorkspaceBtn());
     H.bus.on('preview', showPreview);
     /* the pill carries the effort as well as the name, so it has to be rebuilt when either changes — wherever

@@ -379,6 +379,11 @@ body.asking .composer-box { border-color: var(--warn); }
 .composer-box { background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--r-xl); box-shadow: var(--shadow); transition: border-color .12s; }
 .composer-box:focus-within { border-color: var(--fg-2); }
 #attach-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px 0; } #attach-list:empty { display: none; }
+#attach-list .attach-hint { flex-basis: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px; border-radius: var(--r-sm); background: var(--warn-soft); border: 1px solid var(--warn-line); font-size: 12.5px; line-height: 1.45; color: var(--fg-2); }
+#attach-list .attach-hint > .ico { width: 16px; height: 16px; margin-top: 1px; flex-shrink: 0; color: var(--warn); }
+#attach-list .attach-hint .body { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+#attach-list .attach-hint b { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }
+#attach-list .attach-hint .btn { flex-shrink: 0; align-self: center; }
 #attach-list .chip { height: 22px; } #attach-list .chip a { color: var(--muted); margin-left: 2px; } #attach-list .chip a:hover { color: var(--fg); text-decoration: none; }
 #input { width: 100%; min-height: 50px; max-height: 260px; padding: 14px 16px 6px; border: 0; background: transparent; resize: none; font-size: 15px; line-height: 1.5; box-shadow: none; }
 #input:focus { box-shadow: none; }
@@ -685,6 +690,7 @@ details.adv[open] > summary { margin-bottom: 4px; } details.adv[open] > summary 
   .composer-box { display: grid; grid-template-columns: 40px 1fr 44px; grid-template-areas: "files files files" "attach input send" "pills pills pills"; align-items: end; column-gap: 8px; row-gap: 6px; padding: 0; background: transparent; border: 0; box-shadow: none; }
   .composer-bar { display: contents; }
   #attach-list { grid-area: files; padding: 0 4px; }
+  #attach-list .attach-hint { flex-wrap: wrap; } #attach-list .attach-hint .body { flex-basis: calc(100% - 26px); } #attach-list .attach-hint .btn { margin-left: 26px; align-self: flex-start; }
   #attach-btn { grid-area: attach; width: 40px; height: 40px; margin-bottom: 2px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
   #attach-btn .ico { width: 18px; height: 18px; }
   #input { grid-area: input; min-height: 44px; max-height: 32vh; padding: 11px 16px; border: 1px solid var(--border-strong); border-radius: 22px; background: var(--surface); font-size: 16px; line-height: 1.35; scrollbar-width: none; }

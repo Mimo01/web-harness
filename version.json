@@ -1,6 +1,6 @@
 {
-  "version": "1.31.0",
-  "date": "2026-09-30",
+  "version": "1.31.1",
+  "date": "2026-10-03",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "Word, PowerPoint and Excel files are now read in full: headers, footers, footnotes, comments, tracked changes, speaker notes, slide order, formulas, cell comments, chart data and embedded pictures. Old .doc and .ppt files can be read too."
+  "notes": "A large attachment now says it is better read from the workspace folder, and offers to open one when the chat has none."
 }
