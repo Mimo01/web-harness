@@ -6,8 +6,8 @@
 <title>LLM Harness</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%231b1a17'/><path d='M7 8l5-3 5 3v8l-5 3-5-3z' fill='none' stroke='white' stroke-width='1.8'/></svg>">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file: blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-gbR96onWfUsogXGrJPSA0L/IbnuaiOilbdQGyDDLtqY=' 'sha256-8dY7a7hEnPl/30lMwnn0dD+n4ts0oBjAedXaZ5YtbAw=' 'sha256-DP9XPFuXIDZydpCL++a7cwVt075z7gkvt1/88b46n28='; style-src 'self' file: 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' file: data: https://fonts.gstatic.com; img-src * data: blob:; media-src blob: data:; connect-src *; worker-src 'self' blob: https://cdnjs.cloudflare.com; frame-src 'self' blob: about:; object-src 'none'; base-uri 'self'; form-action 'none'">
-<script>window.APP_VERSION = '1.31.1';</script>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file: blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-vuvOdG8QLG3/6pGe3rETX8JnWRaER/2ekK/5cLnqBpY=' 'sha256-8dY7a7hEnPl/30lMwnn0dD+n4ts0oBjAedXaZ5YtbAw=' 'sha256-caUFYckFvXi70KUdG5Drj9Su7RoWnAjBrrzVfWDfAeE='; style-src 'self' file: 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' file: data: https://fonts.gstatic.com; img-src * data: blob:; media-src blob: data:; connect-src *; worker-src 'self' blob: https://cdnjs.cloudflare.com; frame-src 'self' blob: about:; object-src 'none'; base-uri 'self'; form-action 'none'">
+<script>window.APP_VERSION = '1.32.0';</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap">
 <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous">
@@ -46,9 +46,13 @@
     <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
     <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
     <symbol id="i-beer" viewBox="0 0 24 24"><path d="M6 8h9v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1zM15 10h2.5a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H15M6 8a2 2 0 0 1 0-4 3 3 0 0 1 5-1 3 3 0 0 1 4 1 2 2 0 0 1 0 4M9 12v6M12 12v6"/></symbol>
-    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></symbol>
     <symbol id="i-bug" viewBox="0 0 24 24"><path d="M9 9V6a3 3 0 0 1 6 0v3M4 13h4M16 13h4M5 19l3-2M19 19l-3-2M6 7l2 2M18 7l-2 2M8 13a4 4 0 0 0 8 0v-2a4 4 0 0 0-8 0zM12 11v6"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></symbol>
+    <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V4h10v5M7 17H5.5A1.5 1.5 0 0 1 4 15.5v-5A1.5 1.5 0 0 1 5.5 9h13a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H17M7 14h10v6H7z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8zM14 3.5V8h4.5M9 13h6M9 16.5h4"/></symbol>
     <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
   </svg>
 
@@ -64,56 +68,76 @@
       <button id="settings-btn" class="btn" title="Settings (Ctrl/Cmd+/)"><svg class="ico"><use href="#i-settings"/></svg>Settings</button>
       <button id="sidebar-bug-btn" class="btn icon ghost" title="Report a bug on GitHub"><svg class="ico"><use href="#i-bug"/></svg></button>
     </footer>
+    <div class="resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0" title="Drag to resize · double-click to reset"></div>
   </aside>
 
   <div id="main">
-    <div id="topbar">
-      <button id="toggle-sidebar" class="btn icon ghost" title="Toggle sidebar"><svg class="ico"><use href="#i-menu"/></svg></button>
-      <div id="chat-title" title="Click to rename">New chat</div>
-      <span class="spacer"></span>
-      <span id="bridge-pill" class="hidden" title="Browser session bridges connected"></span>
-      <div class="menu-wrap">
-        <button id="more-btn" class="btn icon ghost" title="More"><svg class="ico"><use href="#i-more"/></svg></button>
-        <div id="more-menu" class="menu hidden">
-          <button id="changes-btn"><svg class="ico"><use href="#i-edit"/></svg>Files changed in this chat</button>
-          <button id="export-chat"><svg class="ico"><use href="#i-download"/></svg>Export chat as Markdown</button>
+    <!-- the chat column (conversation + message box) and, beside it, the preview: the message box belongs to the chat -->
+    <div id="stage">
+      <div id="chat-col">
+        <!-- the chat column's header: no bar of its own, only its two groups float over the conversation -->
+        <div id="topbar">
+          <div class="tb-left">
+            <button id="toggle-sidebar" class="btn icon ghost" title="Toggle sidebar" aria-label="Toggle sidebar"><svg class="ico"><use href="#i-sidebar"/></svg></button>
+            <button id="topbar-new" class="btn icon ghost" title="New chat (Ctrl/Cmd+K)" aria-label="New chat"><svg class="ico"><use href="#i-edit"/></svg></button>
+            <div id="chat-title" title="Click to rename">New chat</div>
+          </div>
+          <div class="tb-right">
+            <span id="bridge-pill" class="hidden" title="Browser session bridges connected"></span>
+            <div class="tb-cap">
+              <button id="changes-btn" class="tb-changes hidden" title="Files changed in this chat" aria-label="Files changed in this chat"><svg class="ico"><use href="#i-file"/></svg><span class="n"></span></button>
+              <span id="status" title="LiteLLM connection"><span class="dot"></span><span class="txt">…</span></span>
+            </div>
+          </div>
+        </div>
+        <div id="content">
+          <div id="messages" role="log" aria-label="Conversation"><div class="msg-wrap"></div></div>
+          <button id="scroll-bottom" class="btn icon hidden" title="Scroll to bottom"><svg class="ico"><use href="#i-down"/></svg></button>
+        </div>
+
+        <div id="composer">
+          <div class="inner">
+            <div id="slash-menu" class="hidden"></div>
+            <div id="task-strip" class="hidden"></div>
+            <div id="ctx-nudge" class="hidden" role="status"></div>
+            <div class="composer-box">
+              <div id="attach-list"></div>
+              <textarea id="input" rows="1" aria-label="Message" placeholder="Ask anything — / for commands and skills"></textarea>
+              <div class="drop-hint" aria-hidden="true"><svg class="ico"><use href="#i-clip"/></svg>Drop files to attach</div>
+              <div class="composer-bar">
+                <button id="attach-btn" class="btn icon ghost" title="Attach files (or drag & drop / paste)"><svg class="ico"><use href="#i-clip"/></svg></button>
+                <div class="pill-strip">
+                <div class="menu-wrap">
+                  <button id="ws-btn" class="pill-btn" title="The folders this chat works in"><svg class="ico"><use href="#i-folder"/></svg><span class="lbl">Workspace</span></button>
+                  <div id="ws-menu" class="menu up left wide pick-menu hidden"></div>
+                </div>
+                <div class="menu-wrap" id="model-pick"></div>
+                <div class="menu-wrap" id="mode-pick"></div>
+                <span class="spacer"></span>
+                <div id="ctx-meter" class="hidden" role="button" tabindex="0" title="Context, tokens and cost for this chat"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15"/><circle class="fg" cx="18" cy="18" r="15"/></svg><span class="txt"></span></div>
+                <span id="usage" class="small muted" role="button" tabindex="0" title="Context, tokens and cost for this chat"></span>
+                </div>
+                <button id="send-btn" class="btn primary icon" title="Send (Enter)"><svg class="ico"><use href="#i-arrow-up"/></svg></button>
+                <button id="stop-btn" class="btn danger icon hidden" title="Stop"><svg class="ico"><use href="#i-stop"/></svg></button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-      <span id="status" title="LiteLLM connection"><span class="dot"></span><span class="txt">…</span></span>
-    </div>
-    <div id="content">
-      <div id="messages" role="log" aria-label="Conversation"><div class="msg-wrap"></div></div>
-      <button id="scroll-bottom" class="btn icon hidden" title="Scroll to bottom"><svg class="ico"><use href="#i-down"/></svg></button>
       <div id="preview" class="hidden">
-        <header><b class="ptitle">Preview</b><span class="spacer"></span><button id="preview-download" class="btn sm ghost" title="Save the HTML file"><svg class="ico"><use href="#i-download"/></svg>Download</button><button id="preview-pdf" class="btn sm ghost" title="Print this page to PDF (opens it in a tab and starts your browser's print dialog)">Save as PDF</button><button id="preview-open" class="btn sm ghost"><svg class="ico"><use href="#i-external"/></svg>Open in tab</button><button id="preview-close" class="btn icon ghost"><svg class="ico"><use href="#i-x"/></svg></button></header>
-        <iframe title="preview"></iframe>
-        <div id="preview-pdf-view" class="hidden" tabindex="0" aria-label="PDF preview"></div>
-      </div>
-    </div>
-
-    <div id="composer">
-      <div class="inner">
-        <div id="slash-menu" class="hidden"></div>
-        <div id="task-strip" class="hidden"></div>
-        <div class="composer-box">
-          <div id="attach-list"></div>
-          <textarea id="input" rows="1" aria-label="Message" placeholder="Message… type / for commands and skills, drop files to attach"></textarea>
-          <div class="composer-bar">
-            <button id="attach-btn" class="btn icon ghost" title="Attach files (or drag & drop / paste)"><svg class="ico"><use href="#i-clip"/></svg></button>
-            <div class="pill-strip">
-            <div class="menu-wrap">
-              <button id="ws-btn" class="pill-btn" title="The folders this chat works in"><svg class="ico"><use href="#i-folder"/></svg><span class="lbl">Workspace</span></button>
-              <div id="ws-menu" class="menu up left wide pick-menu hidden"></div>
-            </div>
-            <div class="menu-wrap" id="model-pick"></div>
-            <div class="menu-wrap" id="mode-pick"></div>
-            <span class="spacer"></span>
-            <div id="ctx-meter" role="button" tabindex="0" title="Context, tokens and cost for this chat"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.5"/><circle class="fg" cx="18" cy="18" r="15.5"/></svg><span class="txt"></span></div>
-            <span id="usage" class="small muted" role="button" tabindex="0" title="Context, tokens and cost for this chat"></span>
-            </div>
-            <button id="send-btn" class="btn primary icon" title="Send (Enter)"><svg class="ico"><use href="#i-arrow-up"/></svg></button>
-            <button id="stop-btn" class="btn danger icon hidden" title="Stop"><svg class="ico"><use href="#i-stop"/></svg></button>
-          </div>
+        <div class="resizer" id="preview-resizer" role="separator" aria-orientation="vertical" aria-label="Resize preview" tabindex="0" title="Drag to resize · double-click to reset"></div>
+        <header>
+          <span class="pmark"><svg class="ico"><use href="#i-globe"/></svg></span><b class="ptitle">Preview</b><span class="pkind"></span>
+          <span class="spacer"></span>
+          <button id="preview-download" class="btn icon ghost" title="Download" aria-label="Download"><svg class="ico"><use href="#i-download"/></svg></button>
+          <button id="preview-pdf" class="btn icon ghost" title="Save as PDF (opens it in a tab and starts your browser's print dialog)" aria-label="Save as PDF"><svg class="ico"><use href="#i-print"/></svg></button>
+          <button id="preview-open" class="btn icon ghost" title="Open in a new tab" aria-label="Open in a new tab"><svg class="ico"><use href="#i-external"/></svg></button>
+          <span class="psep"></span>
+          <button id="preview-close" class="btn icon ghost" title="Close" aria-label="Close preview"><svg class="ico"><use href="#i-x"/></svg></button>
+        </header>
+        <div class="pframe">
+          <iframe title="preview"></iframe>
+          <div id="preview-pdf-view" class="hidden" tabindex="0" aria-label="PDF preview"></div>
         </div>
       </div>
     </div>
@@ -124,7 +148,7 @@
   <div id="sr-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
   <script>
   (function () {
-    const files = ['util', 'db', 'settings', 'usage', 'bridge', 'ext', 'extract', 'update', 'permissions', 'llm', 'fs', 'diff', 'journal', 'code', 'git', 'runtime', 'pdf', 'skills', 'commands', 'plugins', 'tools', 'agent', 'ui', 'app'];
+    const files = ['util', 'orb', 'db', 'settings', 'usage', 'bridge', 'ext', 'extract', 'update', 'permissions', 'llm', 'fs', 'diff', 'journal', 'code', 'git', 'runtime', 'pdf', 'skills', 'commands', 'plugins', 'tools', 'agent', 'ui', 'app'];
     /* a module that throws while loading leaves the app half-initialised: show the error instead of a silently broken page */
     const fails = []; let loading = true;   // only errors thrown while the modules load are startup errors
     const banner = () => {

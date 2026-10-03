@@ -32,7 +32,7 @@ H.commands = (() => {
       /* typing the space after /copy turns the menu into this list; the nameless one is the bare command */
       args: [
         { name: '', description: 'The last reply, as markdown.' },
-        { name: 'all', description: 'The whole chat, as markdown (same text as Export).' },
+        { name: 'all', description: 'The whole chat, as markdown.' },
         { name: 'code', description: 'The last code block of the last reply.' },
       ],
       run: async (args) => {

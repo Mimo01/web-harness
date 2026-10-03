@@ -535,6 +535,13 @@ When you have enough information, write a concrete, numbered implementation plan
   }
 
   function stop(id) { runs.get(id || chat?.id)?.abort.abort(); }
+  /* ask a user message again: whatever followed it goes, the message itself (attachments and all) stays */
+  async function retryFrom(idx) {
+    const c = chat;
+    if (!c || runs.has(c.id) || c.messages[idx]?.role !== 'user' || c.messages[idx].meta?.compacted) return;
+    c.messages.splice(idx + 1);
+    H.bus.emit('chat-loaded', c); await persist(c); await run(c);
+  }
   async function regenerate() {
     const c = chat; if (!c || runs.has(c.id)) return;   // same rule as send(): persist() awaits storage, so hold on to the chat
     while (c.messages.length && c.messages.at(-1).role !== 'user') c.messages.pop();
@@ -642,5 +649,5 @@ When you have enough information, write a concrete, numbered implementation plan
     return text || '(sub-agent produced no final text)';
   }
 
-  return { send, stop, run, regenerate, continueRun, continueSteps, load, reset, remove, rename, deleteMessage, editMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, setTaskList, taskList, current: () => chat, isRunning, runFolderOf, systemPrompt, envBlock, restorePending, sweepLegacyEmpty, isPending: (id) => !!pending && (id || chat?.id) === pending.id };
+  return { send, stop, run, regenerate, retryFrom, continueRun, continueSteps, load, reset, remove, rename, deleteMessage, editMessage, runOnce, executePlan, askUser, answerQuestion, pendingQuestion, compact, apiMessages, setTaskList, taskList, current: () => chat, isRunning, runFolderOf, systemPrompt, envBlock, restorePending, sweepLegacyEmpty, isPending: (id) => !!pending && (id || chat?.id) === pending.id };
 })();

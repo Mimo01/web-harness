@@ -1,6 +1,6 @@
 {
-  "version": "1.31.1",
+  "version": "1.32.0",
   "date": "2026-10-03",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "A large attachment now says it is better read from the workspace folder, and offers to open one when the chat has none."
+  "notes": "A redesigned interface: thought-orb loaders that show what the assistant is doing, smoother streaming text, a new home screen, a macOS-style light theme, resizable sidebar and preview, and a cleaner message box and top bar."
 }

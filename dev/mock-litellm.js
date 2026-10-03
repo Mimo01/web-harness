@@ -102,6 +102,19 @@ http.createServer((req, res) => {
       chunk({ role: 'assistant', content: 'Writing that skill. ' });
       chunk({ tool_calls: [{ index: 0, id: 'call_s', type: 'function', function: { name: 'skill_write', arguments: JSON.stringify({ name: /named copy/i.test(said(last)) ? 'copy' : 'standup', description: "Turn today's git log into a standup note", content: '1. Call git_log for the last day.\n2. Group the commits by area.\n3. Write three lines: done, next, blocked.' }) } }] });
       chunk({}, 'tool_calls');
+    } else if (last.role === 'user' && /markdown/i.test(said(last))) {
+      /* a long formatted reply delivered the way a real model does it: uneven bursts of a few words with pauses
+         between them, for watching how streamed text, lists, a table and code settle in */
+      const text = 'Here is a plan for the refactor.\n\n## Why\n\n' + 'The authentication module has grown organically and now mixes session handling with token refresh, which makes both hard to test and harder to change safely. '.repeat(2)
+        + '\n\n## Steps\n\n1. Split session storage from token refresh\n2. Add a single token service that owns expiry\n3. Move retries into the HTTP layer\n\n| Step | Owner | Effort |\n|---|---|---|\n| Split | Ana | 2d |\n| Service | Ben | 3d |\n| Retries | Ana | 1d |\n\n'
+        + '```js\nexport async function refresh(token) {\n  const res = await http.post("/auth/refresh", { token });\n  return res.json();\n}\n```\n\nOnce these land, the old helpers can be deleted and the tests simplified.';
+      const words = text.split(/(?<=\s)/); const wait = (ms) => new Promise(r => setTimeout(r, ms));
+      chunk({ role: 'assistant', content: '' });
+      (async () => {
+        for (let i = 0; i < words.length;) { const n = 1 + Math.floor(Math.random() * 6); chunk({ content: words.slice(i, i + n).join('') }); i += n; await wait(30 + Math.random() * 140); }
+        chunk({}, 'stop'); send(res, { id, choices: [], usage: { prompt_tokens: 123, completion_tokens: 210 } }); res.write('data: [DONE]\n\n'); res.end();
+      })();
+      return;
     } else if (last.role === 'tool') {
       const text = `Tool **${last.tool_call_id}** returned:\n\n\`\`\`json\n${last.content}\n\`\`\`\n\nDone.`;
       for (const w of text.split(/(?<= )/)) chunk({ content: w });

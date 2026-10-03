@@ -126,19 +126,30 @@ H.ui = (() => {
     if (from === undefined) scrollBottom(true);
     updateContextMeter();
   }
+  /* the home screen: a large, faint thought orb behind the greeting, drifting slowly through its kinds of work and
+     stirring as you type */
   function emptyState() {
-    const tips = [
-      ['folder', 'Explore a workspace', 'Open a folder with the folder button under the message box, then ask the model to list and summarize the project.', 'List the files in the workspace and summarize what this project does.'],
-      ['code', 'Run code', 'Python (Pyodide) and JavaScript run in a sandbox right in the browser.', 'Use python to compute the first 20 primes and plot them as an ASCII chart.'],
-      ['bolt', 'Plan first', 'Switch to Plan mode: the model investigates read-only, proposes a plan, and you decide whether to execute it.', 'Plan how to add unit tests to this project.'],
-      ['plug', 'Use plugins', 'Set up Jira or GitHub in Plugins, then ask about issues and pull requests.', 'What are my open Jira issues? Group them by status.'],
-    ];
-    return el('div', { id: 'empty' }, [
+    const orb = H.loader('think', Math.round(Math.min(680, innerWidth * .9, innerHeight * .78)));
+    orb.classList.add('home-orb'); orb.setAttribute('aria-hidden', 'true'); orb.removeAttribute('role');
+    orb.rate(.25); orb.blend(2.5);   // ambient: a quarter of a working orb's pace, and slow to change shape
+    const kinds = ['think', 'search', 'solve', 'compose', 'connect'];
+    let k = 0, shown = false;
+    const cycle = setInterval(() => {   // stops once the home screen has gone (a chat started or opened)
+      if (!orb.isConnected) { if (shown) clearInterval(cycle); return; }
+      shown = true; orb.setKind(kinds[++k % kinds.length]);
+    }, 14000);
+    /* a little depth: the orb drifts a few pixels after the pointer (eased in css), never under reduced motion */
+    const home = el('div', { id: 'empty', onpointermove: (e) => {
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const r = home.getBoundingClientRect();
+      orb.style.setProperty('--dx', ((e.clientX - r.left) / r.width - .5).toFixed(3));
+      orb.style.setProperty('--dy', ((e.clientY - r.top) / r.height - .5).toFixed(3));
+    }, onpointerleave: () => { orb.style.setProperty('--dx', 0); orb.style.setProperty('--dy', 0); } });
+    home.append(orb,
       el('h2', {}, ['What are we working on?']),
       el('p', {}, ['Chat, tools, skills and plugins. Everything runs in your browser, straight against your LiteLLM proxy.']),
-      connectionsStrip(),
-      el('div', { class: 'tips' }, tips.map(([ic, t, d, prompt]) => el('div', { class: 'tip', onclick: () => { $('#input').value = prompt; autoresize(); $('#input').focus(); } }, [el('div', { class: 'ti' }, [H.icon(ic)]), el('div', {}, [el('b', {}, [t]), el('div', { class: 'small muted' }, [d])])]))),
-    ]);
+      connectionsStrip());
+    return home;
   }
   /* ---------------- connections (plugins) status ---------------- */
   function pluginStatus(p) {
@@ -252,39 +263,69 @@ H.ui = (() => {
     }
     const node = el('div', { class: 'msg user' + (m.meta?.planExec ? ' plan-exec' : '') + (m.meta?.system ? ' system' : '') + (m.meta?.compacted ? ' compacted' : '') }, [el('div', { class: 'body' }, [
       el('div', { class: 'role' }, [el('span', { class: 'actions' }, [
-        el('button', { class: 'btn sm ghost', title: 'Copy', onclick: () => { navigator.clipboard.writeText(m.display || (typeof m.content === 'string' ? m.content : '')); H.toast('Copied', 'success', 1200); } }, ['Copy']),
+        m.meta?.compacted ? null : iconBtn('refresh', 'Retry: ask this again', () => retryMessage(idx), idx < 0),
         /* not on the harness's own messages ("Continue", "Execute the plan", the images a tool asked for): there is
            no wording of those to reconsider */
-        m.meta?.system ? null : el('button', { class: 'btn sm ghost', title: 'Edit this message and ask again', disabled: idx < 0 || null, onclick: () => startEdit(node, m, idx) }, ['Edit']),
-        el('button', { class: 'btn sm ghost icon', title: 'Delete', disabled: idx < 0 || null, onclick: () => H.agent.deleteMessage(idx) }, [H.icon('x')])]), el('span', { class: 'muted small ts', title: H.fmtTime(m.ts) }, [H.fmtClock(m.ts)])]),
+        m.meta?.system ? null : iconBtn('edit', 'Edit this message and ask again', () => startEdit(node, m, idx), idx < 0),
+        copyBtn('Copy', () => m.display || (typeof m.content === 'string' ? m.content : ''))]), el('span', { class: 'muted small ts', title: H.fmtTime(m.ts), 'data-ts': m.ts }, [H.relTime(m.ts)])]),
       el('div', { class: 'text' }, [m.display || (typeof m.content === 'string' ? m.content : '')]),
       m.attachments?.length ? el('div', { class: 'attachments' }, m.attachments.map(a => el('span', { class: 'chip' + (a.empty ? ' risk-danger' : ''), title: a.empty ? 'No text could be extracted from this file; the model cannot read it. ' + (a.note || '') : (a.chars ? `${a.chars.toLocaleString()} characters of text were sent to the model` : '') }, [H.icon('clip'), `${a.name} (${H.fmtBytes(a.size || 0)})`, a.empty ? ' · no text!' : '']))) : null,
     ])]);
     return node;
   }
+  /* the small icon buttons under messages: the tooltip carries the word the icon stands for */
+  const iconBtn = (icon, title, onclick, disabled) => el('button', { class: 'btn sm ghost icon', title, 'aria-label': title, disabled: disabled || null, onclick }, [H.icon(icon)]);
+  /* copy answers with a tick in place of the icon for a moment, rather than a toast across the screen */
+  const copyBtn = (title, text) => {
+    const b = iconBtn('copy', title, () => {
+      navigator.clipboard.writeText(text()).then(() => {
+        b.replaceChildren(H.icon('check')); b.classList.add('done');
+        setTimeout(() => { b.replaceChildren(H.icon('copy')); b.classList.remove('done'); }, 1200);
+      }, () => H.toast('Could not copy', 'error'));
+    });
+    return b;
+  };
+  /* retrying the latest question just asks it again; an earlier one replaces everything after it, so it asks first */
+  function retryMessage(idx) {
+    const c = H.agent.current(); if (!c) return;
+    if (H.agent.isRunning()) return H.toast('The assistant is still working; stop it first.', 'warn');
+    const later = c.messages.slice(idx + 1).filter(x => x.role === 'user' && !x.meta?.system).length;
+    if (later && !confirm(`Ask this again? ${later === 1 ? 'The exchange' : `The ${later} exchanges`} after it will be replaced.`)) return;
+    H.agent.retryFrom(idx);
+  }
   function newTurn(firstMsg) {
     const body = el('div', { class: 'body' });
-    const stats = el('span', { class: 'muted small stats' });
+    const stats = el('span', { class: 'muted small turn-stats' });   // not .stats: that is the usage page's grid of tiles
     const node = el('div', { class: 'msg assistant turn' }, [el('div', { class: 'tbody-wrap' }, [
-      el('div', { class: 'role' }, [el('span', { class: 'name' }, ['Assistant']), el('span', { class: 'muted small ts', title: H.fmtTime(firstMsg.ts) }, [H.fmtClock(firstMsg.ts)]), stats, el('span', { class: 'spacer' }), el('span', { class: 'actions' }, [
-        el('button', { class: 'btn sm ghost', title: 'Copy the whole response (markdown)', onclick: () => { navigator.clipboard.writeText(turn.msgs.filter(x => x.role === 'assistant' && x.content).map(x => x.content).join('\n\n')); H.toast('Response copied', 'success', 1200); } }, ['Copy']),
-        el('button', { class: 'btn sm ghost', title: 'Regenerate this response', onclick: () => H.agent.regenerate() }, ['Retry']),
-      ])]),
+      el('div', { class: 'role' }, [el('span', { class: 'actions' }, [
+        copyBtn('Copy the whole response (markdown)', () => turn.msgs.filter(x => x.role === 'assistant' && x.content).map(x => x.content).join('\n\n')),
+      ]), stats]),
       body,
     ])]);
-    const turn = { node, body, stats, msgs: [] };
+    const turn = { node, body, stats, msgs: [], ts: firstMsg.ts };
     return turn;
   }
   function updateTurnStats(turn) {
     let p = 0, c = 0, cost = 0, known = false;
     let cached = 0;
     for (const m of turn.msgs) { const u = m.meta?.usage; if (!u) continue; p += u.prompt_tokens || 0; c += u.completion_tokens || 0; cached += H.usage.cachedOf(u); const k = H.usage.costOfUsage(m.meta.model || H.settings.get('model'), u); if (k != null) { cost += k; known = true; } }
-    turn.stats.textContent = (p || c) ? `· ${H.usage.fmtTok(p)} in${cached ? ` (${H.usage.fmtTok(cached)} cached)` : ''} / ${H.usage.fmtTok(c)} out` + (known && H.settings.get('showCost') ? ` · ${H.usage.fmtCost(cost)}` : '') : '';
+    /* the line says when, in words ("5 min ago"); the exact time, the tokens and the cost are in its tooltip */
+    const showCost = known && H.settings.get('showCost');
+    turn.stats.textContent = H.relTime(turn.ts); turn.stats.dataset.ts = turn.ts;
+    turn.stats.title = [H.fmtTime(turn.ts), (p || c) ? `${H.usage.fmtTok(p)} in${cached ? ` (${H.usage.fmtTok(cached)} cached)` : ''} · ${H.usage.fmtTok(c)} out` : '', showCost ? H.usage.fmtCost(cost) : ''].filter(Boolean).join('\n');
   }
   function assistantPart(m) {
     return el('div', { class: 'part text' }, [
-      el('div', { class: 'reasoning-slot' }), el('div', { class: 'thinking hidden' }, [el('span'), el('span'), el('span')]), el('div', { class: 'md content' }), el('div', { class: 'tc-slot' }), el('div', { class: 'err-slot' }), el('div', { class: 'plan-slot' }),
+      el('div', { class: 'reasoning-slot' }), el('div', { class: 'md content' }), el('div', { class: 'tc-slot' }), el('div', { class: 'err-slot' }), el('div', { class: 'plan-slot' }),
     ]);
+  }
+  /* which orb a running tool shows: fanning out, computing, writing, or looking things up */
+  function orbFor(name = '') {
+    if (/subagent/.test(name)) return 'connect';
+    if (/^run_|calculate|compare|regex|hash|json_query|csv|text_stats|code_/.test(name)) return 'solve';
+    if (/write|edit|append|put_|create|render|pdf|save|update|comment|note|mkdir|move|delete|merge|assign|transition/.test(name)) return 'compose';
+    if (/search|find|fetch|read|list|get_|query|show|log|status|blame|history|overview|stat|diff|tree|whoami|myself/.test(name)) return 'search';
+    return 'work';
   }
   function toolPart(m) {
     return el('details', { class: 'tool-card' }, [el('summary', {}, [el('span', { class: 'tstate' }), el('span', { class: 'tname' }, [m.name]), el('span', { class: 'targs' }), el('span', { class: 'tactions' })]), el('div', { class: 'tbody' })]);
@@ -302,24 +343,54 @@ H.ui = (() => {
     turn.body.append(part); turn.msgs.push(m); nodeFor.set(m, part); turnOf.set(part, turn);
     if (m.role === 'assistant') updateAssistant(part, m); else updateTool(part, m);
   }
+  /* Streamed text is shown at an even pace, not in the bursts the network delivers: what is shown walks toward
+     what has arrived, a word at a time, faster the further behind it is, and queues its own next frame until it
+     has caught up. A table row still being written is held back until its line ends, so it never flashes up as
+     plain text before it becomes part of the table. */
+  function revealed(node, m, live) {
+    const full = m.content || '';
+    if (!live && node._shown == null) return full;   // never streamed here (a chat opened from history): all at once
+    const shown = Math.min(node._shown ?? 0, full.length);
+    let end = shown;
+    if (shown < full.length) {
+      end = Math.min(full.length, shown + Math.max(3, Math.ceil((full.length - shown) / 7)));
+      const sp = full.slice(end, end + 14).search(/\s/); if (sp >= 0) end += sp;   // finish the word it is in
+      node._shown = end;
+      if (end < full.length) { dirty.add(m); if (!raf) raf = requestAnimationFrame(flushUpdates); }
+    }
+    let text = full.slice(0, end);
+    const nl = text.lastIndexOf('\n');
+    if (live && /^\s*\|/.test(text.slice(nl + 1))) text = text.slice(0, nl + 1);
+    return text;
+  }
+  /* each block (paragraph, list, code, table) fades in as it first appears. The markdown is re-rendered every
+     frame, so the animation is carried across renders with a negative delay equal to the block's age. */
+  function freshBlocks(node, c, streaming) {
+    const born = node._born ||= []; const now = performance.now();
+    for (let i = 0; i < c.children.length; i++) {
+      if (born[i] == null) born[i] = streaming ? now : 0;
+      const age = now - born[i];
+      if (age < 400) { c.children[i].classList.add('fresh'); c.children[i].style.animationDelay = -Math.round(age) + 'ms'; }
+    }
+  }
   function updateAssistant(node, m) {
     const c = node.querySelector('.content');
     const streaming = !!m.meta?.streaming;
-    // re-render markdown only when the text changed; while streaming, skip syntax highlighting (done once at the end)
-    const key = (m.content || '') + '\u0000' + (streaming ? 's' : 'f');
+    const text = revealed(node, m, streaming);
+    const done = !streaming && text.length >= (m.content || '').length;   // the stream has ended and the text caught up
+    // re-render markdown only when the text changed; skip syntax highlighting until it is done (once, at the end)
+    const key = text + '\u0000' + (done ? 'f' : 's');
     if (node._key !== key) {
       node._key = key;
-      c.innerHTML = md(m.content);
-      enhanceCode(c, { highlight: !streaming });
+      c.innerHTML = md(text);
+      enhanceCode(c, { highlight: done });
+      freshBlocks(node, c, !done);
     }
-    c.classList.toggle('cursor', streaming && !!m.content && !m.tool_calls?.length);
-    node.querySelector('.thinking').classList.toggle('hidden', !(streaming && !m.content && !m.reasoning && !m.tool_calls?.length));
     node.classList.toggle('blank', !m.content && !streaming && !m.meta?.error && !m.reasoning);   // e.g. a turn that goes straight to a tool call
     const rs = node.querySelector('.reasoning-slot');
     const rkey = m.reasoning || '';
     if (rs._key !== rkey) { rs._key = rkey; rs.innerHTML = ''; if (m.reasoning) rs.append(el('details', { class: 'reasoning' }, [el('summary', {}, ['Reasoning']), mdBlock(m.reasoning)])); }
     const tcs = node.querySelector('.tc-slot'); tcs.innerHTML = '';
-    if (m.meta?.streaming && m.tool_calls?.length) tcs.append(el('div', { class: 'muted small' }, [el('span', { class: 'spinner' }), ' Calling ', el('code', {}, [m.tool_calls.map(t => t.function.name).join(', ')])]));
     const es = node.querySelector('.err-slot'); es.innerHTML = '';
     if (m.meta?.error) es.append(el('div', { class: 'error-box row gap wrap' }, [el('span', { style: 'flex:1' }, ['Error: ' + m.meta.error]), el('button', { class: 'btn sm', onclick: () => H.agent.regenerate() }, [H.icon('refresh'), 'Retry'])]));
     if (m.meta?.aborted) es.append(el('div', { class: 'muted small' }, ['(stopped)']));
@@ -438,7 +509,7 @@ H.ui = (() => {
     const st = node.querySelector('.tstate'); const args = node.querySelector('.targs');
     const a = m.meta?.args; args.textContent = typeof a === 'object' ? JSON.stringify(a) : String(a || '');
     node.classList.remove('running', 'ok', 'error', 'denied');
-    if (m.meta?.running) { node.classList.add('running'); st.innerHTML = ''; st.append(el('span', { class: 'spinner' })); if (m.meta.status) st.append(' ' + m.meta.status); }
+    if (m.meta?.running) { node.classList.add('running'); st.innerHTML = ''; st.append(H.loader(orbFor(m.name), 16)); if (m.meta.status) st.append(' ' + m.meta.status); }
     else if (m.meta?.interrupted) { node.classList.add('denied'); st.textContent = 'interrupted'; }   // the tab closed while it ran; nothing will finish it
     else if (m.meta?.denied) { node.classList.add('denied'); st.textContent = 'denied'; }
     else if (m.meta?.error) { node.classList.add('error'); st.textContent = 'error'; }
@@ -447,7 +518,7 @@ H.ui = (() => {
     const ta = node.querySelector('.tactions'); ta.innerHTML = '';
     const tool = H.tools.get(m.name);
     if (tool?.rerun && !m.meta?.running && typeof a === 'object') {
-      ta.append(el('button', { class: 'btn sm ghost rerun', title: 'Run this tool again with the same arguments (result is shown to you only, not sent to the model)', onclick: (e) => { e.preventDefault(); e.stopPropagation(); rerunTool(node, tool, a); } }, [H.icon('refresh'), tool.rerun]));
+      ta.append(el('button', { class: 'btn sm ghost rerun', title: 'Run this tool again with the same arguments (result is shown to you only, not sent to the model)', onclick: (e) => { e.preventDefault(); e.stopPropagation(); rerunTool(node, tool, a, e.currentTarget); } }, [H.icon('refresh'), tool.rerun]));
     }
     const body = node.querySelector('.tbody'); body.innerHTML = '';
     body.append(el('div', { class: 'lbl' }, ['Arguments']), el('pre', {}, [typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a || '')]));
@@ -465,15 +536,20 @@ H.ui = (() => {
     }
     body.append(el('div', { class: 'rerun-slot' }));
   }
-  async function rerunTool(node, tool, args) {
+  /* every re-runnable tool acts outside its card (renders, downloads, opens, copies), so the card stays as it is:
+     the result is written into it for whoever opens it, and it only opens itself when the re-run failed */
+  async function rerunTool(node, tool, args, btn) {
     const needConfirm = typeof tool.rerunConfirm === 'function' ? tool.rerunConfirm(args) : !!tool.rerunConfirm;
     if (needConfirm && !confirm(`Run ${tool.name} again? This repeats an action that changes state.`)) return;
-    const slot = node.querySelector('.rerun-slot'); slot.innerHTML = ''; node.open = true;
-    slot.append(el('div', { class: 'lbl' }, ['Re-run', el('span', { class: 'lbl-extra' }, [el('span', { class: 'spinner' })])]));
+    if (btn) btn.disabled = true;
+    const slot = node.querySelector('.rerun-slot'); slot.innerHTML = '';
+    slot.append(el('div', { class: 'lbl' }, ['Re-run', el('span', { class: 'lbl-extra' }, [H.loader(orbFor(tool.name), 14)])]));
     const perm = await H.perms.check(tool, args, {});
     let out;
     if (!perm.ok) out = { error: 'Permission denied: ' + perm.reason };
     else { try { out = await tool.run(args, { onStatus: () => { } }); } catch (e) { out = { error: e.message }; } }
+    if (btn) btn.disabled = false;
+    if (out && typeof out === 'object' && out.error) node.open = true;
     slot.innerHTML = '';
     slot.append(el('div', { class: 'lbl' }, ['Re-run result', el('span', { class: 'lbl-extra' }, [H.fmtClock(Date.now()) + ' · not sent to the model'])]), el('pre', {}, [H.clamp(typeof out === 'string' ? out : JSON.stringify(out, null, 2), 20000)]));
   }
@@ -488,8 +564,9 @@ H.ui = (() => {
   const dirty = new Set(); let raf = 0;
   function flushUpdates() {
     raf = 0;
-    for (const m of dirty) { const node = nodeFor.get(m); if (!node) continue; if (m.role === 'assistant') updateAssistant(node, m); else if (m.role === 'tool') updateTool(node, m); }
-    dirty.clear(); scrollBottom();
+    const batch = [...dirty]; dirty.clear();   // taken first, so an update can queue its own next frame (see reveal)
+    for (const m of batch) { const node = nodeFor.get(m); if (!node) continue; if (m.role === 'assistant') updateAssistant(node, m); else if (m.role === 'tool') updateTool(node, m); }
+    scrollBottom();
   }
   function onMessageUpdated(m, chatId) {
     if (chatId && chatId !== H.agent.current()?.id) return;
@@ -502,19 +579,129 @@ H.ui = (() => {
   function scrollBottom(force) { const b = $('#messages'); if (force || stick) b.scrollTop = b.scrollHeight; updateScrollBtn(); }
   function updateScrollBtn() { const b = $('#messages'); const far = b.scrollHeight - b.scrollTop - b.clientHeight > 200; $('#scroll-bottom').classList.toggle('hidden', !far); }
 
+  /* ---------------- activity: what the assistant is doing right now ----------------
+     One row under the reply for as long as a run lasts — an orb, what is happening, and how long it has been going.
+     The orb changes shape with the kind of work, ticks over while a tool runs, and surges with every streamed chunk,
+     so a long run reads as busy rather than stuck. */
+  let activity = null, actTimer = 0;
+  const runStart = new Map();   // chat id → when its run began
+  const ACT_VERB = { search: 'Looking things up', solve: 'Working it out', compose: 'Making changes', connect: 'Coordinating sub-agents', work: 'Working' };
+  function activityState(chat) {
+    const m = (chat?.messages || []).at(-1);
+    if (m?.role === 'tool' && m.meta?.running) { const k = orbFor(m.name); return { kind: k, label: m.meta.status || ACT_VERB[k], detail: m.name, floor: .3 }; }
+    if (m?.role === 'assistant' && m.meta?.streaming) {
+      if (m.tool_calls?.length) return { kind: 'compose', label: 'Preparing', detail: m.tool_calls.map(t => t.function?.name).filter(Boolean).join(', '), floor: .2 };
+      if (m.content) return { kind: 'compose', label: 'Writing', floor: 0, quiet: true };   // the words are the progress now
+      if (m.reasoning) return { kind: 'think', label: 'Reasoning', floor: .08 };
+    }
+    return { kind: 'think', label: 'Thinking', floor: .08 };
+  }
+  const paintTime = () => { if (activity) activity.querySelector('.act-time').textContent = fmtElapsed(Date.now() - (runStart.get(H.agent.current()?.id) || Date.now())); };
+  const fmtElapsed = (ms) => { const s = Math.floor(ms / 1000); return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's'; };
+  function syncActivity() {
+    const chat = H.agent.current(); const wrap = $('#messages .msg-wrap');
+    const on = !!chat && !!wrap && H.agent.isRunning(chat.id) && !H.agent.pendingQuestion();
+    if (!on) { activity?.remove(); activity = null; clearInterval(actTimer); actTimer = 0; return; }
+    if (!activity || !activity.isConnected) {   // a re-render took it away: a fresh one, so its orb is still being drawn
+      activity = el('div', { class: 'activity', role: 'status' }, [
+        H.loader('think', 30),
+        el('div', { class: 'act-text' }, [el('span', { class: 'act-label shimmer' }), el('span', { class: 'act-time' }), el('span', { class: 'act-detail' })]),
+      ]);
+    }
+    if (wrap.lastElementChild !== activity) wrap.append(activity);
+    const st = activityState(chat), orb = activity.firstChild;
+    orb.setKind(st.kind); orb.floor(st.floor);
+    activity.classList.toggle('quiet', !!st.quiet && Date.now() - (activity._grew || 0) < 1500);   // back after 1.5 s without new words
+    activity.querySelector('.act-label').textContent = st.label;
+    const det = activity.querySelector('.act-detail'); det.textContent = st.detail || ''; det.hidden = !st.detail;
+    if (!runStart.has(chat.id)) runStart.set(chat.id, [...chat.messages].reverse().find(m => m.role === 'user')?.ts || Date.now());
+    paintTime(); if (!actTimer) actTimer = setInterval(() => { paintTime(); syncActivity(); }, 500);   // the clock, and a stalled stream bringing the row back
+    scrollBottom();
+  }
+  /* every streamed chunk is a small surge, sized by how much text it brought */
+  function pulseActivity(m) {
+    if (!activity || m.role !== 'assistant' || !m.meta?.streaming) return;
+    const len = (m.content || '').length + (m.reasoning || '').length + JSON.stringify(m.tool_calls || []).length;
+    const grew = len - (m._actLen || 0); m._actLen = len;
+    if (grew > 0) { activity.firstChild.pulse(Math.min(.45, .06 + grew / 160)); activity._grew = Date.now(); }
+  }
+
+  /* ---------------- resizable sidebar and preview ----------------
+     Both inner edges can be dragged, or nudged with the arrow keys once focused; a double-click puts one back. The
+     chat between them always keeps room to read. Widths are a per-device convenience, kept in localStorage. */
+  function initResizers() {
+    const KEY = 'harness.layout', root = document.documentElement, side = $('#sidebar'), preview = $('#preview');
+    let saved = {}; try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch { }
+    const save = () => { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch { } };
+    const limits = {
+      sidebar: () => [200, Math.min(440, innerWidth * .4)],
+      preview: () => [320, Math.max(320, innerWidth - side.getBoundingClientRect().right - 380)],   // the chat keeps 380px
+    };
+    const apply = {
+      sidebar: (w) => w ? root.style.setProperty('--sidebar-w', w + 'px') : root.style.removeProperty('--sidebar-w'),
+      preview: (w) => { preview.style.width = w ? w + 'px' : ''; },
+    };
+    const clamp = (which, w) => { const [lo, hi] = limits[which](); return Math.round(Math.min(hi, Math.max(lo, w))); };
+    const restore = () => { for (const w of ['sidebar', 'preview']) if (saved[w]) apply[w](clamp(w, saved[w])); };
+    const grip = (which, handle, widthAt, current) => {
+      const set = (w) => { saved[which] = clamp(which, w); apply[which](saved[which]); };
+      handle.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); handle.setPointerCapture(e.pointerId);
+        handle.classList.add('active'); document.body.classList.add('resizing');
+        const move = (ev) => set(widthAt(ev.clientX));
+        const up = () => {
+          handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', up);
+          handle.classList.remove('active'); document.body.classList.remove('resizing'); save();
+        };
+        handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up); handle.addEventListener('pointercancel', up);
+      });
+      handle.addEventListener('dblclick', () => { delete saved[which]; save(); apply[which](0); });
+      handle.addEventListener('keydown', (e) => {
+        const d = e.key === 'ArrowLeft' ? -16 : e.key === 'ArrowRight' ? 16 : 0; if (!d) return;
+        e.preventDefault(); set(current() + (which === 'sidebar' ? d : -d)); save();
+      });
+    };
+    grip('sidebar', $('#sidebar-resizer'), (x) => x - side.getBoundingClientRect().left, () => side.offsetWidth);
+    grip('preview', $('#preview-resizer'), (x) => preview.getBoundingClientRect().right - x, () => preview.offsetWidth);
+    restore(); addEventListener('resize', restore);
+  }
+
   /* ---------------- context / cost meter ---------------- */
   function updateContextMeter() {
     const chat = H.agent.current();
     const b = H.usage.contextBreakdown(chat); const pct = b.pct;
-    const bar = $('#ctx-meter'); const circ = 2 * Math.PI * 15.5;
-    bar.querySelector('.fg').style.strokeDasharray = `${circ * pct / 100} ${circ}`;
+    const bar = $('#ctx-meter'); const circ = 2 * Math.PI * 15;
+    bar.querySelector('.fg').style.strokeDasharray = `${circ * Math.min(100, pct) / 100} ${circ}`;
+    bar.setAttribute('aria-label', `${pct}% of the context window in use`);
+    bar.classList.toggle('hidden', !(chat?.messages || []).length);   // a chat with nothing in it has nothing to measure
     bar.classList.toggle('warn', pct >= 70); bar.classList.toggle('danger', pct >= 90);
-    bar.querySelector('.txt').textContent = `${pct}%` + (pct >= 90 ? ' context full' : pct >= 70 ? ' context' : '');
+    bar.querySelector('.txt').textContent = pct + '%';
+    paintNudge(chat, pct);
     const u = chat?.usage || { prompt: 0, completion: 0 };
     const cc = H.usage.chatCost(chat);
     const costTxt = H.settings.get('showCost') ? ' · ' + (cc.known ? H.usage.fmtCost(cc.cost) : 'set pricing') : '';
     $('#usage').textContent = `${H.usage.fmtTok((u.prompt || 0) + (u.completion || 0))} tok${costTxt}`;
     ctxPop?.repaint();
+  }
+
+  /* past 80% a line above the message box says so and offers the way out. Dismissed, it stays away for this chat
+     until the chat crosses into the next band (90%). */
+  const nudgeDismissed = new Map();   // chat id → the band it was dismissed at
+  function paintNudge(chat, pct) {
+    const box = $('#ctx-nudge'); const band = pct >= 90 ? 2 : pct >= 80 ? 1 : 0;
+    const show = !!chat && band > 0 && (nudgeDismissed.get(chat.id) || 0) < band;
+    box.classList.toggle('hidden', !show); box.classList.toggle('danger', band === 2);
+    if (!show) { box.innerHTML = ''; return; }
+    if (box.dataset.key === `${chat.id}:${pct}`) return;
+    box.dataset.key = `${chat.id}:${pct}`; box.innerHTML = '';
+    const auto = H.settings.get('autoCompact');
+    box.append(
+      el('span', { class: 'dot' }),
+      el('span', { class: 'msg-t' }, [el('b', {}, [`This chat is ${pct}% full.`]), ' ', auto ? 'The older part will be summarised before your next message.' : 'It stops once the window is full.']),
+      el('button', { class: 'btn sm', onclick: async () => { const ok = await H.agent.compact(H.agent.current(), { manual: true }); if (ok !== false) updateContextMeter(); } }, ['Compact now']),
+      el('button', { class: 'btn sm icon ghost', title: 'Dismiss', 'aria-label': 'Dismiss', onclick: () => { nudgeDismissed.set(chat.id, band); paintNudge(chat, pct); } }, [H.icon('x')]),
+    );
   }
 
   /* ---------------- context popup ----------------
@@ -640,16 +827,20 @@ H.ui = (() => {
       const rf = running ? H.agent.runFolderOf(c.id) : null;
       const wrongFolder = !!rf && rf.id !== H.fs.folderId();
       list.append(el('div', { class: 'chat-item' + (cur?.id === c.id ? ' active' : '') + (running ? ' running' : '') + (wrongFolder ? ' stale-folder' : ''), onclick: () => H.agent.load(c.id), title: `${c.title}\n${c.count} messages · ${H.relTime(c.updated)}${running ? '\nRunning…' : ''}${wrongFolder ? `\nIt works in "${rf.name}", which is not the folder open now: its file tools will refuse until you reopen it.` : ''}` }, [
-        running ? el('span', { class: 'spinner' }) : null,
+        running ? H.loader('work', 16) : null,
         el('span', { class: 'title' }, [c.title]),
-        el('button', { class: 'btn sm icon del', title: 'Rename', onclick: async (e) => { e.stopPropagation(); const t = prompt('Chat title', c.title); if (t) { if (cur?.id === c.id) { await H.agent.rename(t); } else { const full = await H.db.getChat(c.id); if (full) { full.title = t; await H.db.putChat(full); } } indexVersion++; renderChatList(); } } }, [H.icon('edit')]),
-        el('button', { class: 'btn sm icon del', title: 'Delete', onclick: (e) => { e.stopPropagation(); if (confirm('Delete chat "' + c.title + '"?')) H.agent.remove(c.id); } }, [H.icon('x')]),
+        el('span', { class: 'acts' }, [
+          el('button', { class: 'btn sm icon del', title: 'Rename', onclick: async (e) => { e.stopPropagation(); const t = prompt('Chat title', c.title); if (t) { if (cur?.id === c.id) { await H.agent.rename(t); } else { const full = await H.db.getChat(c.id); if (full) { full.title = t; await H.db.putChat(full); } } indexVersion++; renderChatList(); } } }, [H.icon('edit')]),
+          el('button', { class: 'btn sm icon del', title: 'Delete', onclick: (e) => { e.stopPropagation(); if (confirm('Delete chat "' + c.title + '"?')) H.agent.remove(c.id); } }, [H.icon('x')]),
+        ]),
       ]));
     }
   }
 
   /* ---------------- composer ---------------- */
-  function autoresize() { const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(260, t.scrollHeight) + 'px'; }
+  function autoresize() { const t = $('#input'); t.style.height = 'auto'; t.style.height = Math.min(260, t.scrollHeight) + 'px'; syncReady(); }
+  /* the send button stays quiet until there is something to send */
+  function syncReady() { $('.composer-box').classList.toggle('ready', !!$('#input').value.trim() || attachments.length > 0); }
   async function submit() {
     const t = $('#input'); const text = t.value.trim();
     if (!text && !attachments.length) return;
@@ -686,7 +877,14 @@ H.ui = (() => {
   function renderAttachments() {
     const box = $('#attach-list'); box.innerHTML = '';
     const isBig = (a) => a.kind === 'text' && (a.content || '').length > BIG_ATTACHMENT_CHARS;
-    attachments.forEach((a, i) => box.append(el('span', { class: 'chip' + (isBig(a) ? ' risk-write' : ''), title: isBig(a) ? `${(a.content || '').length.toLocaleString()} characters of text` : '' }, [H.icon('clip'), `${a.name} `, el('a', { href: '#', onclick: (e) => { e.preventDefault(); attachments.splice(i, 1); renderAttachments(); saveDraft(); } }, ['✕'])])));
+    /* one small card per file: a thumbnail for images, the file type for anything else, and what it weighs */
+    const ext = (n) => (/\.([a-z0-9]{1,5})$/i.exec(n)?.[1] || 'file').toUpperCase();
+    attachments.forEach((a, i) => box.append(el('div', { class: 'att' + (isBig(a) ? ' big' : ''), title: isBig(a) ? `${(a.content || '').length.toLocaleString()} characters of text` : a.name }, [
+      a.kind === 'image' && a.content ? el('img', { class: 'att-thumb', src: a.content, alt: '' }) : el('span', { class: 'att-thumb att-type' }, [ext(a.name)]),
+      el('span', { class: 'att-text' }, [el('span', { class: 'att-name' }, [a.name]), el('span', { class: 'att-meta' }, [[a.kind === 'image' ? 'Image' : ext(a.name), a.size ? H.fmtBytes(a.size) : null, isBig(a) ? 'large' : null].filter(Boolean).join(' · ')])]),
+      el('button', { class: 'att-x', title: 'Remove', 'aria-label': `Remove ${a.name}`, onclick: () => { attachments.splice(i, 1); renderAttachments(); saveDraft(); } }, [H.icon('x')]),
+    ])));
+    syncReady();
     /* an attachment rides along in the history and is paid for again on every turn; a file in the folder is read
        once, and only as far as the model needs. Big ones say so, and offer the folder when there is none. */
     const big = attachments.filter(isBig);
@@ -946,7 +1144,7 @@ H.ui = (() => {
       return models;
     } catch (e) { setStatus('error', 'LiteLLM unreachable'); console.warn(e); throw e; }
   }
-  function setStatus(kind, text) { const s = $('#status'); s.className = kind; s.querySelector('.txt').textContent = text; }
+  function setStatus(kind, text) { const s = $('#status'); s.className = kind; s.querySelector('.txt').textContent = text; s.title = 'LiteLLM: ' + text; }
   /* "folder · branch ●3" — the branch comes from .git/HEAD (one small read); the change count only
      appears once something has actually run git_status, it is never computed to paint a button. */
   function updateWorkspaceBtn(name) {
@@ -1096,7 +1294,7 @@ H.ui = (() => {
     if (H.agent.pendingQuestion()) { $('#input').placeholder = 'Answer the assistant\'s question…'; $('#send-btn').classList.remove('hidden'); $('#stop-btn').classList.add('hidden'); document.body.classList.add('asking'); return; }
     document.body.classList.remove('asking');
     if (modePick) modePick.btn.title = 'Chat mode · ' + (MODES.find(m => m.v === mode)?.short || mode);
-    $('#input').placeholder = mode === 'plan' ? 'Plan mode: describe what you want planned…' : window.matchMedia('(max-width: 560px)').matches ? 'Message…' : 'Message… type / for commands and skills, drop files to attach';
+    $('#input').placeholder = mode === 'plan' ? 'Plan mode: describe what you want planned…' : window.matchMedia('(max-width: 560px)').matches ? 'Ask anything…' : 'Ask anything — / for commands and skills';
   }
   function updateTitle() { const c = H.agent.current(); $('#chat-title').textContent = c?.title || 'New chat'; }
   function bugReport() {
@@ -2019,6 +2217,8 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
   function previewKind(kind) {
     const p = $('#preview');
     p.dataset.kind = kind;
+    p.querySelector('.pkind').textContent = kind === 'pdf' ? 'PDF' : 'HTML';
+    p.querySelector('.pmark use').setAttribute('href', kind === 'pdf' ? '#i-file' : '#i-globe');
     p.querySelector('iframe').classList.toggle('hidden', kind === 'pdf');
     $('#preview-pdf-view').classList.toggle('hidden', kind !== 'pdf');
     $('#preview-pdf').classList.toggle('hidden', kind === 'pdf');        // "Save as PDF": it already is one
@@ -2093,7 +2293,7 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
   function init() {
     applyTheme(); a11yInit();
     const input = $('#input');
-    input.addEventListener('input', () => { autoresize(); showSlash(); saveDraft(); });
+    input.addEventListener('input', () => { autoresize(); showSlash(); saveDraft(); $('#empty .home-orb')?.pulse(.07); });
     input.addEventListener('keydown', (e) => {
       const menu = $('#slash-menu'); const open = !menu.classList.contains('hidden');
       if (open) {
@@ -2108,12 +2308,19 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
       if (e.key === 'Enter' && !touch && ((mode === 'enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) || (mode === 'ctrlenter' && (e.ctrlKey || e.metaKey)))) { e.preventDefault(); submit(); }
     });
     input.addEventListener('paste', (e) => { const files = [...(e.clipboardData?.files || [])]; if (files.length) { e.preventDefault(); addFiles(files); } });
+    /* while files are dragged over the window the message box becomes the drop zone; the counter survives the
+       enter/leave pairs every child element fires on the way across */
+    let drags = 0; const dragging = (on) => document.body.classList.toggle('dragging', on);
+    const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+    document.addEventListener('dragenter', (e) => { if (hasFiles(e)) { drags++; dragging(true); } });
+    document.addEventListener('dragleave', (e) => { if (hasFiles(e) && --drags <= 0) { drags = 0; dragging(false); } });
     document.addEventListener('dragover', (e) => e.preventDefault());
-    document.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]); });
+    document.addEventListener('drop', (e) => { e.preventDefault(); drags = 0; dragging(false); if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]); });
     $('#send-btn').onclick = submit;
     $('#stop-btn').onclick = () => H.agent.stop();
     $('#attach-btn').onclick = () => { const i = el('input', { type: 'file', multiple: true }); i.onchange = () => addFiles([...i.files]); i.click(); };
     $('#new-chat').onclick = () => H.agent.reset();
+    $('#topbar-new').onclick = () => H.agent.reset();
     $('#settings-btn').onclick = () => openSettings('general');
     for (const sel of ['#ctx-meter', '#usage']) {
       const t = $(sel);
@@ -2123,6 +2330,9 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     }
     $('#sidebar-bug-btn').onclick = bugReport;
     const narrow = () => window.matchMedia('(max-width: 900px)').matches;
+    initResizers();
+    /* "just now" has to become "2 min ago" by itself: the relative times under messages are refreshed while the page is open */
+    setInterval(() => { for (const e of document.querySelectorAll('#messages [data-ts]')) e.textContent = H.relTime(+e.dataset.ts); }, 30000);
     const openDrawer = (on) => { $('#sidebar').classList.toggle('open', on); $('#backdrop').classList.toggle('hidden', !on); };
     $('#toggle-sidebar').onclick = () => { if (narrow()) openDrawer(!$('#sidebar').classList.contains('open')); else $('#sidebar').classList.toggle('collapsed'); };
     $('#backdrop').onclick = () => openDrawer(false);
@@ -2130,7 +2340,6 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     $('#new-chat').addEventListener('click', () => { if (narrow()) openDrawer(false); });
     window.addEventListener('resize', () => { if (!narrow()) openDrawer(false); });
     bindMenu($('#ws-btn'), $('#ws-menu'), renderWorkspaceMenu);
-    bindMenu($('#more-btn'), $('#more-menu'));
     modelPick = picker({
       variant: 'pill', icon: 'cube', title: 'Model', search: true, searchPlaceholder: 'Filter models…',
       empty: 'No model matches', placeholder: 'No model', value: H.settings.get('model'),
@@ -2147,6 +2356,18 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     document.addEventListener('click', () => closeMenus());
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openMenus.size) { e.stopPropagation(); closeMenus(); } });
     $('#changes-btn').onclick = () => changesPanel();
+    /* the top bar's changes button: present only once this chat has written, edited or deleted a file, with how many */
+    let chgV = 0;
+    const syncChanges = async () => {
+      const v = ++chgV; const b = $('#changes-btn');
+      const rows = H.journal.enabled() ? await H.journal.list().catch(() => []) : [];
+      if (v !== chgV) return;   // a newer check started meanwhile
+      b.classList.toggle('hidden', !rows.length);
+      b.querySelector('.n').textContent = rows.length || '';
+      b.title = rows.length ? `${rows.length} file${rows.length === 1 ? '' : 's'} changed in this chat` : 'Files changed in this chat';
+    };
+    for (const ev of ['journal', 'chat-loaded', 'run-state']) H.bus.on(ev, syncChanges);
+    syncChanges();
     H.bus.on('compacting', (id, on) => { if (id === H.agent.current()?.id && on) H.toast('Compacting the conversation…', 'info', 3000); });
     $('#chat-title').onclick = () => { const c = H.agent.current(); if (!c) return; const t = prompt('Chat title', c.title); if (t && t.trim()) { H.agent.rename(t.trim()).then(() => { updateTitle(); renderChatList(); }); } };
     $('#preview-close').onclick = () => $('#preview').classList.add('hidden');
@@ -2173,7 +2394,6 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     };
     $('#preview-open').onclick = () => openPreviewTab(false);
     $('#preview-pdf').onclick = () => { openPreviewTab(true); H.toast('Choose "Save as PDF" as the destination in the print dialog.', 'info', 6000); };
-    $('#export-chat').onclick = () => { const c = H.agent.current(); if (!c) return; H.download((c.title || 'chat').replace(/[^\w-]+/g, '_') + '.md', H.chatMarkdown(c), 'text/markdown'); };
     $('#messages').addEventListener('scroll', () => { const b = $('#messages'); stick = b.scrollHeight - b.scrollTop - b.clientHeight < 80; updateScrollBtn(); });
     $('#scroll-bottom').onclick = () => { stick = true; scrollBottom(true); };
     $('#chat-search').addEventListener('input', () => renderChatList());
@@ -2194,6 +2414,11 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     H.bus.on('run-state', () => renderChatList());
     H.bus.on('message-added', onMessageAdded);
     H.bus.on('message-updated', onMessageUpdated);
+    H.bus.on('run-state', (running, chatId) => { if (running) runStart.set(chatId, Date.now()); else runStart.delete(chatId); syncActivity(); });
+    H.bus.on('message-added', (m, chatId) => { if (!chatId || chatId === H.agent.current()?.id) syncActivity(); });
+    H.bus.on('message-updated', (m, chatId) => { if (chatId && chatId !== H.agent.current()?.id) return; pulseActivity(m); syncActivity(); });
+    H.bus.on('chat-loaded', () => syncActivity());
+    H.bus.on('question', () => syncActivity());
     const syncRunButtons = () => { const r = H.agent.isRunning() && !H.agent.pendingQuestion(); $('#send-btn').classList.toggle('hidden', r); $('#stop-btn').classList.toggle('hidden', !r); updateModeUI(); };
     H.bus.on('run-state', () => { syncRunButtons(); renderChatList(); });
     H.bus.on('chat-loaded', () => { syncRunButtons(); updateModeUI(); });
