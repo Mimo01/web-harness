@@ -1,6 +1,6 @@
 {
-  "version": "1.32.0",
-  "date": "2026-10-03",
+  "version": "1.33.0",
+  "date": "2026-10-12",
   "url": "https://github.com/Mimo01/web-harness/archive/refs/heads/main.zip",
-  "notes": "A redesigned interface: thought-orb loaders that show what the assistant is doing, smoother streaming text, a new home screen, a macOS-style light theme, resizable sidebar and preview, and a cleaner message box and top bar."
+  "notes": "Scripts do the data work: code tools load workspace files and attachments by name and save their results back, and the model is told to compute with code instead of in its head. Pages with JavaScript preview reliably: local scripts, modules, styles, images and data files are built in from the folder, storage works, more CDNs are allowed, and errors are reported back to the model."
 }

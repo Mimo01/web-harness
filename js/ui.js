@@ -2097,7 +2097,7 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
       ]),
       sec('Running the model\'s code and showing its output', 'Everything the model produces is treated as untrusted: it runs walled off from this page and from your folder.', [advanced([el('ul', { class: 'help-list' }, [
         el('li', {}, ['JavaScript runs in a Web Worker with no DOM or workspace access; Python runs in Pyodide (WebAssembly) in a Worker. Both can make network requests, so run_* tools ask for permission by default. calculate, json_query and plugin expressions run in a Worker with all network APIs removed. Every JavaScript sandbox also has IndexedDB, the cache storage and BroadcastChannel taken away, so code running in one cannot reach your chats, memories or the list of folders you have opened.']),
-        el('li', {}, ['HTML previews render in a sandboxed iframe (unique origin) with an injected Content Security Policy: no fetch/XHR/WebSocket, no form posts, no remote images; scripts only inline or from the two CDNs the app itself uses. The frame cannot open windows or show browser dialogs either, so a rendered page has no way to carry anything out of it.']),
+        el('li', {}, ['HTML previews render in a sandboxed iframe (unique origin) with an injected Content Security Policy: no fetch/XHR/WebSocket, no form posts, no remote images; scripts only inline or from a few public CDNs (cdnjs, jsdelivr, unpkg, esm.sh, Tailwind, jQuery). Local scripts, styles, images and data files next to a previewed page are built into it from the open folder. Storage and cookies are in-memory stand-ins. The frame cannot open windows or show browser dialogs either, so a rendered page has no way to carry anything out of it.']),
         el('li', {}, ['Markdown from the model is sanitized with DOMPurify; images are shown as click-to-load placeholders so a reply can never trigger a request on its own.']),
         el('li', {}, ['web_fetch and http_request ask once per site (origin) in Default and Plan mode; "Allow this site for session" / "Always allow this site" remember the answer. When one of those two is routed through a connected browser tab (your login session), it asks in every mode, including Allow all.']),
         el('li', {}, ['Plugin tools follow their own risk: once you enable a plugin, its "safe" read tools run without asking and its "write" / "danger" tools ask in Default mode. A plugin routed through the bridge or the connector extension asks once per session before any of its tools run, whatever the mode, because those calls ride your login on that site. Give a plugin "always ask" or "deny" per tool in Permissions if that is not enough.']),
@@ -2225,6 +2225,12 @@ Address the assistant in the second person. Give concrete, ordered steps, name t
     $('#preview-open').classList.toggle('hidden', kind === 'pdf');       // model HTML is never opened on this origin
     if (kind !== 'pdf') { pdfView?.destroy(); pdfView = null; $('#preview-pdf-view').innerHTML = ''; }
   }
+  /* the panel's frame reports how the page went; runtime.previewHTML is waiting for it under the same id */
+  addEventListener('message', (e) => {
+    const fr = $('#preview iframe');
+    if (!fr || e.source !== fr.contentWindow || e.data?.type !== 'preview-report') return;
+    H.bus.emit('preview-report', e.data.id, e.data.report);
+  });
   async function showPreview({ url, title, html, raw, kind, bytes, filename }) {
     const p = $('#preview'); p.classList.remove('hidden');
     p.querySelector('.ptitle').textContent = title;

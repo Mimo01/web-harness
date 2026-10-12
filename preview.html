@@ -5,8 +5,9 @@
 <!-- Host page for HTML previews. The app cannot render model HTML in a srcdoc/blob frame directly: such frames inherit the
      app's own CSP (which forbids inline scripts). This page is a real same-origin document, so it carries its own policy,
      and the sandboxed frame below inherits THIS one: inline scripts allowed, but no fetch/XHR/WebSocket, no form posts,
-     no remote images or media, scripts only inline or from the two CDNs the app itself uses. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src data: https://fonts.gstatic.com; img-src data: blob:; media-src data: blob:; connect-src 'none'; form-action 'none'; frame-src 'self' about:; object-src 'none'; base-uri 'none'">
+     no remote images or media, scripts only inline or from a short list of public CDNs (kept in step with PREVIEW_CSP in
+     js/runtime.js). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data: blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://esm.sh https://cdn.tailwindcss.com https://code.jquery.com; worker-src blob: data:; style-src 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; font-src data: https://fonts.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; img-src data: blob:; media-src data: blob:; connect-src 'none'; form-action 'none'; frame-src 'self' about:; object-src 'none'; base-uri 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Preview</title>
 <style>html,body{margin:0;height:100%;background:#fff}iframe{border:0;width:100%;height:100%;display:block}</style>
@@ -27,6 +28,12 @@
   if (!app) { document.body.textContent = 'This page is opened by the LLM Harness to show previews.'; return; }
   const origin = /^https?:\/\//.test(location.origin) ? location.origin : '*';   // file:// pages report "null" or "file://": nothing to check against
   addEventListener('message', (e) => {
+    /* the page's own report of how it went (errors, blocked resources), relayed to the harness; the id is the one
+       the harness built into the page, so a late report from a replaced page cannot pass for the new one's */
+    if (e.source === f.contentWindow) {
+      if (e.data && e.data.type === 'preview-report' && e.data.id != null) app.postMessage({ type: 'preview-report', id: e.data.id, report: e.data.report }, origin);
+      return;
+    }
     if (e.source !== app) return;
     if (origin !== '*' && e.origin !== origin) return;
     const m = e.data || {};

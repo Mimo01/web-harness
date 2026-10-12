@@ -419,27 +419,88 @@ H.tools = (() => {
   });
 
   /* ===================== CODE EXECUTION ===================== */
+  /* The code tools take their data by name and hand it over themselves: a workspace path is read here, an
+     attachment is taken from the chat history, and neither passes through the model on the way. Without this
+     the only route to a script was to read the file into the conversation and copy it into the call — paying for
+     the data twice and trusting the model to retype it exactly, which is the opposite of why one runs code. */
+  const paths = (d) => ({ type: 'array', items: { type: 'string' }, description: d });
+  const INPUTS_DOC = 'Files the code works on, loaded by the harness so their contents never have to pass through you: workspace paths (e.g. "data/sales.csv") and/or names of files the user attached in this chat. Each appears under its own path/name';
+  const OUTPUTS_DOC = 'Workspace paths the code creates and that should be saved back into the folder (e.g. "out/summary.csv"); overwrites existing files, which the user can revert';
+  const normPath = (p) => String(p).replace(/\\/g, '/').replace(/^\.?\//, '').replace(/\/$/, '');
+  function sameFolder(ctx) {
+    if (ctx?.runFolder && H.fs.folderId() !== ctx.runFolder.id) throw new Error(`This chat was working in the folder "${ctx.runFolder.name}", which is not open now; ask the user to reopen it before reading or writing files.`);
+  }
+  /* an attachment is kept as the text extracted from it, so a spreadsheet or document handed over under its own
+     name would be text in a file that claims to be a workbook; it gets a .txt name instead, and the result says so */
+  const EXTRACTED = /\.(xlsx?|xlsm|docx?|pptx?|pdf|odt|ods|odp|rtf)$/i;
+  async function loadInputs(names, ctx, { binary }) {
+    const files = {}, notes = [];
+    for (const raw of names || []) {
+      const name = normPath(raw);
+      const att = ctx?.chatId ? H.agent.attachmentText(ctx.chatId, String(raw)) : null;
+      if (att != null) {
+        const as = EXTRACTED.test(raw) ? String(raw) + '.txt' : String(raw);
+        files[as] = att;
+        if (as !== raw) notes.push(`Attachment "${raw}" is available as "${as}": the text extracted from it, not the original file. For the original (e.g. pd.read_excel), use the copy in the workspace folder, if there is one.`);
+        continue;
+      }
+      if (!H.fs.hasRoot()) throw new Error(`"${raw}" is not an attachment in this chat, and no folder is open to read it from.`);
+      sameFolder(ctx);
+      try { files[name] = binary ? new Uint8Array(await (await H.fs.readFile(name, { binary: true })).arrayBuffer()) : await H.fs.readFile(name); }
+      catch (e) { throw new Error(`Could not load input "${raw}": ${e.message}. Check the path with fs_find or fs_list.`); }
+    }
+    return { files, notes };
+  }
+  async function saveOutputs(saved, ctx) {
+    const entries = Object.entries(saved || {});
+    if (!entries.length) return undefined;
+    if (!H.fs.hasRoot()) return { error: 'No folder is open, so the output files could not be saved.' };
+    sameFolder(ctx);
+    const out = [];
+    for (const [raw, content] of entries) { const p = normPath(raw); const r = await H.fs.writeFile(p, content, { chatId: ctx?.chatId }); out.push({ path: p, bytes: r.bytes }); }
+    return out;
+  }
   def({
     name: 'run_javascript', group: 'Code', risk: 'write',
-    description: 'Run JavaScript in a sandboxed Web Worker (no DOM, no workspace access, network via fetch allowed). Use console.log for output; the value of a final `return` is captured. Async/await supported.',
-    parameters: obj({ code: str('JavaScript code (body of an async function; use return to yield a value)'), input: { description: 'Optional JSON input available as `input`' }, timeoutMs: num('Timeout in ms (default 15000)') }, ['code']),
-    run: async ({ code, input, timeoutMs }, ctx) => ok(await H.runtime.runJS(code, { timeout: timeoutMs || 15000, input, signal: ctx?.signal })),
+    description: 'Run JavaScript in a sandboxed Web Worker (no DOM, network via fetch allowed). Use console.log for output; the value of a final `return` is captured. Async/await supported. Files listed in `inputs` are available as `files[path]` (text); call `saveFile(path, text)` to write a file back to the workspace.',
+    parameters: obj({ code: str('JavaScript code (body of an async function; use return to yield a value)'), inputs: paths(INPUTS_DOC + ' in `files`.'), input: { description: 'Optional small JSON value available as `input` (for parameters, not for data you could load via `inputs`)' }, timeoutMs: num('Timeout in ms (default 15000)') }, ['code']),
+    run: async ({ code, inputs, input, timeoutMs }, ctx) => {
+      const { files, notes } = await loadInputs(inputs, ctx, { binary: false });
+      const { saved, ...r } = await H.runtime.runJS(code, { timeout: timeoutMs || 15000, input, files, signal: ctx?.signal });
+      if (notes.length) r.inputNotes = notes;
+      if (!r.error) { const w = await saveOutputs(saved, ctx); if (w) r.savedFiles = w; }
+      return ok(r);
+    },
   });
   def({
     name: 'run_python', group: 'Code', risk: 'write',
-    description: 'Run Python code in the browser via Pyodide (numpy, pandas, etc. available; pure-python packages installable). Output = stdout + value of last expression. No workspace access; pass files via `files`.',
-    parameters: obj({ code: str('Python code'), packages: { type: 'array', items: { type: 'string' }, description: 'Packages to load/install, e.g. ["numpy","requests"]' }, files: { type: 'object', description: 'Map filename -> text content to place in the Python working dir', additionalProperties: { type: 'string' } }, timeoutMs: num('Timeout ms (default 60000)') }, ['code']),
-    run: async ({ code, packages, files, timeoutMs }, ctx) => ok(await H.runtime.runPython(code, { packages: packages || [], files: files || {}, timeout: timeoutMs || 60000, onStatus: ctx.onStatus, signal: ctx.signal })),
+    description: 'Run Python code in the browser via Pyodide (numpy, pandas, openpyxl etc. loadable; pure-python packages installable). Output = stdout + value of last expression. Files listed in `inputs` are placed in the working directory under their workspace path (binary files intact, so pd.read_excel works); files the code writes and lists in `outputs` are saved back to the workspace.',
+    parameters: obj({ code: str('Python code'), inputs: paths(INPUTS_DOC + ' in the working directory.'), outputs: paths(OUTPUTS_DOC + '.'), packages: { type: 'array', items: { type: 'string' }, description: 'Packages to load/install, e.g. ["numpy","requests"]' }, files: { type: 'object', description: 'Map filename -> text content to place in the Python working dir. Only for small content you generate; load existing files via `inputs` instead', additionalProperties: { type: 'string' } }, timeoutMs: num('Timeout ms (default 60000)') }, ['code']),
+    run: async ({ code, inputs, outputs, packages, files, timeoutMs }, ctx) => {
+      const { files: loaded, notes } = await loadInputs(inputs, ctx, { binary: true });
+      const outs = (outputs || []).map(normPath);
+      const { saved, missing, ...r } = await H.runtime.runPython(code, { packages: packages || [], files: { ...(files || {}), ...loaded }, outputs: outs, timeout: timeoutMs || 60000, onStatus: ctx.onStatus, signal: ctx.signal });
+      if (notes.length) r.inputNotes = notes;
+      if (!r.error) {
+        const w = await saveOutputs(saved, ctx); if (w) r.savedFiles = w;
+        if (missing?.length) r.missingOutputs = missing.map(p => `${p} was listed in outputs but the code did not create it`);
+      }
+      return ok(r);
+    },
   });
   def({
     name: 'run_file', rerun: 'Run again', rerunConfirm: (a) => !/\.html?$/i.test(String(a.path || '')), group: 'Code', risk: 'write',
-    description: 'Run a file from the workspace: .js/.mjs (sandboxed worker), .py (Pyodide), .html (preview panel), .json (parse & return), .md/.txt (return contents). Other .py files in the same directory are made importable.',
+    description: 'Run a file from the workspace: .js/.mjs (sandboxed worker), .py (Pyodide), .html (preview panel: the scripts, styles, images and data files it refers to are built in from the folder, and the result reports errors), .json (parse & return), .md/.txt (return contents). Other .py files in the same directory are made importable.',
     parameters: obj({ path: str('Workspace file path'), args: { type: 'array', items: { type: 'string' }, description: 'Arguments (sys.argv for Python, `input.args` for JS)' } }, ['path']),
     run: async ({ path, args = [] }, ctx) => {
-      path = String(path).replace(/\\/g, '/');
+      path = normPath(path);
       const ext = (path.split('.').pop() || '').toLowerCase();
       const code = await H.fs.readFile(path);
-      if (ext === 'js' || ext === 'mjs') return ok(await H.runtime.runJS(code, { input: { args } }));
+      if (ext === 'js' || ext === 'mjs') {
+        const { saved, ...r } = await H.runtime.runJS(code, { input: { args }, signal: ctx?.signal });
+        if (!r.error) { const w = await saveOutputs(saved, ctx); if (w) r.savedFiles = w; }
+        return ok(r);
+      }
       if (ext === 'py') {
         const dir = path.split('/').slice(0, -1).join('/');
         const files = {};
@@ -447,16 +508,24 @@ H.tools = (() => {
         const pre = `import sys\nsys.argv = ${JSON.stringify([path.split('/').pop(), ...args])}\n`;
         return ok(await H.runtime.runPython(pre + code, { files, onStatus: ctx.onStatus }));
       }
-      if (ext === 'html' || ext === 'htm') { H.runtime.previewHTML(code, { title: path }); return ok({ previewed: path }); }
+      if (ext === 'html' || ext === 'htm') {
+        const b = await H.runtime.bundleHTML(code, { baseDir: path.split('/').slice(0, -1).join('/') });
+        const report = await H.runtime.previewHTML(b.html, { title: path });
+        return ok({ previewed: path, builtIn: b.inlined.length ? b.inlined : undefined, ...H.runtime.describeReport(report, b.notes) });
+      }
       if (ext === 'json') { const j = H.parseArgs(code); if (j.error) throw new Error('Invalid JSON in ' + path + ': ' + j.error); return ok({ parsed: j.value }); }
       return ok({ content: H.clamp(code, 50000) });
     },
   });
   def({
     name: 'render_html', rerun: 'Render again', group: 'Code', risk: 'safe',
-    description: 'Render an HTML document (with inline CSS/JS) in the preview panel for the user to see.',
-    parameters: obj({ html: str('Complete HTML document'), title: str('Panel title') }, ['html']),
-    run: async ({ html, title }) => { H.runtime.previewHTML(html, { title: title || 'Preview' }); return ok({ rendered: true }); },
+    description: 'Render an HTML document in the preview panel for the user to see. The result reports script errors, blocked resources and a blank page: if it lists problems, fix them and render again before telling the user it works. Local files the page refers to (scripts, styles, images, ES modules, data files it fetches) are read from the open folder relative to `baseDir` and built in; to preview a page saved in the folder, use run_file on it instead. The preview has no network: fetch/XHR to remote URLs and remote images are blocked; external scripts and styles only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com, esm.sh, cdn.tailwindcss.com, code.jquery.com. localStorage and cookies work but are not kept.',
+    parameters: obj({ html: str('Complete HTML document'), title: str('Panel title'), baseDir: str('Folder (in the workspace) that relative paths in the page are resolved against; default: the folder root') }, ['html']),
+    run: async ({ html, title, baseDir }) => {
+      const b = await H.runtime.bundleHTML(html, { baseDir: normPath(baseDir || '') });
+      const report = await H.runtime.previewHTML(b.html, { title: title || 'Preview' });
+      return ok({ rendered: true, builtIn: b.inlined.length ? b.inlined : undefined, ...H.runtime.describeReport(report, b.notes) });
+    },
   });
   def({
     name: 'calculate', group: 'Code', risk: 'safe',
