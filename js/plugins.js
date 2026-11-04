@@ -185,10 +185,15 @@ H.plugins = (() => {
       { name: 'get_issue', risk: 'safe', description: 'Get full details of an issue including description and comments.', parameters: P({ key: S('Issue key, e.g. ABC-123') }, ['key']),
         request: { method: 'GET', path: '/rest/api/2/issue/{{key}}' },
         transform: '({ key: data.key, summary: data.fields.summary, status: data.fields.status?.name, assignee: data.fields.assignee?.displayName, reporter: data.fields.reporter?.displayName, priority: data.fields.priority?.name, type: data.fields.issuetype?.name, labels: data.fields.labels, created: data.fields.created, updated: data.fields.updated, description: data.fields.description, comments: (data.fields.comment?.comments||[]).map(c => ({ author: c.author?.displayName, created: c.created, body: c.body })), subtasks: (data.fields.subtasks||[]).map(s => s.key + " " + s.fields.summary) })' },
-      { name: 'create_issue', risk: 'write', description: 'Create an issue.', parameters: P({ project: S('Project key'), summary: S('Summary'), description: S('Description (plain text / wiki markup)'), issueType: S('Issue type (default Task)'), priority: S('Priority name'), labels: { type: 'array', items: { type: 'string' } }, assignee: S('Assignee username (Server) or accountId (Cloud)') }, ['project', 'summary']),
-        request: { method: 'POST', path: '/rest/api/2/issue', body: { fields: { project: { key: '{{project}}' }, summary: '{{summary}}', description: '{{description}}', issuetype: { name: '{{issueType}}' }, priority: { name: '{{priority}}' }, labels: '{{json labels}}', assignee: { name: '{{assignee}}' } } } }, defaults: { issueType: 'Task' }, transform: '({ key: data.key, id: data.id })' },
-      { name: 'update_issue', risk: 'write', description: 'Update summary / description / priority / labels of an issue.', parameters: P({ key: S('Issue key'), summary: S('New summary'), description: S('New description'), priority: S('Priority name'), labels: { type: 'array', items: { type: 'string' } } }, ['key']),
-        request: { method: 'PUT', path: '/rest/api/2/issue/{{key}}', body: { fields: { summary: '{{summary}}', description: '{{description}}', priority: { name: '{{priority}}' }, labels: '{{json labels}}' } } } },
+      { name: 'create_issue', risk: 'write', description: 'Create an issue.', parameters: P({ project: S('Project key'), summary: S('Summary'), description: S('Description (plain text / wiki markup)'), issueType: S('Issue type (default Task)'), priority: S('Priority name'), labels: { type: 'array', items: { type: 'string' } }, assignee: S('Assignee username (Server) or accountId (Cloud)') ,customFields: { type: 'object', description: 'Extra fields passed straight into the REST payload, keyed by field id, e.g. {"customfield_10409": {"id": "12345"}} or {"customfield_10500": "text"}. Use get_create_meta to find required fields and allowed values.' } }, ['project', 'summary']),
+        mergeFields: true, request: { method: 'POST', path: '/rest/api/2/issue', body: { fields: { project: { key: '{{project}}' }, summary: '{{summary}}', description: '{{description}}', issuetype: { name: '{{issueType}}' }, priority: { name: '{{priority}}' }, labels: '{{json labels}}', assignee: { name: '{{assignee}}' } } } }, defaults: { issueType: 'Task' }, transform: '({ key: data.key, id: data.id })' },
+      { name: 'update_issue', risk: 'write', description: 'Update summary / description / priority / labels / custom fields of an issue.', parameters: P({ key: S('Issue key'), summary: S('New summary'), description: S('New description'), priority: S('Priority name'), labels: { type: 'array', items: { type: 'string' } }, customFields: { type: 'object', description: 'Extra fields passed straight into the REST payload, keyed by field id, e.g. {"customfield_10409": {"id": "12345"}} or {"customfield_10500": "text"}. Use get_create_meta to find required fields and allowed values.' } }, ['key']),
+        mergeFields: true, request: { method: 'PUT', path: '/rest/api/2/issue/{{key}}', body: { fields: { summary: '{{summary}}', description: '{{description}}', priority: { name: '{{priority}}' }, labels: '{{json labels}}' } } } },
+      { name: 'get_create_meta', risk: 'safe', description: 'List the fields (and allowed values) for creating an issue of a given type, including required custom fields such as customfield_10409. Call before create_issue when Jira answers "<field> is required".', parameters: P({ project: S('Project key'), issueType: S('Issue type name, e.g. Bug') }, ['project', 'issueType']),
+        request: { method: 'GET', path: '/rest/api/2/issue/createmeta', query: { projectKeys: '{{project}}', issuetypeNames: '{{issueType}}', expand: 'projects.issuetypes.fields' } },
+        transform: '(data.projects||[]).flatMap(p => (p.issuetypes||[]).map(t => ({ project: p.key, issueType: t.name, fields: Object.entries(t.fields||{}).map(([id, f]) => ({ id, name: f.name, required: !!f.required, type: f.schema?.type, allowedValues: (f.allowedValues||[]).slice(0, 25).map(v => ({ id: v.id, value: v.value || v.name || v.key })) })) })))' },
+      { name: 'link_issues', risk: 'write', description: 'Link two issues, e.g. type "Relates" (inward "relates to"). Link type names vary per Jira; common: Relates, Blocks, Duplicate.', parameters: P({ inwardKey: S('Inward issue key'), outwardKey: S('Outward issue key'), linkType: S('Link type name (default Relates)') }, ['inwardKey', 'outwardKey']),
+        request: { method: 'POST', path: '/rest/api/2/issueLink', body: { type: { name: '{{linkType}}' }, inwardIssue: { key: '{{inwardKey}}' }, outwardIssue: { key: '{{outwardKey}}' } } }, defaults: { linkType: 'Relates' } },
       { name: 'add_comment', risk: 'write', description: 'Add a comment.', parameters: P({ key: S('Issue key'), body: S('Comment text') }, ['key', 'body']), request: { method: 'POST', path: '/rest/api/2/issue/{{key}}/comment', body: { body: '{{body}}' } }, transform: '({ id: data.id, created: data.created })' },
       { name: 'get_transitions', risk: 'safe', description: 'List available workflow transitions.', parameters: P({ key: S('Issue key') }, ['key']), request: { method: 'GET', path: '/rest/api/2/issue/{{key}}/transitions' }, transform: 'data.transitions.map(t => ({ id: t.id, name: t.name, to: t.to?.name }))' },
       { name: 'transition_issue', risk: 'write', description: 'Move an issue to another status. Call get_transitions first and pick the id whose target status matches; ids differ per project.', parameters: P({ key: S('Issue key'), transitionId: S('Transition id'), comment: S('Optional comment') }, ['key', 'transitionId']),
@@ -264,6 +269,13 @@ H.plugins = (() => {
   for (const p of plugins) {
     const t = Object.values(templates).find(x => x.id === p.id); if (!t) continue;
     p.setup = t.setup; p.notes = t.notes; p.guide = t.guide; p.headers = { ...(t.headers || {}), ...(p.headers || {}) };
+    /* stored plugins keep their own tool list: add built-in tools they predate, and refresh the ones that gained mergeFields */
+    p.tools = p.tools || [];
+    for (const tt of t.tools || []) {
+      const i = p.tools.findIndex(x => x.name === tt.name);
+      if (i < 0) p.tools.push(H.deepClone(tt));
+      else if (tt.mergeFields && !p.tools[i].mergeFields) p.tools[i] = H.deepClone(tt);
+    }
     const real = (v) => !!v && !/^<.*>$/.test(v);
     const hasCreds = !!(p.auth && (real(p.auth.token) || real(p.auth.password) || real(p.auth.value)));
     if (!p.route && t.route && !hasCreds) { p.route = H.deepClone(t.route); p.auth = { type: 'none' }; }  // never set up: adopt the recommended route
@@ -345,7 +357,8 @@ H.plugins = (() => {
     const headers = { ...(p.headers || {}), ...(route.dropAuth ? {} : authHeaders(p)), ...(req.headers || {}), ...route.headers };
     const init = { method: req.method || 'GET', headers };
     if (req.body !== undefined && init.method !== 'GET') {
-      const body = prune(H.templateDeep(req.body, a));
+      let body = prune(H.templateDeep(req.body, a));
+      if (t.mergeFields && a.customFields && typeof a.customFields === 'object') body = { ...body, fields: { ...(body && body.fields), ...a.customFields } };   // custom fields (customfield_NNNNN) are free-form
       init.body = typeof body === 'string' ? body : JSON.stringify(body);
       headers['Content-Type'] ||= 'application/json';
     }
