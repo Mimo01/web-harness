@@ -269,6 +269,13 @@ H.plugins = (() => {
   for (const p of plugins) {
     const t = Object.values(templates).find(x => x.id === p.id); if (!t) continue;
     p.setup = t.setup; p.notes = t.notes; p.guide = t.guide; p.headers = { ...(t.headers || {}), ...(p.headers || {}) };
+    /* stored plugins keep their own tool list: add built-in tools they predate, and refresh the ones that gained mergeFields */
+    p.tools = p.tools || [];
+    for (const tt of t.tools || []) {
+      const i = p.tools.findIndex(x => x.name === tt.name);
+      if (i < 0) p.tools.push(H.deepClone(tt));
+      else if (tt.mergeFields && !p.tools[i].mergeFields) p.tools[i] = H.deepClone(tt);
+    }
     const real = (v) => !!v && !/^<.*>$/.test(v);
     const hasCreds = !!(p.auth && (real(p.auth.token) || real(p.auth.password) || real(p.auth.value)));
     if (!p.route && t.route && !hasCreds) { p.route = H.deepClone(t.route); p.auth = { type: 'none' }; }  // never set up: adopt the recommended route
