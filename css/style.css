@@ -229,9 +229,9 @@ body.embedded #topbar { padding: 0 8px; }   /* the folder pill stays: embedded o
 .msg.compacted { opacity: .5; } .msg.compacted:hover { opacity: .9; }
 /* user: a bubble on the right */
 .msg.user { display: flex; flex-direction: row-reverse; }
-.msg.user .body { max-width: 76%; display: flex; flex-direction: column; align-items: flex-end; }
+.msg.user .body { max-width: 76%; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; }
 .msg.user .role { order: 2; margin-top: 2px; } .msg.user .role .actions { order: -1; }
-.msg.user .text { padding: 10px 15px; border-radius: 18px 18px 6px 18px; background: var(--bubble); color: var(--on-bubble); font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; word-wrap: break-word; }
+.msg.user .text { padding: 10px 15px; border-radius: 18px 18px 6px 18px; background: var(--bubble); color: var(--on-bubble); font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
 .msg.user.plan-exec .text { background: var(--ok); color: #fff; }
 /* editing a message in place: the bubble becomes a field, and the edit is the only thing worth looking at, so it
    takes the full width the reply gets rather than the bubble's 76%, and the message's own row of actions and its
