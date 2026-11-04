@@ -23,4 +23,29 @@ fs.writeFileSync(idx, html);
 const v = JSON.parse(fs.readFileSync(vj, 'utf8')); v.version = ver; v.date = new Date().toISOString().slice(0, 10); if (notes) v.notes = notes;
 fs.writeFileSync(vj, JSON.stringify(v, null, 2) + '\n');
 console.log(`version ${ver} written to index.html and version.json`);
-if (flags.includes('--push')) { cp.execSync(`git add -A && git commit -q -m "${ver}: ${(notes || 'release').replace(/"/g, "'")}" && git push -q origin main`, { cwd: root, stdio: 'inherit' }); console.log('committed and pushed'); }
+if (flags.includes('--push')) {
+  cp.execSync(`git add -A && git commit -q -m "${ver}: ${(notes || 'release').replace(/"/g, "'")}" && git push -q origin main`, { cwd: root, stdio: 'inherit' }); console.log('committed and pushed');
+  tellReporters();
+}
+
+/* A merged PR closes its issue hours before the release that carries the fix reaches anyone, so the reporter is told
+   when it ships: every issue closed by a PR merged since the previous release gets one "Shipped in x.y.z" comment.
+   Needs the gh CLI; without it (or offline) the release is still complete and the step just says it was skipped. */
+function tellReporters() {
+  const sh = (c) => cp.execSync(c, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  try { sh('gh auth status'); } catch { console.log('gh not available: issues were not told about the release'); return; }
+  let since;
+  try { since = sh(`git log -1 --format=%cI --grep='^[0-9]*\\.[0-9]*\\.[0-9]*:' HEAD~1`); } catch { since = ''; }
+  const prs = JSON.parse(sh(`gh pr list --state merged --base main --limit 50 --json number,mergedAt,closingIssuesReferences`));
+  const seen = new Set();
+  for (const pr of prs) {
+    if (since && pr.mergedAt <= since) continue;
+    for (const iss of pr.closingIssuesReferences || []) {
+      if (seen.has(iss.number)) continue; seen.add(iss.number);
+      const body = `Shipped in ${ver} (via #${pr.number}). The app's update check will offer it; reload after updating. If the problem is still there, please reopen this issue.`;
+      try { sh(`gh issue comment ${iss.number} --body ${JSON.stringify(body)}`); console.log(`told issue #${iss.number}`); }
+      catch { console.log(`could not comment on issue #${iss.number}`); }
+    }
+  }
+  if (!seen.size) console.log('no issues closed by PRs since the previous release');
+}
